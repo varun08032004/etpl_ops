@@ -1,0 +1,47 @@
+:root {
+  --bg-void: #0a0f0d;
+  --bg-surface: #121815;
+  --bg-raised: #1a221d;
+  --border: #232c26;
+  --text-primary: #eaf2ec;
+  --text-secondary: #8fa398;
+  --accent: #2fbf71;
+  --accent-dim: #1e8f53;
+  --danger: #e5484d;
+  --warning: #e5a54b;
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg-void);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Every currency figure in the app renders in tabular monospace — decimals
+   align down a column, which matters when you're scanning a P&L. */
+.figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg-void); }
+::-webkit-scrollbar-thumb { background: var(--bg-raised); border-radius: 5px; }
+
+a { color: inherit; text-decoration: none; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

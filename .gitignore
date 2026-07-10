@@ -1,0 +1,15 @@
+node_modules/
+.env
+.env.local
+*.log
+npm-debug.log*
+
+# build output
+frontend/build/
+backend/dist/
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
