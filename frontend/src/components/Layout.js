@@ -7,6 +7,7 @@ import AccountBalanceOutlinedIcon from '@mui/icons-material/AccountBalanceOutlin
 import PaidOutlinedIcon from '@mui/icons-material/PaidOutlined';
 import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import { useAuth } from '../context/AuthContext';
 
@@ -16,6 +17,7 @@ const NAV = [
   { to: '/invoices', label: 'Invoices', icon: ReceiptLongOutlinedIcon },
   { to: '/accounting', label: 'Accounting', icon: AccountBalanceOutlinedIcon },
   { to: '/payroll', label: 'Payroll', icon: PaidOutlinedIcon },
+  { to: '/documents', label: 'Documents', icon: DescriptionOutlinedIcon },
   { to: '/import', label: 'Import CSV', icon: UploadFileOutlinedIcon },
   { to: '/team', label: 'Team logins', icon: GroupOutlinedIcon },
 ];

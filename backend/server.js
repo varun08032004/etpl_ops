@@ -29,6 +29,7 @@ app.use('/api/employees', require('./routes/employees'));
 app.use('/api/parties', require('./routes/parties'));
 app.use('/api/staff-accounts', require('./routes/staff-accounts'));
 app.use('/api/import', require('./routes/import'));
+app.use('/api/documents', require('./routes/documents'));
 app.use('/api/accounting', require('./routes/accounting'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/payroll', require('./routes/payroll'));

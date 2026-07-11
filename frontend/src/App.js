@@ -11,6 +11,7 @@ import Accounting from './pages/Accounting';
 import Payroll from './pages/Payroll';
 import Team from './pages/Team';
 import Import from './pages/Import';
+import Documents from './pages/Documents';
 
 function ProtectedRoutes() {
   const { staff, loading } = useAuth();
@@ -38,6 +39,7 @@ export default function App() {
               <Route path="/payroll" element={<Payroll />} />
               <Route path="/team" element={<Team />} />
               <Route path="/import" element={<Import />} />
+              <Route path="/documents" element={<Documents />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
