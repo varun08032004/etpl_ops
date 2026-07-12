@@ -82,10 +82,22 @@ router.post('/:id/new-version', upload.single('file'), async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { entity_type, entity_id, doc_type, current_only } = req.query;
+
+    // Access control: employee-linked documents (resume, offer letter, id proof, etc.)
+    // are only visible to the employee they belong to, or to HR/finance/admin/owner —
+    // not to any authenticated staff account by default.
+    const privileged = ['owner', 'admin', 'hr', 'finance'].includes(req.staff.role);
+    if (entity_type === 'employee' && entity_id && !privileged && entity_id !== req.staff.employee_id) {
+      return res.status(403).json({ error: "You can only view your own documents" });
+    }
+    // If a non-privileged user queries employee docs WITHOUT specifying entity_id,
+    // scope it to their own record rather than leaking everyone's.
+    const effectiveEntityId = (entity_type === 'employee' && !privileged && !entity_id) ? req.staff.employee_id : entity_id;
+
     const conditions = [];
     const params = [];
     if (entity_type) { params.push(entity_type); conditions.push(`entity_type = $${params.length}`); }
-    if (entity_id) { params.push(entity_id); conditions.push(`entity_id = $${params.length}`); }
+    if (effectiveEntityId) { params.push(effectiveEntityId); conditions.push(`entity_id = $${params.length}`); }
     if (doc_type) { params.push(doc_type); conditions.push(`doc_type = $${params.length}`); }
     if (current_only !== 'false') conditions.push(`is_current = true`); // default: only show latest version
 
@@ -106,6 +118,7 @@ router.get('/', async (req, res) => {
 // ── version history for one document lineage ────────────────────────────────
 router.get('/:id/history', async (req, res) => {
   try {
+    // Walk both directions: find the root, then get every version descending from it
     let current = req.params.id;
     let doc;
     while (true) {
@@ -136,6 +149,12 @@ router.get('/:id/download', async (req, res) => {
   try {
     const { rows: [doc] } = await safeQuery(`SELECT * FROM documents WHERE id = $1`, [req.params.id]);
     if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+    const privileged = ['owner', 'admin', 'hr', 'finance'].includes(req.staff.role);
+    if (doc.entity_type === 'employee' && doc.entity_id && !privileged && doc.entity_id !== req.staff.employee_id) {
+      return res.status(403).json({ error: "You can only download your own documents" });
+    }
+
     const url = await storage.getSignedUrl(doc.storage_path, 300); // 5-minute link
     res.json({ url, fileName: doc.file_name });
   } catch (err) {

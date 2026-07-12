@@ -8,23 +8,44 @@ import PaidOutlinedIcon from '@mui/icons-material/PaidOutlined';
 import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import TrendingUpOutlinedIcon from '@mui/icons-material/TrendingUpOutlined';
+import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined';
+import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
+import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
+import PersonOutlinedIcon from '@mui/icons-material/PersonOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import { useAuth } from '../context/AuthContext';
+import NotificationBell from './NotificationBell';
 
-const NAV = [
+// Owner/admin/hr/finance get the full operational console.
+// Everyone else (manager/employee) gets a scoped self-service view —
+// they should not see company-wide financials, other people's records,
+// or admin tools like Team logins / CSV import.
+const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance'];
+
+const FULL_NAV = [
   { to: '/', label: 'Dashboard', icon: DashboardOutlinedIcon, end: true },
   { to: '/employees', label: 'People', icon: PeopleOutlinedIcon },
+  { to: '/sales', label: 'Sales', icon: TrendingUpOutlinedIcon },
   { to: '/invoices', label: 'Invoices', icon: ReceiptLongOutlinedIcon },
   { to: '/accounting', label: 'Accounting', icon: AccountBalanceOutlinedIcon },
   { to: '/payroll', label: 'Payroll', icon: PaidOutlinedIcon },
   { to: '/documents', label: 'Documents', icon: DescriptionOutlinedIcon },
   { to: '/import', label: 'Import CSV', icon: UploadFileOutlinedIcon },
   { to: '/team', label: 'Team logins', icon: GroupOutlinedIcon },
+  { to: '/automation', label: 'Automation', icon: BoltOutlinedIcon },
+  { to: '/ai-assistant', label: 'AI Assistant', icon: SmartToyOutlinedIcon },
+  { to: '/analytics', label: 'Analytics', icon: InsightsOutlinedIcon },
+];
+
+const SELF_SERVICE_NAV = [
+  { to: '/', label: 'My Profile', icon: PersonOutlinedIcon, end: true },
 ];
 
 export default function Layout() {
   const { staff, logout } = useAuth();
   const navigate = useNavigate();
+  const nav = PRIVILEGED_ROLES.includes(staff?.role) ? FULL_NAV : SELF_SERVICE_NAV;
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -46,7 +67,7 @@ export default function Layout() {
         </Box>
 
         <Box sx={{ px: 1.5, display: 'flex', flexDirection: 'column', gap: 0.5, flex: 1 }}>
-          {NAV.map(({ to, label, icon: Icon, end }) => (
+          {nav.map(({ to, label, icon: Icon, end }) => (
             <Box
               key={to} component={NavLink} to={to} end={end}
               sx={{
@@ -87,8 +108,13 @@ export default function Layout() {
         </Box>
       </Box>
 
-      <Box component="main" sx={{ flex: 1, minWidth: 0, p: 4 }}>
-        <Outlet />
+      <Box component="main" sx={{ flex: 1, minWidth: 0 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: 4, pt: 2 }}>
+          <NotificationBell />
+        </Box>
+        <Box sx={{ px: 4, pb: 4 }}>
+          <Outlet />
+        </Box>
       </Box>
     </Box>
   );

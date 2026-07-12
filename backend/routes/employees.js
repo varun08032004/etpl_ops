@@ -4,8 +4,58 @@ const express = require('express');
 const router = express.Router();
 const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { fireEvent } = require('../services/automationEngine');
 
 router.use(authenticate);
+
+// ── self-service: resolve the logged-in staff member's own employee record ──
+// Must be defined BEFORE the /:id routes below, or Express would treat "me" as an :id.
+router.get('/me', async (req, res) => {
+  try {
+    if (!req.staff.employee_id) {
+      return res.status(404).json({ error: 'This login is not linked to an employee record' });
+    }
+    const { rows: [employee] } = await safeQuery(
+      `SELECT e.*, d.name AS department, des.title AS designation
+       FROM employees e
+       LEFT JOIN departments d ON d.id = e.department_id
+       LEFT JOIN designations des ON des.id = e.designation_id
+       WHERE e.id = $1`,
+      [req.staff.employee_id]
+    );
+    if (!employee) return res.status(404).json({ error: 'Employee record not found' });
+    res.json({ employee }); // full compensation visible — this IS the owner viewing their own record
+  } catch (err) {
+    console.error('[employees:me]', err);
+    res.status(500).json({ error: 'Failed to fetch your profile' });
+  }
+});
+
+router.get('/me/leave', async (req, res) => {
+  try {
+    if (!req.staff.employee_id) return res.status(404).json({ error: 'This login is not linked to an employee record' });
+    const { rows } = await safeQuery(
+      `SELECT lr.*, lt.name AS leave_type_name FROM leave_requests lr
+       JOIN leave_types lt ON lt.id = lr.leave_type_id
+       WHERE lr.employee_id = $1 ORDER BY lr.start_date DESC`,
+      [req.staff.employee_id]
+    );
+    res.json({ leaveRequests: rows });
+  } catch (err) {
+    console.error('[employees:me:leave]', err);
+    res.status(500).json({ error: 'Failed to fetch your leave requests' });
+  }
+});
+
+router.get('/leave-types', async (req, res) => {
+  try {
+    const { rows } = await safeQuery(`SELECT * FROM leave_types ORDER BY name`);
+    res.json({ leaveTypes: rows });
+  } catch (err) {
+    console.error('[employees:leave-types]', err);
+    res.status(500).json({ error: 'Failed to fetch leave types' });
+  }
+});
 
 // ── list / search employees ────────────────────────────────────────────────
 router.get('/', async (req, res) => {
@@ -82,9 +132,10 @@ router.post('/', requireRole('hr'), async (req, res) => {
          address_line, city, state, pincode, pan_number,
          department_id, designation_id, manager_id, employment_type, date_of_joining,
          ctc_annual, basic_monthly, hra_monthly, other_allowances_monthly, employer_pf_monthly,
+         da_monthly, tax_regime, pf_applicable,
          bank_account_number, bank_ifsc
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
-       RETURNING id, employee_code, full_name`,
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+       RETURNING *`,
       [
         next_code, b.full_name, b.personal_email || null, b.work_email || null, b.phone || null,
         b.gender || null, b.date_of_birth || null,
@@ -93,9 +144,12 @@ router.post('/', requireRole('hr'), async (req, res) => {
         b.employment_type || 'full_time', b.date_of_joining,
         b.ctc_annual || null, b.basic_monthly || null, b.hra_monthly || null,
         b.other_allowances_monthly || null, b.employer_pf_monthly || 0,
+        b.da_monthly || 0, b.tax_regime || 'new', b.pf_applicable !== false,
         b.bank_account_number || null, b.bank_ifsc || null,
       ]
     );
+
+    fireEvent('employee.created', { employeeId: employee.id, employeeName: employee.full_name });
 
     res.status(201).json({ employee });
   } catch (err) {
@@ -112,6 +166,7 @@ router.put('/:id', requireRole('hr'), async (req, res) => {
       'address_line', 'city', 'state', 'pincode', 'pan_number',
       'department_id', 'designation_id', 'manager_id', 'employment_type', 'status',
       'ctc_annual', 'basic_monthly', 'hra_monthly', 'other_allowances_monthly', 'employer_pf_monthly',
+      'da_monthly', 'tax_regime', 'pf_applicable', 'esic_applicable', 'declared_deductions',
       'bank_account_number', 'bank_ifsc', 'trackpilot_user_id', 'notes',
     ];
     const sets = [];
@@ -196,6 +251,13 @@ router.post('/leave/:leaveId/decision', requireRole('hr'), async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: 'Leave request not found' });
 
     // Deduct from balance if approved and it's a tracked type
+    if (decision === 'approved') {
+      const { rows: [empInfo] } = await safeQuery(`SELECT full_name FROM employees WHERE id = $1`, [rows[0].employee_id]);
+      fireEvent('leave.approved', {
+        employee_name: empInfo?.full_name, start_date: rows[0].start_date?.toISOString().slice(0,10),
+        end_date: rows[0].end_date?.toISOString().slice(0,10), link: `/employees/${rows[0].employee_id}`,
+      });
+    }
     if (decision === 'approved') {
       const lr = rows[0];
       const { rows: [lt] } = await safeQuery(`SELECT name FROM leave_types WHERE id = $1`, [lr.leave_type_id]);

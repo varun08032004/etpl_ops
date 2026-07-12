@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import MyProfile from './pages/MyProfile';
 import { EmployeeList, EmployeeDetail } from './pages/Employees';
 import Invoices from './pages/Invoices';
 import Accounting from './pages/Accounting';
@@ -12,6 +13,12 @@ import Payroll from './pages/Payroll';
 import Team from './pages/Team';
 import Import from './pages/Import';
 import Documents from './pages/Documents';
+import Sales from './pages/Sales';
+import Automation from './pages/Automation';
+import AIAssistant from './pages/AIAssistant';
+import Analytics from './pages/Analytics';
+
+const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance'];
 
 function ProtectedRoutes() {
   const { staff, loading } = useAuth();
@@ -20,6 +27,13 @@ function ProtectedRoutes() {
   return (
     <Layout />
   );
+}
+
+// The root path shows different content depending on role — company-wide
+// financials for owner/admin/hr/finance, a personal profile for everyone else.
+function Home() {
+  const { staff } = useAuth();
+  return PRIVILEGED_ROLES.includes(staff?.role) ? <Dashboard /> : <MyProfile />;
 }
 
 export default function App() {
@@ -31,7 +45,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route element={<ProtectedRoutes />}>
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/" element={<Home />} />
               <Route path="/employees" element={<EmployeeList />} />
               <Route path="/employees/:id" element={<EmployeeDetail />} />
               <Route path="/invoices" element={<Invoices />} />
@@ -40,6 +54,10 @@ export default function App() {
               <Route path="/team" element={<Team />} />
               <Route path="/import" element={<Import />} />
               <Route path="/documents" element={<Documents />} />
+              <Route path="/sales" element={<Sales />} />
+              <Route path="/automation" element={<Automation />} />
+              <Route path="/ai-assistant" element={<AIAssistant />} />
+              <Route path="/analytics" element={<Analytics />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

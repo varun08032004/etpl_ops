@@ -9,6 +9,23 @@ const ledger = require('../services/ledger');
 
 router.use(authenticate);
 
+// ── self-service: own payslip history — any logged-in employee can see their own ──
+router.get('/me/payslips', async (req, res) => {
+  try {
+    if (!req.staff.employee_id) return res.status(404).json({ error: 'This login is not linked to an employee record' });
+    const { rows } = await safeQuery(
+      `SELECT pi.*, pr.period_month, pr.period_year, pr.status AS run_status
+       FROM payroll_items pi JOIN payroll_runs pr ON pr.id = pi.payroll_run_id
+       WHERE pi.employee_id = $1 ORDER BY pr.period_year DESC, pr.period_month DESC`,
+      [req.staff.employee_id]
+    );
+    res.json({ payslips: rows });
+  } catch (err) {
+    console.error('[payroll:me:payslips]', err);
+    res.status(500).json({ error: 'Failed to fetch your payslips' });
+  }
+});
+
 // Instantiated lazily (only when a disbursal is actually attempted) so the server
 // doesn't crash on startup just because RazorpayX keys aren't configured yet.
 let _razorpay = null;
@@ -42,6 +59,8 @@ router.post('/runs', requireRole('finance'), async (req, res) => {
     const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
     const daysInMonth = new Date(year, month, 0).getDate();
     const monthEnd = `${year}-${String(month).padStart(2, '0')}-${daysInMonth}`;
+    const fiscalYear = compliance.currentFiscalYearLabel(month, year);
+    const fyStartMonth = month >= 4 ? 4 : 4; // FY starts April; used to bound YTD lookups below
 
     const run = await withTransaction(async (client) => {
       const { rows: [payrollRun] } = await client.query(
