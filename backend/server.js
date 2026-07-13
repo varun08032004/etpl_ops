@@ -35,6 +35,7 @@ app.use('/api/automation', require('./routes/automation'));
 app.use('/api/ai', require('./routes/ai'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/accounting', require('./routes/accounting'));
+app.use('/api/platform-sync', require('./routes/platform-sync'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/attendance', require('./routes/attendance'));

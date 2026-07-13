@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Grid, Chip, Button, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, MenuItem, Alert, IconButton, Divider, Table, TableHead, TableRow, TableCell, TableBody, Checkbox,
+  Tabs, Tab, CircularProgress, ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -211,7 +212,7 @@ function DealDetail({ dealId, onClose, onChanged }) {
   );
 }
 
-export default function Sales() {
+function Pipeline() {
   const [deals, setDeals] = useState([]);
   const [forecast, setForecast] = useState(null);
   const [newDealOpen, setNewDealOpen] = useState(false);
@@ -292,6 +293,231 @@ export default function Sales() {
           <Button variant="contained" onClick={handleCreateDeal} disabled={saving || !form.company_name}>{saving ? 'Creating…' : 'Create deal'}</Button>
         </DialogActions>
       </Dialog>
+    </Box>
+  );
+}
+
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function downloadCsv(filename, headers, rows) {
+  const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [headers.join(','), ...rows.map((r) => r.map(cell).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Read-only sales register pulled from the platform — separate from the
+// Platform Sync tab in Accounting, which posts these same records to the
+// ledger. This view is for browsing/exporting, not booking.
+function PlatformSalesRecords() {
+  const now = new Date();
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
+  const [sourceFilter, setSourceFilter] = useState('all'); // 'all' | 'trade_fee' | 'subscription'
+  const [search, setSearch] = useState('');
+  const [records, setRecords] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    client.get('/platform-sync/records', { params: { month, year } })
+      .then(({ data }) => setRecords(data.records))
+      .catch((e) => setError(e.response?.data?.error || 'Could not reach the platform API'))
+      .finally(() => setLoading(false));
+  }, [month, year]);
+
+  const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
+
+  // Client-side filter — source toggle + search — applied on top of the
+  // month/year server fetch. Export always exports exactly what's on screen.
+  const filtered = (records || []).filter((r) => {
+    if (sourceFilter !== 'all' && r.source !== sourceFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const haystack = [r.customer_email, r.buyer_email, r.seller_email, r.project_name, r.description]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const total = filtered.reduce((s, r) => s + Number(r.amount_inr), 0);
+
+  const exportCsv = () => {
+    const headers = ['Date','Source','Customer / Buyer','Seller','Project','Quantity (tCO2)','Amount (INR)','GST (INR)','Description'];
+    const rows = filtered.map((r) => [
+      new Date(r.date).toISOString().slice(0, 10), r.source,
+      r.customer_email || r.buyer_email || '', r.seller_email || '',
+      r.project_name || '', r.quantity_tco2 || '',
+      Number(r.amount_inr).toFixed(2), Number(r.gst_inr || 0).toFixed(2), r.description,
+    ]);
+    const sourceLabel = sourceFilter === 'all' ? 'all' : sourceFilter;
+    downloadCsv(`sales_records_${sourceLabel}_${MONTHS[month - 1]}_${year}.csv`, headers, rows);
+  };
+
+  return (
+    <Box>
+      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2, flexWrap: 'wrap' }}>
+        <TextField select size="small" label="Month" value={month} onChange={(e) => setMonth(Number(e.target.value))} sx={{ minWidth: 160 }}>
+          {MONTHS.map((m, i) => <MenuItem key={m} value={i + 1}>{m}</MenuItem>)}
+        </TextField>
+        <TextField select size="small" label="Year" value={year} onChange={(e) => setYear(Number(e.target.value))} sx={{ minWidth: 120 }}>
+          {years.map((y) => <MenuItem key={y} value={y}>{y}</MenuItem>)}
+        </TextField>
+        <ToggleButtonGroup
+          size="small"
+          value={sourceFilter}
+          exclusive
+          onChange={(e, val) => val && setSourceFilter(val)}
+        >
+          <ToggleButton value="all">All</ToggleButton>
+          <ToggleButton value="trade_fee">Trades</ToggleButton>
+          <ToggleButton value="subscription">Subscriptions</ToggleButton>
+        </ToggleButtonGroup>
+        <TextField size="small" label="Search" placeholder="Email, project…" value={search} onChange={(e) => setSearch(e.target.value)} sx={{ minWidth: 200 }} />
+        <Button variant="outlined" onClick={exportCsv} disabled={!filtered.length} sx={{ ml: 'auto' }}>
+          Export CSV
+        </Button>
+      </Box>
+
+      {error && <Alert severity="error" sx={{ mb: 2.5 }}>{error}</Alert>}
+      {loading && <CircularProgress size={22} />}
+
+      {!loading && records && (
+        <>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
+            <Typography sx={{ color: 'text.secondary', fontSize: '0.85rem' }}>
+              {filtered.length} record{filtered.length === 1 ? '' : 's'}
+              {sourceFilter !== 'all' && ` · ${sourceFilter === 'trade_fee' ? 'Trades' : 'Subscriptions'}`}
+              {records.length !== filtered.length && ` (of ${records.length} total)`}
+            </Typography>
+            <Money amount={total} />
+          </Box>
+          <Paper>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Source</TableCell>
+                  <TableCell>Customer / Buyer</TableCell>
+                  <TableCell>Project</TableCell>
+                  <TableCell align="right">Qty (tCO2)</TableCell>
+                  <TableCell align="right">Amount</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {filtered.map((r) => (
+                  <TableRow key={`${r.source}-${r.ref_id}`}>
+                    <TableCell sx={{ fontSize: '0.8rem' }}>{new Date(r.date).toLocaleDateString('en-IN')}</TableCell>
+                    <TableCell><Chip size="small" label={r.source === 'trade_fee' ? 'Trade' : 'Subscription'} variant="outlined" /></TableCell>
+                    <TableCell sx={{ fontSize: '0.8rem' }}>{r.customer_email || r.buyer_email || '—'}</TableCell>
+                    <TableCell sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>{r.project_name || (r.plan ? `${r.plan} (${r.cycle})` : '—')}</TableCell>
+                    <TableCell align="right" sx={{ fontSize: '0.8rem' }}>{r.quantity_tco2 || '—'}</TableCell>
+                    <TableCell align="right"><Money amount={r.amount_inr} size="0.85rem" /></TableCell>
+                  </TableRow>
+                ))}
+                {filtered.length === 0 && (
+                  <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', color: 'text.secondary', py: 3 }}>
+                    {records.length === 0 ? `No records for ${MONTHS[month - 1]} ${year}` : 'No records match this filter'}
+                  </TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </Paper>
+        </>
+      )}
+    </Box>
+  );
+}
+
+// Read-only customer roster with subscription status + lifetime trade
+// activity — account health at a glance: who's active, who's overdue for
+// renewal, who's a heavy trader worth an upsell call, who's gone quiet.
+function PlatformCustomers() {
+  const [customers, setCustomers] = useState(null);
+  const [search, setSearch] = useState('');
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    client.get('/platform-sync/customers').then(({ data }) => setCustomers(data.customers)).catch((e) => setError(e.response?.data?.error || 'Could not reach the platform API'));
+  }, []);
+
+  const filtered = (customers || []).filter((c) =>
+    !search || c.email?.toLowerCase().includes(search.toLowerCase()) || c.company_name?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const renewalSoon = (dateStr) => {
+    if (!dateStr) return false;
+    const days = (new Date(dateStr) - new Date()) / (1000 * 60 * 60 * 24);
+    return days >= 0 && days <= 14;
+  };
+
+  return (
+    <Box>
+      {error && <Alert severity="error" sx={{ mb: 2.5 }}>{error}</Alert>}
+      <TextField size="small" label="Search by email or company" value={search} onChange={(e) => setSearch(e.target.value)} sx={{ mb: 2.5, minWidth: 280 }} />
+      {!customers && !error && <CircularProgress size={22} />}
+      {customers && (
+        <Paper>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Customer</TableCell>
+                <TableCell>Plan</TableCell>
+                <TableCell>KYC</TableCell>
+                <TableCell>Renewal</TableCell>
+                <TableCell align="right">Trades</TableCell>
+                <TableCell align="right">Volume</TableCell>
+                <TableCell>Last trade</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filtered.map((c) => (
+                <TableRow key={c.id}>
+                  <TableCell>
+                    <Typography sx={{ fontSize: '0.85rem' }}>{c.company_name || c.full_name || c.email}</Typography>
+                    <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>{c.email}</Typography>
+                  </TableCell>
+                  <TableCell sx={{ fontSize: '0.8rem' }}>{c.subscription_plan || '—'}{c.corporate_managed ? ' · corp' : ''}</TableCell>
+                  <TableCell><StatusChip status={c.kyc_status} /></TableCell>
+                  <TableCell>
+                    {c.subscription_renewal_date ? (
+                      <Chip size="small" label={new Date(c.subscription_renewal_date).toLocaleDateString('en-IN')} color={renewalSoon(c.subscription_renewal_date) ? 'warning' : 'default'} variant="outlined" />
+                    ) : '—'}
+                  </TableCell>
+                  <TableCell align="right" sx={{ fontSize: '0.8rem' }}>{c.trade_count}</TableCell>
+                  <TableCell align="right"><Money amount={c.trade_volume_inr} size="0.85rem" /></TableCell>
+                  <TableCell sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{c.last_trade_at ? new Date(c.last_trade_at).toLocaleDateString('en-IN') : 'Never'}</TableCell>
+                </TableRow>
+              ))}
+              {filtered.length === 0 && (
+                <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', color: 'text.secondary', py: 3 }}>No customers match "{search}"</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </Paper>
+      )}
+    </Box>
+  );
+}
+
+export default function Sales() {
+  const [tab, setTab] = useState(0);
+  return (
+    <Box>
+      <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: 3, borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Tab label="Pipeline" />
+        <Tab label="Platform Sales" />
+        <Tab label="Platform Customers" />
+      </Tabs>
+      {tab === 0 && <Pipeline />}
+      {tab === 1 && <PlatformSalesRecords />}
+      {tab === 2 && <PlatformCustomers />}
     </Box>
   );
 }

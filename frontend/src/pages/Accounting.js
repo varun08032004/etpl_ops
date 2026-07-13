@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Box, Typography, Paper, Tabs, Tab, Table, TableHead, TableRow, TableCell, TableBody, TextField, Grid, Divider } from '@mui/material';
+import { Box, Typography, Paper, Tabs, Tab, Table, TableHead, TableRow, TableCell, TableBody, TextField, Grid, Divider, MenuItem, Button, Alert, Chip, CircularProgress } from '@mui/material';
+import SyncOutlinedIcon from '@mui/icons-material/SyncOutlined';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import client from '../api/client';
 import Money from '../components/Money';
+import PlatformSyncLog from './PlatformSyncLog';
 
 function monthStartEnd() {
   const now = new Date();
@@ -127,6 +131,309 @@ function BalanceSheet() {
   );
 }
 
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function PlatformSync() {
+  const now = new Date();
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
+  const [preview, setPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [history, setHistory] = useState([]);
+
+  const loadHistory = () => client.get('/platform-sync/history').then(({ data }) => setHistory(data.runs)).catch(() => {});
+
+  useEffect(() => { loadHistory(); }, []);
+
+  useEffect(() => {
+    setError(null);
+    setResult(null);
+    setLoadingPreview(true);
+    client.get('/platform-sync/preview', { params: { month, year } })
+      .then(({ data }) => setPreview(data))
+      .catch((e) => setError(e.response?.data?.error || 'Could not reach the platform API'))
+      .finally(() => setLoadingPreview(false));
+  }, [month, year]);
+
+  const runSync = async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      const { data } = await client.post('/platform-sync/run', { month, year });
+      setResult(data);
+      // Refresh preview + history — the just-synced records now show as already-synced.
+      const { data: p } = await client.get('/platform-sync/preview', { params: { month, year } });
+      setPreview(p);
+      loadHistory();
+    } catch (e) {
+      setError(e.response?.data?.error || 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
+
+  return (
+    <Box sx={{ maxWidth: 900 }}>
+      <Typography sx={{ color: 'text.secondary', mb: 2.5, fontSize: '0.875rem' }}>
+        Pulls subscription and trade-fee revenue from the EtherTrack platform (read-only) and posts it
+        into this ledger — Platform Settlement Account debited, Subscription/Trade Fee Revenue and
+        GST payable credited. Safe to click more than once: anything already synced is skipped automatically.
+      </Typography>
+
+      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2.5 }}>
+        <TextField select size="small" label="Month" value={month} onChange={(e) => setMonth(Number(e.target.value))} sx={{ minWidth: 160 }}>
+          {MONTHS.map((m, i) => <MenuItem key={m} value={i + 1}>{m}</MenuItem>)}
+        </TextField>
+        <TextField select size="small" label="Year" value={year} onChange={(e) => setYear(Number(e.target.value))} sx={{ minWidth: 120 }}>
+          {years.map((y) => <MenuItem key={y} value={y}>{y}</MenuItem>)}
+        </TextField>
+      </Box>
+
+      {error && <Alert severity="error" sx={{ mb: 2.5 }}>{error}</Alert>}
+
+      {loadingPreview && <CircularProgress size={22} />}
+
+      {!loadingPreview && preview && (
+        <Paper sx={{ p: 2.5, mb: 2.5, maxWidth: 720 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
+            <Typography sx={{ fontWeight: 600 }}>{MONTHS[month - 1]} {year}</Typography>
+            <Chip size="small" label={`${preview.newRecords} new · ${preview.alreadySynced} already synced`} color={preview.newRecords > 0 ? 'primary' : 'default'} variant="outlined" />
+          </Box>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5 }}>
+            <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>Subscriptions</Typography>
+            <Money amount={preview.bySource?.subscription || 0} size="0.85rem" />
+          </Box>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5 }}>
+            <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>Trade fees</Typography>
+            <Money amount={preview.bySource?.trade_fee || 0} size="0.85rem" />
+          </Box>
+          <Divider sx={{ my: 1.5 }} />
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+            <Typography sx={{ fontWeight: 600 }}>Total to import</Typography>
+            <Money amount={preview.totalNewAmount} />
+          </Box>
+          <Button
+            variant="contained"
+            startIcon={syncing ? <CircularProgress size={16} color="inherit" /> : <SyncOutlinedIcon />}
+            disabled={syncing || preview.newRecords === 0}
+            onClick={runSync}
+          >
+            {preview.newRecords === 0 ? 'Nothing new to sync' : `Sync ${preview.newRecords} record${preview.newRecords === 1 ? '' : 's'}`}
+          </Button>
+        </Paper>
+      )}
+
+      {result && (
+        <Alert severity="success" sx={{ mb: 2.5 }}>
+          Posted {result.synced} journal {result.synced === 1 ? 'entry' : 'entries'} totalling{' '}
+          <Money amount={result.totalAmount} size="0.85rem" /> · {result.skipped} skipped (already synced)
+          {result.failed > 0 ? ` · ${result.failed} failed` : ''}.
+        </Alert>
+      )}
+
+      {history.length > 0 && (
+        <>
+          <Typography sx={{ fontWeight: 600, mb: 1.5, mt: 3 }}>Sync history</Typography>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Period</TableCell>
+                <TableCell align="right">Synced</TableCell>
+                <TableCell align="right">Skipped</TableCell>
+                <TableCell align="right">Amount</TableCell>
+                <TableCell>By</TableCell>
+                <TableCell>When</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {history.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{MONTHS[r.period_month - 1]} {r.period_year}</TableCell>
+                  <TableCell align="right">{r.records_synced}</TableCell>
+                  <TableCell align="right">{r.records_skipped}</TableCell>
+                  <TableCell align="right"><Money amount={r.total_amount_inr} size="0.8rem" /></TableCell>
+                  <TableCell sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>{r.run_by_email || '—'}</TableCell>
+                  <TableCell sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>{new Date(r.run_at).toLocaleString('en-IN')}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </>
+      )}
+
+      <Divider sx={{ my: 4 }} />
+      <Typography sx={{ fontWeight: 600, mb: 0.5 }}>Synced records</Typography>
+      <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem', mb: 2 }}>
+        Every individually posted record for a period. If something was imported by mistake, void it
+        here — this posts a reversing entry, it never deletes anything.
+      </Typography>
+      <PlatformSyncLog />
+    </Box>
+  );
+}
+
+// ── Growth: revenue trend + mix, and a GST filing summary ──────────────────
+// Pure ledger data, no guessed numbers — subscriptions vs trade fees off
+// accounts 4100/4110, GST off 2210/2220/2230. If a period includes a voided
+// (reversed) record, it nets out automatically since the reversal is just
+// another journal entry in the same accounts.
+function MrrCard() {
+  const [mrr, setMrr] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    client.get('/platform-sync/mrr')
+      .then(({ data }) => setMrr(data))
+      .catch((e) => setError(e.response?.data?.error || 'Failed to load MRR'));
+  }, []);
+
+  if (error) return <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>;
+  if (!mrr) return null;
+
+  const planLabels = { starter: 'Starter', growth: 'Growth', corporate: 'Corporate' };
+
+  return (
+    <Paper sx={{ p: 2.5, mb: 3 }}>
+      <Grid container spacing={3} sx={{ mb: mrr.note ? 2.5 : 0 }}>
+        <Grid item xs={6} sm={3}>
+          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>MRR</Typography>
+          <Money amount={mrr.mrr} size="1.3rem" />
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>ARR</Typography>
+          <Money amount={mrr.arr} size="1.3rem" />
+        </Grid>
+        {Object.entries(mrr.byPlan || {}).map(([plan, amount]) => (
+          <Grid item xs={6} sm={3} key={plan}>
+            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{planLabels[plan] || plan} MRR</Typography>
+            <Money amount={amount} size="1.05rem" />
+          </Grid>
+        ))}
+      </Grid>
+
+      <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', mb: mrr.note ? 1.5 : 0 }}>
+        {mrr.activeSubscribers} active paid subscriber{mrr.activeSubscribers === 1 ? '' : 's'} — includes Corporate at real contract value.
+      </Typography>
+      {mrr.note && <Alert severity="warning">{mrr.note}</Alert>}
+    </Paper>
+  );
+}
+
+function RevenueGrowth() {
+  const [months, setMonths] = useState(12);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+
+  const [gstRange, setGstRange] = useState(monthStartEnd());
+  const [gst, setGst] = useState(null);
+  const [gstError, setGstError] = useState(null);
+
+  useEffect(() => {
+    setError(null);
+    client.get('/accounting/reports/revenue-growth', { params: { months } })
+      .then(({ data }) => setData(data))
+      .catch((e) => setError(e.response?.data?.error || 'Failed to load revenue trend'));
+  }, [months]);
+
+  useEffect(() => {
+    setGstError(null);
+    client.get('/accounting/reports/gst-summary', { params: gstRange })
+      .then(({ data }) => setGst(data))
+      .catch((e) => setGstError(e.response?.data?.error || 'Failed to load GST summary'));
+  }, [gstRange]);
+
+  const maxMonthTotal = data ? Math.max(...data.months.map((m) => m.totalRevenue), 1) : 1;
+
+  return (
+    <Box sx={{ maxWidth: 900 }}>
+      <MrrCard />
+
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography sx={{ fontWeight: 600 }}>Revenue trend</Typography>
+        <TextField select size="small" label="Range" value={months} onChange={(e) => setMonths(Number(e.target.value))} sx={{ minWidth: 140 }}>
+          <MenuItem value={6}>Last 6 months</MenuItem>
+          <MenuItem value={12}>Last 12 months</MenuItem>
+          <MenuItem value={24}>Last 24 months</MenuItem>
+        </TextField>
+      </Box>
+
+      {error && <Alert severity="error" sx={{ mb: 2.5 }}>{error}</Alert>}
+
+      {data && (
+        <Paper sx={{ p: 2.5, mb: 3 }}>
+          {data.momGrowthPercent !== null && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2.5 }}>
+              {data.momGrowthPercent >= 0
+                ? <TrendingUpIcon fontSize="small" color="success" />
+                : <TrendingDownIcon fontSize="small" color="error" />}
+              <Typography sx={{ fontSize: '0.85rem' }}>
+                <strong>{data.momGrowthPercent >= 0 ? '+' : ''}{data.momGrowthPercent}%</strong> month-over-month
+              </Typography>
+            </Box>
+          )}
+
+          {data.months.map((m) => (
+            <Box key={m.month} sx={{ mb: 1.75 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>{m.month}</Typography>
+                <Money amount={m.totalRevenue} size="0.8rem" />
+              </Box>
+              <Box sx={{ display: 'flex', height: 10, borderRadius: 1, overflow: 'hidden', bgcolor: 'action.hover' }}>
+                <Box sx={{
+                  width: `${(m.subscriptionRevenue / maxMonthTotal) * 100}%`,
+                  bgcolor: 'primary.main', transition: 'width 0.3s',
+                }} />
+                <Box sx={{
+                  width: `${(m.tradeFeeRevenue / maxMonthTotal) * 100}%`,
+                  bgcolor: 'secondary.main', transition: 'width 0.3s',
+                }} />
+              </Box>
+            </Box>
+          ))}
+
+          <Box sx={{ display: 'flex', gap: 3, mt: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <Box sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: 'primary.main' }} />
+              <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Subscriptions</Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <Box sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: 'secondary.main' }} />
+              <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Trade fees</Typography>
+            </Box>
+          </Box>
+        </Paper>
+      )}
+
+      <Typography sx={{ fontWeight: 600, mb: 2 }}>GST filing summary</Typography>
+      <Box sx={{ display: 'flex', gap: 2, mb: 2.5 }}>
+        <TextField size="small" type="date" label="From" InputLabelProps={{ shrink: true }} value={gstRange.from} onChange={(e) => setGstRange({ ...gstRange, from: e.target.value })} />
+        <TextField size="small" type="date" label="To" InputLabelProps={{ shrink: true }} value={gstRange.to} onChange={(e) => setGstRange({ ...gstRange, to: e.target.value })} />
+      </Box>
+      {gstError && <Alert severity="error" sx={{ mb: 2.5 }}>{gstError}</Alert>}
+      {gst && (
+        <Paper sx={{ p: 2.5, maxWidth: 420 }}>
+          {[['CGST', gst.cgst], ['SGST', gst.sgst], ['IGST', gst.igst]].map(([label, val]) => (
+            <Box key={label} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.75 }}>
+              <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>{label} output payable</Typography>
+              <Money amount={val} size="0.85rem" />
+            </Box>
+          ))}
+          <Divider sx={{ my: 1.5 }} />
+          <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+            <Typography sx={{ fontWeight: 600 }}>Total</Typography>
+            <Money amount={gst.total} size="1.05rem" />
+          </Box>
+        </Paper>
+      )}
+    </Box>
+  );
+}
+
 export default function Accounting() {
   const [tab, setTab] = useState(0);
   return (
@@ -136,10 +443,14 @@ export default function Accounting() {
         <Tab label="Trial Balance" />
         <Tab label="Profit & Loss" />
         <Tab label="Balance Sheet" />
+        <Tab label="Platform Sync" />
+        <Tab label="Growth" />
       </Tabs>
       {tab === 0 && <TrialBalance />}
       {tab === 1 && <ProfitAndLoss />}
       {tab === 2 && <BalanceSheet />}
+      {tab === 3 && <PlatformSync />}
+      {tab === 4 && <RevenueGrowth />}
     </Box>
   );
 }

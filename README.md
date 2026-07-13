@@ -32,6 +32,30 @@ customer carbon-credit data.
 | Vendor bills / expenses (AP) | Not built yet — same pattern as `backend/routes/invoices.js`, mirrored for the payable side |
 | Financial year close / retained earnings roll-forward | Not built — flagged as a TODO in `getBalanceSheet()` |
 | Frontend (React) | Not built |
+| **Platform revenue sync** (subscriptions + trade fees, one-click by month) | **Done** — see below |
+
+## Platform revenue sync
+
+Pulls subscription payments and trade-fee revenue from the EtherTrack customer platform
+(read-only, via the platform's `/api/ops-integration/income` endpoint — see SRS §18.8) and
+posts it into this ledger, one click at a time, scoped to a month/year.
+
+- **Platform side:** `ethertrack-backend/routes/opsIntegration.js` — a dedicated, minimal,
+  read-only route gated by `middleware/serviceAuth.js` (a shared-secret `x-service-token`
+  header, not a user session). Deliberately kept separate from `routes/admin.js` so this
+  integration surface can't accidentally grow write endpoints.
+- **Ops side:** `backend/services/platformClient.js` (fetches the feed) +
+  `backend/routes/platform-sync.js` (posts journal entries). Idempotent — each platform
+  record's `(source, ref_id)` is checked against `platform_sync_log` before posting, backed
+  by a DB `UNIQUE` constraint, so clicking "Sync" twice for the same month never double-posts.
+- **New ledger accounts:** `1120 Platform Settlement Account`, `4110 Platform Trade Fee
+  Revenue` (subscriptions post to the existing `4100`). GST from the platform posts as output
+  tax payable (`2210`/`2220`/`2230`) since it was already collected on the company's behalf.
+- **Frontend:** new "Platform Sync" tab on the Accounting page — pick a month/year, see a
+  preview (new vs. already-synced, total amount), click Sync.
+- **Setup:** run `npm run db:migrate:platform-sync` (or paste `db/002_platform_sync.sql` into
+  Supabase's SQL editor), then set `PLATFORM_API_URL` + `PLATFORM_SYNC_SERVICE_TOKEN` in
+  `.env` — the token must match `OPS_SYNC_SERVICE_TOKEN` set on the platform's server.
 
 ## Setup (Supabase)
 
@@ -113,6 +137,7 @@ here would mean maintaining carbon-credit logic in two places that drift apart.
 | Phase | Scope | Status |
 |---|---|---|
 | 1a | HR, Accounting/Bookkeeping ledger, GST invoicing, Payroll, Dashboard | Backend done · Frontend done |
+| 1a+ | Platform revenue sync (subscriptions + trade fees, one-click by month) | Done |
 | 1b | Documents (contracts, offer letters, NDAs, policies — versioned) | Not started |
 | 1c | Sales (lightweight prospect/lead pipeline — stops once a lead becomes a paying customer, since the platform's subscription/billing takes over from there) | Not started |
 | 1d | Automation (trigger→action rules on existing data: overdue invoice → reminder, new hire → checklist) | Not started |
