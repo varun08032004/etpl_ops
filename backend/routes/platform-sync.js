@@ -32,7 +32,7 @@ const router = express.Router();
 const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const ledger = require('../services/ledger');
-const { fetchPlatformIncome, fetchPlatformCustomers } = require('../services/platformClient');
+const { fetchPlatformIncome, fetchPlatformCustomers, fetchInvoicePdf } = require('../services/platformClient');
 
 router.use(authenticate);
 
@@ -280,6 +280,37 @@ router.get('/records', requireRole('finance', 'manager'), async (req, res) => {
     const { from, to } = monthRange(req.query.month, req.query.year);
     const records = await fetchPlatformIncome(from, to);
     res.json({ from, to, records });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// GET /api/platform-sync/records/:source/:refId/invoice
+//
+// Proxies the real GST invoice/bill PDF for a single record straight from
+// the platform — for GST filing / audit purposes, so you can pull the
+// actual signed document instead of relying on the ledger numbers alone.
+// Nothing is stored or cached on the ops side; this streams the platform's
+// response through on each request, so it always reflects the current
+// document (e.g. if a trade invoice gets patched with an on-chain
+// confirmation after the fact).
+router.get('/records/:source/:refId/invoice', requireRole('finance', 'manager'), async (req, res) => {
+  const { source, refId } = req.params;
+  const typeMap = { trade_fee: 'trade', subscription: 'subscription' };
+  const type = typeMap[source];
+  if (!type) {
+    return res.status(400).json({ error: "source must be 'trade_fee' or 'subscription'" });
+  }
+
+  try {
+    const { buffer, filename } = await fetchInvoicePdf(type, refId);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': buffer.length,
+      'Cache-Control': 'no-store',
+    });
+    res.send(buffer);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }

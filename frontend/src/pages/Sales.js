@@ -349,15 +349,34 @@ function PlatformSalesRecords() {
   const total = filtered.reduce((s, r) => s + Number(r.amount_inr), 0);
 
   const exportCsv = () => {
-    const headers = ['Date','Source','Customer / Buyer','Seller','Project','Quantity (tCO2)','Amount (INR)','GST (INR)','Description'];
+    const headers = ['Date','Source','Customer / Buyer','Seller','Project','Quantity (tCO2)','Amount (INR)','GST (INR)','Invoice #','Description'];
     const rows = filtered.map((r) => [
       new Date(r.date).toISOString().slice(0, 10), r.source,
       r.customer_email || r.buyer_email || '', r.seller_email || '',
       r.project_name || '', r.quantity_tco2 || '',
-      Number(r.amount_inr).toFixed(2), Number(r.gst_inr || 0).toFixed(2), r.description,
+      Number(r.amount_inr).toFixed(2), Number(r.gst_inr || 0).toFixed(2), r.invoice_number || '', r.description,
     ]);
     const sourceLabel = sourceFilter === 'all' ? 'all' : sourceFilter;
     downloadCsv(`sales_records_${sourceLabel}_${MONTHS[month - 1]}_${year}.csv`, headers, rows);
+  };
+
+  // Pulls the real invoice/bill PDF straight from the platform (not
+  // regenerated, not stored here) — for GST filing / audit purposes.
+  const downloadInvoice = async (record) => {
+    try {
+      const { data } = await client.get(
+        `/platform-sync/records/${record.source}/${record.ref_id}/invoice`,
+        { responseType: 'blob' }
+      );
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${record.invoice_number || record.ref_id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert('Could not download this invoice — it may not have finished generating on the platform yet.');
+    }
   };
 
   return (
@@ -408,6 +427,7 @@ function PlatformSalesRecords() {
                   <TableCell>Project</TableCell>
                   <TableCell align="right">Qty (tCO2)</TableCell>
                   <TableCell align="right">Amount</TableCell>
+                  <TableCell align="right">Invoice</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -419,10 +439,23 @@ function PlatformSalesRecords() {
                     <TableCell sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>{r.project_name || (r.plan ? `${r.plan} (${r.cycle})` : '—')}</TableCell>
                     <TableCell align="right" sx={{ fontSize: '0.8rem' }}>{r.quantity_tco2 || '—'}</TableCell>
                     <TableCell align="right"><Money amount={r.amount_inr} size="0.85rem" /></TableCell>
+                    <TableCell align="right">
+                      {r.invoice_number ? (
+                        <Button
+                          size="small"
+                          onClick={() => downloadInvoice(r)}
+                          sx={{ fontSize: '0.72rem', minWidth: 0, textTransform: 'none' }}
+                        >
+                          {r.invoice_number}
+                        </Button>
+                      ) : (
+                        <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>—</Typography>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
                 {filtered.length === 0 && (
-                  <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', color: 'text.secondary', py: 3 }}>
+                  <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', color: 'text.secondary', py: 3 }}>
                     {records.length === 0 ? `No records for ${MONTHS[month - 1]} ${year}` : 'No records match this filter'}
                   </TableCell></TableRow>
                 )}
