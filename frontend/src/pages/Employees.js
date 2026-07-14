@@ -4,12 +4,15 @@ import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   TextField, InputAdornment, Button, Dialog, DialogTitle, DialogContent,
   DialogActions, Grid, MenuItem, Tabs, Tab, Stepper, Step, StepLabel, Alert, Switch, FormControlLabel,
+  Autocomplete,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DownloadIcon from '@mui/icons-material/Download';
 import EditIcon from '@mui/icons-material/Edit';
+import LogoutIcon from '@mui/icons-material/Logout';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import client from '../api/client';
 import StatusChip from '../components/StatusChip';
 import Money from '../components/Money';
@@ -23,13 +26,25 @@ const emptyForm = {
   full_name: '', personal_email: '', work_email: '', phone: '', date_of_birth: '',
   city: '', state: 'Maharashtra', pan_number: '',
   date_of_joining: '', employment_type: 'full_time',
+  department_id: '', designation_title: '', manager_id: '',
   ctc_annual: '', basic_monthly: '', hra_monthly: '', other_allowances_monthly: '', da_monthly: '',
   tax_regime: 'new', pf_applicable: true,
   bank_account_number: '', bank_ifsc: '',
 };
 
+// Resolves a free-typed designation title to an id — finds an existing one
+// by title or creates it, so the employee form doesn't need a separate
+// "manage designations" screen. Returns null if left blank.
+async function resolveDesignationId(title, departmentId) {
+  if (!title || !title.trim()) return null;
+  const { data } = await client.post('/designations', { title: title.trim(), department_id: departmentId || null });
+  return data.designation.id;
+}
+
 function EmployeeList() {
   const [employees, setEmployees] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [designations, setDesignations] = useState([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -44,7 +59,11 @@ function EmployeeList() {
     setEmployees(data.employees);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    client.get('/departments').then(({ data }) => setDepartments(data.departments)).catch(() => {});
+    client.get('/designations').then(({ data }) => setDesignations(data.designations)).catch(() => {});
+  }, []);
 
   const handleSearch = (e) => {
     setSearch(e.target.value);
@@ -63,7 +82,11 @@ function EmployeeList() {
     setSaving(true);
     setError('');
     try {
-      const { data } = await client.post('/employees', form);
+      const designation_id = await resolveDesignationId(form.designation_title, form.department_id);
+      const { department_id, designation_title, manager_id, ...rest } = form;
+      const payload = { ...rest, department_id: department_id || null, designation_id, manager_id: manager_id || null };
+
+      const { data } = await client.post('/employees', payload);
       const employeeId = data.employee.id;
 
       const uploads = [];
@@ -181,6 +204,27 @@ function EmployeeList() {
                   {['full_time', 'part_time', 'contract', 'intern'].map((t) => <MenuItem key={t} value={t}>{t.replace('_', ' ')}</MenuItem>)}
                 </TextField>
               </Grid>
+              <Grid item xs={6}>
+                <TextField fullWidth select label="Department" value={form.department_id} onChange={set('department_id')}>
+                  <MenuItem value="">Unassigned</MenuItem>
+                  {departments.map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
+                </TextField>
+              </Grid>
+              <Grid item xs={6}>
+                <Autocomplete
+                  freeSolo
+                  options={designations.map((d) => d.title)}
+                  value={form.designation_title}
+                  onInputChange={(e, val) => setForm({ ...form, designation_title: val })}
+                  renderInput={(params) => <TextField {...params} fullWidth label="Designation" helperText="Type a new title or pick an existing one" />}
+                />
+              </Grid>
+              <Grid item xs={6}>
+                <TextField fullWidth select label="Reports to (manager)" value={form.manager_id} onChange={set('manager_id')}>
+                  <MenuItem value="">No manager set</MenuItem>
+                  {employees.map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
+                </TextField>
+              </Grid>
               <Grid item xs={6}><TextField fullWidth label="Bank account number" value={form.bank_account_number} onChange={set('bank_account_number')} /></Grid>
               <Grid item xs={6}><TextField fullWidth label="Bank IFSC" value={form.bank_ifsc} onChange={set('bank_ifsc')} /></Grid>
             </Grid>
@@ -261,11 +305,24 @@ function EmployeeDetail() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [checklist, setChecklist] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [designations, setDesignations] = useState([]);
+  const [allEmployees, setAllEmployees] = useState([]);
+  const [message, setMessage] = useState(null);
+
+  const [exitOpen, setExitOpen] = useState(false);
+  const [exitForm, setExitForm] = useState({ exit_date: '', reason: '' });
+  const [exiting, setExiting] = useState(false);
+
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [loginForm, setLoginForm] = useState({ email: '', password: '', role: 'employee' });
+  const [creatingLogin, setCreatingLogin] = useState(false);
+  const [loginError, setLoginError] = useState('');
 
   const canEdit = ['owner', 'admin', 'hr'].includes(staff?.role);
+  const canExit = ['owner', 'admin', 'hr'].includes(staff?.role);
 
   const loadDocs = () => client.get('/documents', { params: { entity_type: 'employee', entity_id: id } }).then(({ data }) => setDocs(data.documents));
-
   const loadEmployee = () => client.get(`/employees/${id}`).then(({ data }) => setEmployee(data.employee));
   const loadChecklist = () => client.get(`/automation/checklist/${id}`).then(({ data }) => setChecklist(data.items)).catch(() => setChecklist([]));
 
@@ -273,6 +330,9 @@ function EmployeeDetail() {
     loadEmployee();
     loadDocs();
     loadChecklist();
+    client.get('/departments').then(({ data }) => setDepartments(data.departments)).catch(() => {});
+    client.get('/designations').then(({ data }) => setDesignations(data.designations)).catch(() => {});
+    client.get('/employees').then(({ data }) => setAllEmployees(data.employees)).catch(() => {});
   }, [id]);
 
   const toggleChecklistItem = async (itemId) => {
@@ -308,7 +368,8 @@ function EmployeeDetail() {
       full_name: employee.full_name || '', personal_email: employee.personal_email || '',
       work_email: employee.work_email || '', phone: employee.phone || '',
       city: employee.city || '', state: employee.state || '', pan_number: employee.pan_number || '',
-      employment_type: employee.employment_type || 'full_time', status: employee.status || 'active',
+      employment_type: employee.employment_type || 'full_time',
+      department_id: employee.department_id || '', designation_id: employee.designation_id || '', manager_id: employee.manager_id || '',
       bank_account_number: employee.bank_account_number || '', bank_ifsc: employee.bank_ifsc || '',
       ctc_annual: employee.ctc_annual || '', basic_monthly: employee.basic_monthly || '',
       da_monthly: employee.da_monthly || '', hra_monthly: employee.hra_monthly || '',
@@ -335,6 +396,46 @@ function EmployeeDetail() {
 
   const setEdit = (key) => (e) => setEditForm({ ...editForm, [key]: e.target.value });
 
+  const handleExit = async () => {
+    setExiting(true);
+    setMessage(null);
+    try {
+      const { data } = await client.post(`/employees/${id}/exit`, exitForm);
+      if (data.pending) {
+        setMessage({ severity: 'info', text: data.message });
+      } else {
+        setMessage({ severity: 'success', text: `${employee.full_name} has been exited.` });
+        loadEmployee();
+      }
+      setExitOpen(false);
+    } catch (err) {
+      setMessage({ severity: 'error', text: err.response?.data?.error || 'Failed to process exit' });
+    } finally {
+      setExiting(false);
+    }
+  };
+
+  const openCreateLogin = () => {
+    const suggested = employee.work_email || '';
+    setLoginForm({ email: suggested, password: '', role: 'employee' });
+    setLoginError('');
+    setLoginOpen(true);
+  };
+
+  const handleCreateLogin = async () => {
+    setCreatingLogin(true);
+    setLoginError('');
+    try {
+      await client.post('/staff-accounts', { ...loginForm, employee_id: id });
+      setLoginOpen(false);
+      loadEmployee();
+    } catch (err) {
+      setLoginError(err.response?.data?.error || 'Failed to create login');
+    } finally {
+      setCreatingLogin(false);
+    }
+  };
+
   if (!employee) return null;
 
   return (
@@ -344,8 +445,29 @@ function EmployeeDetail() {
           <Typography variant="h5">{employee.full_name}</Typography>
           <Typography sx={{ color: 'text.secondary' }}>{employee.employee_code} · {employee.work_email}</Typography>
         </Box>
-        {canEdit && <Button variant="outlined" startIcon={<EditIcon />} onClick={openEdit}>Edit</Button>}
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {canEdit && employee.status !== 'exited' && (
+            employee.linked_staff_account
+              ? <Button size="small" variant="outlined" disabled sx={{ fontSize: '0.75rem' }}>
+                  Login linked: {employee.linked_staff_account.email}
+                </Button>
+              : <Button size="small" variant="outlined" startIcon={<PersonAddIcon />} onClick={openCreateLogin}>Create login</Button>
+          )}
+          {canEdit && <Button variant="outlined" startIcon={<EditIcon />} onClick={openEdit}>Edit</Button>}
+          {canExit && employee.status !== 'exited' && (
+            <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={() => { setExitForm({ exit_date: '', reason: '' }); setExitOpen(true); }}>
+              Exit
+            </Button>
+          )}
+        </Box>
       </Box>
+
+      {message && <Alert severity={message.severity} sx={{ mb: 2.5 }}>{message.text}</Alert>}
+      {employee.status === 'exited' && (
+        <Alert severity="warning" sx={{ mb: 2.5 }}>
+          Exited on {employee.date_of_exit?.slice(0, 10)}{employee.exit_reason ? ` — ${employee.exit_reason}` : ''}
+        </Alert>
+      )}
 
       <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: 3, borderBottom: '1px solid', borderColor: 'divider' }}>
         <Tab label="Overview" />
@@ -358,6 +480,9 @@ function EmployeeDetail() {
           <Grid container spacing={2}>
             <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Status</Typography><StatusChip status={employee.status} /></Grid>
             <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Employment type</Typography><Typography sx={{ textTransform: 'capitalize' }}>{employee.employment_type?.replace('_', ' ')}</Typography></Grid>
+            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Department</Typography><Typography>{departments.find((d) => d.id === employee.department_id)?.name || '—'}</Typography></Grid>
+            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Designation</Typography><Typography>{designations.find((d) => d.id === employee.designation_id)?.title || '—'}</Typography></Grid>
+            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Reports to</Typography><Typography>{allEmployees.find((e) => e.id === employee.manager_id)?.full_name || '—'}</Typography></Grid>
             <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Date of joining</Typography><Typography className="figure">{employee.date_of_joining?.slice(0, 10)}</Typography></Grid>
             <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Phone</Typography><Typography>{employee.phone || '—'}</Typography></Grid>
             <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>State</Typography><Typography>{employee.state || '—'}</Typography></Grid>
@@ -458,8 +583,26 @@ function EmployeeDetail() {
                 </TextField>
               </Grid>
               <Grid item xs={6}>
-                <TextField fullWidth select label="Status" value={editForm.status} onChange={setEdit('status')}>
-                  {['active', 'on_leave', 'notice_period', 'exited'].map((s) => <MenuItem key={s} value={s}>{s.replace('_', ' ')}</MenuItem>)}
+                <TextField fullWidth select label="Status" value={editForm.status || employee.status} onChange={setEdit('status')}>
+                  {['active', 'on_leave', 'notice_period'].map((s) => <MenuItem key={s} value={s}>{s.replace('_', ' ')}</MenuItem>)}
+                </TextField>
+              </Grid>
+              <Grid item xs={6}>
+                <TextField fullWidth select label="Department" value={editForm.department_id} onChange={setEdit('department_id')}>
+                  <MenuItem value="">Unassigned</MenuItem>
+                  {departments.map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
+                </TextField>
+              </Grid>
+              <Grid item xs={6}>
+                <TextField fullWidth select label="Designation" value={editForm.designation_id} onChange={setEdit('designation_id')}>
+                  <MenuItem value="">Unassigned</MenuItem>
+                  {designations.map((d) => <MenuItem key={d.id} value={d.id}>{d.title}</MenuItem>)}
+                </TextField>
+              </Grid>
+              <Grid item xs={12}>
+                <TextField fullWidth select label="Reports to (manager)" value={editForm.manager_id} onChange={setEdit('manager_id')}>
+                  <MenuItem value="">No manager set</MenuItem>
+                  {allEmployees.filter((e) => e.id !== id).map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
                 </TextField>
               </Grid>
               <Grid item xs={6}><TextField fullWidth label="Bank account number" value={editForm.bank_account_number} onChange={setEdit('bank_account_number')} /></Grid>
@@ -492,6 +635,45 @@ function EmployeeDetail() {
           </DialogActions>
         </Dialog>
       )}
+
+      <Dialog open={exitOpen} onClose={() => setExitOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Exit {employee.full_name}</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 1 }}>
+            This sets status to Exited and deactivates their login (if any). This does not delete their record —
+            payroll and leave history are preserved.
+            {staff?.role === 'admin' && ' As Admin, this will be sent to the Founder for approval before it takes effect.'}
+          </Alert>
+          <TextField fullWidth type="date" label="Exit date" InputLabelProps={{ shrink: true }} margin="normal"
+            value={exitForm.exit_date} onChange={(e) => setExitForm({ ...exitForm, exit_date: e.target.value })} />
+          <TextField fullWidth label="Reason" multiline rows={2} margin="normal"
+            value={exitForm.reason} onChange={(e) => setExitForm({ ...exitForm, reason: e.target.value })} />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setExitOpen(false)}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={handleExit} disabled={exiting || !exitForm.exit_date}>
+            {exiting ? 'Processing…' : 'Confirm exit'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={loginOpen} onClose={() => setLoginOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Create login for {employee.full_name}</DialogTitle>
+        <DialogContent>
+          <TextField fullWidth label="Email" margin="normal" value={loginForm.email} onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })} />
+          <TextField fullWidth label="Temporary password" margin="normal" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} helperText="Share this with them securely." />
+          <TextField fullWidth select label="Role" margin="normal" value={loginForm.role} onChange={(e) => setLoginForm({ ...loginForm, role: e.target.value })}>
+            {['admin', 'hr', 'finance', 'manager', 'employee'].map((r) => <MenuItem key={r} value={r}>{r}</MenuItem>)}
+          </TextField>
+          {loginError && <Alert severity="error" sx={{ mt: 1 }}>{loginError}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLoginOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleCreateLogin} disabled={creatingLogin || !loginForm.email || !loginForm.password}>
+            {creatingLogin ? 'Creating…' : 'Create login'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

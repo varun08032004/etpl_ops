@@ -15,6 +15,7 @@ import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import EventRepeatOutlinedIcon from '@mui/icons-material/EventRepeatOutlined';
+import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined';
 import PersonOutlinedIcon from '@mui/icons-material/PersonOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import { useAuth } from '../context/AuthContext';
@@ -25,6 +26,7 @@ import NotificationBell from './NotificationBell';
 // they should not see company-wide financials, other people's records,
 // or admin tools like Team logins / CSV import.
 const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance'];
+const ADMIN_ROLES = ['owner', 'admin'];
 
 // Grouped instead of one flat list — 13+ items in a row was too much to scan.
 const NAV_GROUPS = [
@@ -70,6 +72,13 @@ const NAV_GROUPS = [
   },
 ];
 
+const ADMIN_NAV_GROUP = {
+  label: 'Admin',
+  items: [
+    { to: '/admin', label: 'Permissions & Audit', icon: AdminPanelSettingsOutlinedIcon },
+  ],
+};
+
 const SELF_SERVICE_NAV = [
   { to: '/', label: 'My Profile', icon: PersonOutlinedIcon, end: true },
 ];
@@ -78,6 +87,8 @@ export default function Layout() {
   const { staff, logout } = useAuth();
   const navigate = useNavigate();
   const isPrivileged = PRIVILEGED_ROLES.includes(staff?.role);
+  const isAdmin = ADMIN_ROLES.includes(staff?.role);
+  const navGroups = isAdmin ? [...NAV_GROUPS, ADMIN_NAV_GROUP] : NAV_GROUPS;
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -100,7 +111,7 @@ export default function Layout() {
 
         <Box sx={{ px: 1.5, display: 'flex', flexDirection: 'column', gap: 0.5, flex: 1, overflowY: 'auto' }}>
           {isPrivileged ? (
-            NAV_GROUPS.map((group) => (
+            navGroups.map((group) => (
               <Box key={group.label} sx={{ mb: 1 }}>
                 <Typography sx={{ px: 1.5, pt: 1.5, pb: 0.5, fontSize: '0.65rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                   {group.label}

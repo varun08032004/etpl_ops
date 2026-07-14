@@ -5,8 +5,26 @@ const router = express.Router();
 const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { fireEvent } = require('../services/automationEngine');
+const { registerApprovalAction, createApprovalRequest } = require('../services/approvals');
 
 router.use(authenticate);
+
+// The actual exit — deactivates status AND their login, since an exited
+// employee shouldn't retain system access. Run either immediately
+// (owner/hr) or later by approveRequest() once the Founder signs off
+// (the admin-initiated path).
+async function exitEmployee(employeeId, payload) {
+  const { exit_date, reason } = payload || {};
+  const { rows } = await safeQuery(
+    `UPDATE employees SET status = 'exited', date_of_exit = $1, exit_reason = $2 WHERE id = $3 RETURNING id, full_name, status`,
+    [exit_date, reason || null, employeeId]
+  );
+  if (rows.length) {
+    await safeQuery(`UPDATE staff_accounts SET is_active = false WHERE employee_id = $1`, [employeeId]);
+  }
+  return rows[0];
+}
+registerApprovalAction('employee.exit', (targetId, payload) => exitEmployee(targetId, payload));
 
 // ── self-service: resolve the logged-in staff member's own employee record ──
 // Must be defined BEFORE the /:id routes below, or Express would treat "me" as an :id.
@@ -105,6 +123,16 @@ router.get('/:id', async (req, res) => {
       delete employee.bank_account_number;
       delete employee.bank_ifsc;
     }
+
+    // Flags whether this employee already has a staff login, and its email —
+    // powers the "Create login" shortcut button on the employee detail page
+    // (only show it when there genuinely isn't one yet).
+    const { rows: [linkedAccount] } = await safeQuery(
+      `SELECT id, email, is_active FROM staff_accounts WHERE employee_id = $1`,
+      [req.params.id]
+    );
+    employee.linked_staff_account = linkedAccount || null;
+
     res.json({ employee });
   } catch (err) {
     console.error('[employees:get]', err);
@@ -169,11 +197,21 @@ router.put('/:id', requireRole('hr'), async (req, res) => {
       'da_monthly', 'tax_regime', 'pf_applicable', 'esic_applicable', 'declared_deductions',
       'bank_account_number', 'bank_ifsc', 'trackpilot_user_id', 'notes',
     ];
+    // 'exited' is deliberately not settable through this generic update —
+    // it has to go through POST /:id/exit, which captures exit_date/reason
+    // properly and deactivates the linked login. Silently blocking it here
+    // rather than letting it slip through as a bare status flip.
+    if (req.body.status === 'exited') {
+      return res.status(400).json({ error: 'Use POST /employees/:id/exit to offboard an employee, not a status update' });
+    }
+
     const sets = [];
     const params = [];
     for (const key of allowed) {
       if (key in req.body) {
-        params.push(req.body[key]);
+        let value = req.body[key];
+        if (value === '') value = null; // "Unassigned"/"No manager set" submit '' — must be NULL for UUID columns
+        params.push(value);
         sets.push(`${key} = $${params.length}`);
       }
     }
@@ -192,21 +230,43 @@ router.put('/:id', requireRole('hr'), async (req, res) => {
   }
 });
 
-// ── offboard (exit) — never hard-delete an employee, preserves payroll/leave history ──
+// ── offboard (exit) ──────────────────────────────────────────────────────────
+// Owner/HR: immediate — offboarding is HR's normal day-to-day work, not
+// treated as a "destructive admin action" needing sign-off.
+// Admin: creates a Founder-approval request instead, same pattern as
+// staff_account.deactivate and department.delete — an admin exiting someone
+// deactivates their login and freezes their record, which fits the
+// "admin proposes, Founder approves" model you set for destructive actions.
 router.post('/:id/exit', requireRole('hr'), async (req, res) => {
   try {
     const { exit_date, reason } = req.body;
     if (!exit_date) return res.status(400).json({ error: 'exit_date is required' });
 
-    const { rows } = await safeQuery(
-      `UPDATE employees SET status = 'exited', date_of_exit = $1, exit_reason = $2 WHERE id = $3 RETURNING id, full_name, status`,
-      [exit_date, reason || null, req.params.id]
-    );
-    if (!rows.length) return res.status(404).json({ error: 'Employee not found' });
+    if (req.staff.role === 'owner' || req.staff.role === 'hr') {
+      const employee = await exitEmployee(req.params.id, { exit_date, reason });
+      if (!employee) return res.status(404).json({ error: 'Employee not found' });
+      return res.json({ employee });
+    }
 
-    await safeQuery(`UPDATE staff_accounts SET is_active = false WHERE employee_id = $1`, [req.params.id]);
+    // admin path: request instead of act
+    const { rows: [emp] } = await safeQuery(`SELECT id, full_name FROM employees WHERE id = $1`, [req.params.id]);
+    if (!emp) return res.status(404).json({ error: 'Employee not found' });
 
-    res.json({ employee: rows[0] });
+    const request = await createApprovalRequest({
+      actionType: 'employee.exit',
+      targetType: 'employee',
+      targetId: emp.id,
+      targetLabel: emp.full_name,
+      requestedBy: req.staff.id,
+      reason: reason || null,
+      payload: { exit_date, reason },
+    });
+
+    res.status(202).json({
+      pending: true,
+      request,
+      message: `Exit for ${emp.full_name} requested — awaiting Founder approval.`,
+    });
   } catch (err) {
     console.error('[employees:exit]', err);
     res.status(500).json({ error: 'Failed to process exit' });
@@ -250,15 +310,12 @@ router.post('/leave/:leaveId/decision', requireRole('hr'), async (req, res) => {
     );
     if (!rows.length) return res.status(404).json({ error: 'Leave request not found' });
 
-    // Deduct from balance if approved and it's a tracked type
     if (decision === 'approved') {
       const { rows: [empInfo] } = await safeQuery(`SELECT full_name FROM employees WHERE id = $1`, [rows[0].employee_id]);
       fireEvent('leave.approved', {
         employee_name: empInfo?.full_name, start_date: rows[0].start_date?.toISOString().slice(0,10),
         end_date: rows[0].end_date?.toISOString().slice(0,10), link: `/employees/${rows[0].employee_id}`,
       });
-    }
-    if (decision === 'approved') {
       const lr = rows[0];
       const { rows: [lt] } = await safeQuery(`SELECT name FROM leave_types WHERE id = $1`, [lr.leave_type_id]);
       const col = /sick/i.test(lt?.name) ? 'leave_balance_sick' : /annual/i.test(lt?.name) ? 'leave_balance_annual' : null;
