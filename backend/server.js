@@ -15,6 +15,7 @@ app.use(cookieParser());
 
 // Webhooks need raw body for signature verification — mount BEFORE express.json()
 app.use('/api/payroll/webhooks/razorpay-payout', express.raw({ type: 'application/json' }));
+app.use('/api/attendance/webhooks/trackpilot', express.raw({ type: 'application/json', limit: '50mb' }));
 
 app.use(express.json());
 
@@ -28,12 +29,15 @@ app.use('/api/auth', require('./routes/auth'));               // TODO: login rou
 app.use('/api/employees', require('./routes/employees'));
 app.use('/api/parties', require('./routes/parties'));
 app.use('/api/staff-accounts', require('./routes/staff-accounts'));
+app.use('/api/approvals', require('./routes/approvals'));
+app.use('/api/departments', require('./routes/departments'));
 app.use('/api/import', require('./routes/import'));
 app.use('/api/documents', require('./routes/documents'));
 app.use('/api/sales', require('./routes/sales'));
 app.use('/api/automation', require('./routes/automation'));
 app.use('/api/ai', require('./routes/ai'));
 app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/accounting', require('./routes/accounting'));
 app.use('/api/platform-sync', require('./routes/platform-sync'));
 app.use('/api/invoices', require('./routes/invoices'));

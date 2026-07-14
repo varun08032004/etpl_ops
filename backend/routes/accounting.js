@@ -11,6 +11,27 @@ router.use(authenticate);
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
 // ── chart of accounts ───────────────────────────────────────────────────────
+// ── bank accounts (for payment/mark-paid dialogs across the app) ───────────
+router.get('/bank-accounts', async (req, res) => {
+  try {
+    const { rows } = await safeQuery(`SELECT * FROM bank_accounts WHERE is_active = true ORDER BY account_name`);
+    res.json({ bankAccounts: rows });
+  } catch (err) {
+    console.error('[accounting:bank-accounts]', err);
+    res.status(500).json({ error: 'Failed to fetch bank accounts' });
+  }
+});
+
+router.get('/expense-categories', async (req, res) => {
+  try {
+    const { rows } = await safeQuery(`SELECT * FROM expense_categories ORDER BY name`);
+    res.json({ categories: rows });
+  } catch (err) {
+    console.error('[accounting:expense-categories]', err);
+    res.status(500).json({ error: 'Failed to fetch expense categories' });
+  }
+});
+
 router.get('/accounts', async (req, res) => {
   try {
     const { rows } = await safeQuery(
@@ -157,18 +178,16 @@ router.get('/reports/cashflow-runway', requireRole('finance'), async (req, res) 
 
 // GET /api/accounting/reports/revenue-growth?months=12
 //
-// Monthly revenue trend split by source (subscription vs trade fee) — the
-// two levers of this business — plus month-over-month growth. Built directly
-// off journal_lines for accounts 4100/4110 so it always matches what's
-// actually posted (voided/reversed months included, since a reversal nets
-// itself out automatically — no special-casing needed).
+// Monthly revenue trend split by Subscription vs Services revenue (our two
+// actual income accounts, 4100/4200), plus month-over-month growth. Built
+// directly off journal_lines so it always matches what's actually posted.
 router.get('/reports/revenue-growth', requireRole('finance'), async (req, res) => {
   try {
     const months = Math.min(Math.max(parseInt(req.query.months || '12', 10), 1), 36);
 
     const { rows: accts } = await safeQuery(
       `SELECT code, id FROM chart_of_accounts WHERE code = ANY($1)`,
-      [['4100', '4110', '2210', '2220', '2230']]
+      [['4100', '4200', '2210', '2220', '2230']]
     );
     const acctMap = Object.fromEntries(accts.map((a) => [a.code, a.id]));
 
@@ -182,21 +201,21 @@ router.get('/reports/revenue-growth', requireRole('finance'), async (req, res) =
       const { rows: [sums] } = await safeQuery(
         `SELECT
            COALESCE(SUM(CASE WHEN jl.account_id = $1 THEN jl.credit - jl.debit ELSE 0 END), 0) AS subscription_revenue,
-           COALESCE(SUM(CASE WHEN jl.account_id = $2 THEN jl.credit - jl.debit ELSE 0 END), 0) AS trade_fee_revenue,
+           COALESCE(SUM(CASE WHEN jl.account_id = $2 THEN jl.credit - jl.debit ELSE 0 END), 0) AS services_revenue,
            COALESCE(SUM(CASE WHEN jl.account_id IN ($3,$4,$5) THEN jl.credit - jl.debit ELSE 0 END), 0) AS gst_collected
          FROM journal_lines jl
          JOIN journal_entries je ON je.id = jl.journal_entry_id
          WHERE je.entry_date BETWEEN $6 AND $7`,
-        [acctMap['4100'] || null, acctMap['4110'] || null, acctMap['2210'] || null, acctMap['2220'] || null, acctMap['2230'] || null, from, to]
+        [acctMap['4100'] || null, acctMap['4200'] || null, acctMap['2210'] || null, acctMap['2220'] || null, acctMap['2230'] || null, from, to]
       );
 
       const subscriptionRevenue = round2(sums.subscription_revenue);
-      const tradeFeeRevenue = round2(sums.trade_fee_revenue);
+      const servicesRevenue = round2(sums.services_revenue);
       results.push({
         month: from.slice(0, 7),
         subscriptionRevenue,
-        tradeFeeRevenue,
-        totalRevenue: round2(subscriptionRevenue + tradeFeeRevenue),
+        servicesRevenue,
+        totalRevenue: round2(subscriptionRevenue + servicesRevenue),
         gstCollected: round2(sums.gst_collected),
       });
     }

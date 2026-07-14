@@ -10,6 +10,8 @@ import { EmployeeList, EmployeeDetail } from './pages/Employees';
 import Invoices from './pages/Invoices';
 import Accounting from './pages/Accounting';
 import Payroll from './pages/Payroll';
+import Attendance from './pages/Attendance';
+import OrgStructure from './pages/OrgStructure';
 import Team from './pages/Team';
 import Import from './pages/Import';
 import Documents from './pages/Documents';
@@ -17,6 +19,7 @@ import Sales from './pages/Sales';
 import Automation from './pages/Automation';
 import AIAssistant from './pages/AIAssistant';
 import Analytics from './pages/Analytics';
+import Expenses from './pages/Expenses';
 
 const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance'];
 
@@ -51,6 +54,8 @@ export default function App() {
               <Route path="/invoices" element={<Invoices />} />
               <Route path="/accounting" element={<Accounting />} />
               <Route path="/payroll" element={<Payroll />} />
+              <Route path="/attendance" element={<Attendance />} />
+              <Route path="/org-structure" element={<OrgStructure />} />
               <Route path="/team" element={<Team />} />
               <Route path="/import" element={<Import />} />
               <Route path="/documents" element={<Documents />} />
@@ -58,6 +63,7 @@ export default function App() {
               <Route path="/automation" element={<Automation />} />
               <Route path="/ai-assistant" element={<AIAssistant />} />
               <Route path="/analytics" element={<Analytics />} />
+              <Route path="/expenses" element={<Expenses />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
