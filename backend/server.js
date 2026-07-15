@@ -38,6 +38,8 @@ app.use('/api/sales', require('./routes/sales'));
 app.use('/api/automation', require('./routes/automation'));
 app.use('/api/ai', require('./routes/ai'));
 app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/expenses', require('./routes/expenses'));
+app.use('/api/admin', require('./routes/admin'));
 app.use('/api/accounting', require('./routes/accounting'));
 app.use('/api/platform-sync', require('./routes/platform-sync'));
 app.use('/api/invoices', require('./routes/invoices'));

@@ -6,6 +6,13 @@ const pool = new Pool({
   connectionString: process.env.INTERNAL_OPS_DATABASE_URL,
   ssl: { rejectUnauthorized: false }, // Supabase requires SSL on every connection, dev included
   max: 10,
+  // Supabase's pooler closes idle connections more aggressively than pg's
+  // own defaults assume — without this, pg-pool holds a connection past
+  // when Supabase has already dropped it server-side, and the next query
+  // on it fails with ECONNRESET instead of pg quietly opening a fresh one.
+  idleTimeoutMillis: 20000,
+  connectionTimeoutMillis: 10000,
+  keepAlive: true,
 });
 
 pool.on('error', (err) => {

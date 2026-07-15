@@ -154,46 +154,76 @@ async function getAccountBalance(accountId, asOfDate = null) {
 
 /** Trial balance: every account with its debit-normal balance, split into debit/credit columns. */
 async function getTrialBalance(asOfDate = null) {
-  const { rows: accounts } = await safeQuery(
-    `SELECT id, code, name, account_type FROM chart_of_accounts WHERE is_group = false AND is_active = true ORDER BY code`
+  // Single grouped query instead of one getAccountBalance() call per account
+  // (which was itself 2 queries) — was 1+2N sequential round trips, now 1.
+  // asOfDate filter lives in the JOIN condition, not WHERE, so accounts with
+  // zero activity in range still appear with a correct zero balance rather
+  // than being silently dropped by an inner-join-like WHERE filter.
+  const { rows } = await safeQuery(
+    `SELECT coa.id, coa.code, coa.name, coa.account_type,
+            COALESCE(SUM(jl.debit),0) AS total_debit,
+            COALESCE(SUM(jl.credit),0) AS total_credit
+     FROM chart_of_accounts coa
+     LEFT JOIN journal_lines jl ON jl.account_id = coa.id
+     LEFT JOIN journal_entries je ON je.id = jl.journal_entry_id
+       AND ($1::date IS NULL OR je.entry_date <= $1::date)
+     WHERE coa.is_group = false AND coa.is_active = true
+     GROUP BY coa.id, coa.code, coa.name, coa.account_type
+     ORDER BY coa.code`,
+    [asOfDate]
   );
+
   const lines = [];
   let totalDebit = 0;
   let totalCredit = 0;
-  for (const a of accounts) {
-    const bal = await getAccountBalance(a.id, asOfDate);
-    if (bal === 0) continue;
+  for (const a of rows) {
+    const debit = Number(a.total_debit);
+    const credit = Number(a.total_credit);
     const debitNormal = ['asset', 'expense'].includes(a.account_type);
-    const debit = debitNormal && bal > 0 ? bal : (!debitNormal && bal < 0 ? -bal : 0);
-    const credit = !debitNormal && bal > 0 ? bal : (debitNormal && bal < 0 ? -bal : 0);
-    totalDebit += debit;
-    totalCredit += credit;
-    lines.push({ code: a.code, name: a.name, type: a.account_type, debit, credit });
+    const bal = debitNormal ? debit - credit : credit - debit;
+    if (bal === 0) continue;
+    const lineDebit = debitNormal && bal > 0 ? bal : (!debitNormal && bal < 0 ? -bal : 0);
+    const lineCredit = !debitNormal && bal > 0 ? bal : (debitNormal && bal < 0 ? -bal : 0);
+    totalDebit += lineDebit;
+    totalCredit += lineCredit;
+    lines.push({ code: a.code, name: a.name, type: a.account_type, debit: lineDebit, credit: lineCredit });
   }
   return { lines, totalDebit: Math.round(totalDebit * 100) / 100, totalCredit: Math.round(totalCredit * 100) / 100 };
 }
 
 /** P&L for a date range: income - expenses = net profit. */
 async function getProfitAndLoss(startDate, endDate) {
-  const { rows: accounts } = await safeQuery(
-    `SELECT id, code, name, account_type FROM chart_of_accounts WHERE account_type IN ('income','expense') AND is_group = false AND is_active = true ORDER BY code`
+  // Was 1+N sequential queries (one per income/expense account); now 1.
+  // This function is called directly by the Dashboard AND once per month
+  // by cashflow-runway (6x by default) — with ~15-20 accounts that was
+  // 100+ sequential DB round trips on a single Dashboard load.
+  const { rows } = await safeQuery(
+    `SELECT coa.id, coa.code, coa.name, coa.account_type,
+            COALESCE(SUM(jl.debit),0) AS total_debit,
+            COALESCE(SUM(jl.credit),0) AS total_credit
+     FROM chart_of_accounts coa
+     LEFT JOIN journal_lines jl ON jl.account_id = coa.id
+     LEFT JOIN journal_entries je ON je.id = jl.journal_entry_id
+       AND je.entry_date BETWEEN $1 AND $2
+     WHERE coa.account_type IN ('income','expense') AND coa.is_group = false AND coa.is_active = true
+     GROUP BY coa.id, coa.code, coa.name, coa.account_type
+     ORDER BY coa.code`,
+    [startDate, endDate]
   );
+
   const income = [];
   const expenses = [];
   let totalIncome = 0;
   let totalExpense = 0;
 
-  for (const a of accounts) {
-    const { rows: [sum] } = await safeQuery(
-      `SELECT COALESCE(SUM(jl.debit),0) AS d, COALESCE(SUM(jl.credit),0) AS c
-       FROM journal_lines jl JOIN journal_entries je ON je.id = jl.journal_entry_id
-       WHERE jl.account_id = $1 AND je.entry_date BETWEEN $2 AND $3`,
-      [a.id, startDate, endDate]
-    );
-    const net = a.account_type === 'income' ? Number(sum.c) - Number(sum.d) : Number(sum.d) - Number(sum.c);
+  for (const a of rows) {
+    const d = Number(a.total_debit);
+    const c = Number(a.total_credit);
+    const net = a.account_type === 'income' ? c - d : d - c;
     if (net === 0) continue;
-    if (a.account_type === 'income') { income.push({ ...a, amount: net }); totalIncome += net; }
-    else { expenses.push({ ...a, amount: net }); totalExpense += net; }
+    const { total_debit, total_credit, ...acct } = a;
+    if (a.account_type === 'income') { income.push({ ...acct, amount: net }); totalIncome += net; }
+    else { expenses.push({ ...acct, amount: net }); totalExpense += net; }
   }
 
   return {
@@ -207,16 +237,31 @@ async function getProfitAndLoss(startDate, endDate) {
 
 /** Balance sheet as of a date: assets = liabilities + equity (should always hold). */
 async function getBalanceSheet(asOfDate) {
-  const { rows: accounts } = await safeQuery(
-    `SELECT id, code, name, account_type FROM chart_of_accounts WHERE account_type IN ('asset','liability','equity') AND is_group = false AND is_active = true ORDER BY code`
+  const { rows } = await safeQuery(
+    `SELECT coa.id, coa.code, coa.name, coa.account_type,
+            COALESCE(SUM(jl.debit),0) AS total_debit,
+            COALESCE(SUM(jl.credit),0) AS total_credit
+     FROM chart_of_accounts coa
+     LEFT JOIN journal_lines jl ON jl.account_id = coa.id
+     LEFT JOIN journal_entries je ON je.id = jl.journal_entry_id
+       AND je.entry_date <= $1::date
+     WHERE coa.account_type IN ('asset','liability','equity') AND coa.is_group = false AND coa.is_active = true
+     GROUP BY coa.id, coa.code, coa.name, coa.account_type
+     ORDER BY coa.code`,
+    [asOfDate]
   );
+
   const buckets = { asset: [], liability: [], equity: [] };
   const totals = { asset: 0, liability: 0, equity: 0 };
 
-  for (const a of accounts) {
-    const bal = await getAccountBalance(a.id, asOfDate);
+  for (const a of rows) {
+    const debit = Number(a.total_debit);
+    const credit = Number(a.total_credit);
+    const debitNormal = ['asset', 'expense'].includes(a.account_type); // expense never appears here, kept for consistency with the sign convention used elsewhere
+    const bal = debitNormal ? debit - credit : credit - debit;
     if (bal === 0) continue;
-    buckets[a.account_type].push({ ...a, amount: bal });
+    const { total_debit, total_credit, ...acct } = a;
+    buckets[a.account_type].push({ ...acct, amount: bal });
     totals[a.account_type] += bal;
   }
 
