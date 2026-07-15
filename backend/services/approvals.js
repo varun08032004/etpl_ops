@@ -1,20 +1,20 @@
 'use strict';
 // services/approvals.js
 //
-// Generic "destructive action needs founder sign-off" workflow.
+// Generic "destructive action needs founder sign-off" workflow, layered on
+// top of the audit log rather than replacing it: creating a request,
+// approving it, and rejecting it each write an audit_log entry (via
+// logAction), so the Admin > Audit Log page shows the full lifecycle of a
+// gated action — not just the eventual executed change.
 //
 // Any module wires in a destructive action by calling registerApprovalAction()
 // once at startup with an executor function, then calling
 // createApprovalRequest() instead of performing the action directly when the
 // actor isn't the owner. Only approveRequest() (owner-only, enforced by the
 // route, not this service) actually runs the executor.
-//
-// This file intentionally does NOT check who's allowed to approve — that's
-// an HTTP-layer concern (the route checks req.staff.role === 'owner' before
-// calling approveRequest/rejectRequest). Keeping that check in the route
-// keeps this service reusable without hardcoding a role name into it.
 
 const { safeQuery } = require('../db/pool');
+const { logAction } = require('./auditLog');
 
 const executors = {};
 
@@ -33,6 +33,15 @@ async function createApprovalRequest({ actionType, targetType, targetId, targetL
      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
     [actionType, targetType, targetId, targetLabel || null, requestedBy, reason || null, payload ? JSON.stringify(payload) : null]
   );
+
+  await logAction({
+    staffId: requestedBy,
+    action: `${actionType}.requested`,
+    entity: targetType,
+    entityId: targetId,
+    newValue: { targetLabel, reason: reason || null },
+  });
+
   return request;
 }
 
@@ -54,6 +63,16 @@ async function approveRequest(requestId, reviewedBy) {
     `UPDATE approval_requests SET status = 'approved', reviewed_by = $1, reviewed_at = NOW() WHERE id = $2 RETURNING *`,
     [reviewedBy, requestId]
   );
+
+  await logAction({
+    staffId: reviewedBy,
+    action: `${request.action_type}.approved`,
+    entity: request.target_type,
+    entityId: request.target_id,
+    oldValue: { requestedBy: request.requested_by, reason: request.reason },
+    newValue: { targetLabel: request.target_label },
+  });
+
   return { request: updated, result };
 }
 
@@ -68,6 +87,16 @@ async function rejectRequest(requestId, reviewedBy, reason) {
     `UPDATE approval_requests SET status = 'rejected', reviewed_by = $1, reviewed_at = NOW(), rejection_reason = $2 WHERE id = $3 RETURNING *`,
     [reviewedBy, reason || null, requestId]
   );
+
+  await logAction({
+    staffId: reviewedBy,
+    action: `${request.action_type}.rejected`,
+    entity: request.target_type,
+    entityId: request.target_id,
+    oldValue: { requestedBy: request.requested_by },
+    newValue: { targetLabel: request.target_label, rejectionReason: reason || null },
+  });
+
   return updated;
 }
 

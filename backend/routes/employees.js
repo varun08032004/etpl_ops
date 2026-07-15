@@ -5,14 +5,16 @@ const router = express.Router();
 const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { fireEvent } = require('../services/automationEngine');
+const { logAction } = require('../services/auditLog');
 const { registerApprovalAction, createApprovalRequest } = require('../services/approvals');
 
 router.use(authenticate);
 
-// The actual exit — deactivates status AND their login, since an exited
-// employee shouldn't retain system access. Run either immediately
-// (owner/hr) or later by approveRequest() once the Founder signs off
-// (the admin-initiated path).
+// The actual exit — deactivates status AND their login. Run either
+// immediately (owner/hr, below) or later by approveRequest() once the
+// Founder signs off (the admin-initiated path). Audit logging happens
+// inside approveRequest() for the admin path, and explicitly here for the
+// owner/hr-immediate path.
 async function exitEmployee(employeeId, payload) {
   const { exit_date, reason } = payload || {};
   const { rows } = await safeQuery(
@@ -125,8 +127,7 @@ router.get('/:id', async (req, res) => {
     }
 
     // Flags whether this employee already has a staff login, and its email —
-    // powers the "Create login" shortcut button on the employee detail page
-    // (only show it when there genuinely isn't one yet).
+    // powers a "Create login" shortcut on the employee detail page.
     const { rows: [linkedAccount] } = await safeQuery(
       `SELECT id, email, is_active FROM staff_accounts WHERE employee_id = $1`,
       [req.params.id]
@@ -197,10 +198,10 @@ router.put('/:id', requireRole('hr'), async (req, res) => {
       'da_monthly', 'tax_regime', 'pf_applicable', 'esic_applicable', 'declared_deductions',
       'bank_account_number', 'bank_ifsc', 'trackpilot_user_id', 'notes',
     ];
-    // 'exited' is deliberately not settable through this generic update —
-    // it has to go through POST /:id/exit, which captures exit_date/reason
-    // properly and deactivates the linked login. Silently blocking it here
-    // rather than letting it slip through as a bare status flip.
+    // 'exited' must go through POST /:id/exit — that's what captures exit_date/
+    // reason properly and deactivates the linked login, and now what routes
+    // through Founder approval for admins. Blocking it here so it can't slip
+    // through as a bare status flip that skips all of that.
     if (req.body.status === 'exited') {
       return res.status(400).json({ error: 'Use POST /employees/:id/exit to offboard an employee, not a status update' });
     }
@@ -230,13 +231,11 @@ router.put('/:id', requireRole('hr'), async (req, res) => {
   }
 });
 
-// ── offboard (exit) ──────────────────────────────────────────────────────────
-// Owner/HR: immediate — offboarding is HR's normal day-to-day work, not
-// treated as a "destructive admin action" needing sign-off.
-// Admin: creates a Founder-approval request instead, same pattern as
-// staff_account.deactivate and department.delete — an admin exiting someone
-// deactivates their login and freezes their record, which fits the
-// "admin proposes, Founder approves" model you set for destructive actions.
+// ── offboard (exit) — never hard-delete an employee, preserves payroll/leave history ──
+// Owner/HR: immediate — offboarding is HR's normal day-to-day work.
+// Admin: creates a Founder-approval request instead — an admin exiting
+// someone deactivates their login and freezes their record, which fits the
+// "admin proposes, Founder approves" model for destructive actions.
 router.post('/:id/exit', requireRole('hr'), async (req, res) => {
   try {
     const { exit_date, reason } = req.body;
@@ -245,6 +244,9 @@ router.post('/:id/exit', requireRole('hr'), async (req, res) => {
     if (req.staff.role === 'owner' || req.staff.role === 'hr') {
       const employee = await exitEmployee(req.params.id, { exit_date, reason });
       if (!employee) return res.status(404).json({ error: 'Employee not found' });
+
+      await logAction({ staffId: req.staff.id, action: 'employee.exited', entity: 'employees', entityId: employee.id, newValue: { full_name: employee.full_name, exit_date } });
+
       return res.json({ employee });
     }
 

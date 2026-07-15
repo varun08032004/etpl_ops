@@ -5,12 +5,16 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { logAction } = require('../services/auditLog');
 const { registerApprovalAction, createApprovalRequest } = require('../services/approvals');
 
 router.use(authenticate);
 
-// The actual deactivation, run either immediately (owner) or later by
-// approveRequest() once the Founder signs off (admin-initiated path).
+// The actual deactivation, run either immediately (owner, below) or later
+// by approveRequest() once the Founder signs off (the admin-initiated path).
+// The executed deactivation gets logged inside approveRequest() (via
+// services/approvals.js) for the admin path, and explicitly here for the
+// owner-immediate path — both end up in the audit log either way.
 async function deactivateStaffAccount(targetId) {
   const { rows } = await safeQuery(
     `UPDATE staff_accounts SET is_active = false WHERE id = $1 RETURNING id, email, is_active`,
@@ -39,7 +43,6 @@ router.get('/', requireRole('admin'), async (req, res) => {
 });
 
 // Create a login for a team member. Only owner (or admin, for non-owner roles) can do this.
-// Additions are never gated behind approval — only destructive actions are.
 router.post('/', requireRole('admin'), async (req, res) => {
   try {
     const { email, password, role, employee_id } = req.body;
@@ -61,6 +64,9 @@ router.post('/', requireRole('admin'), async (req, res) => {
        VALUES ($1,$2,$3,$4) RETURNING id, email, role, employee_id, is_active, created_at`,
       [email.toLowerCase(), hash, role, employee_id || null]
     );
+
+    await logAction({ staffId: req.staff.id, action: 'staff_account.created', entity: 'staff_accounts', entityId: staff.id, newValue: { email: staff.email, role: staff.role } });
+
     res.status(201).json({ staff });
   } catch (err) {
     console.error('[staff-accounts:create]', err);
@@ -69,9 +75,10 @@ router.post('/', requireRole('admin'), async (req, res) => {
   }
 });
 
-// Deactivate a login. Owner: happens immediately (same as before).
-// Admin: creates a pending approval request instead — the account stays
-// active until the Founder approves it via /api/approvals/:id/approve.
+// Deactivate a login. Owner: happens immediately (same as before), logged
+// directly. Admin: creates a pending approval request instead — the account
+// stays active until the Founder approves it via /api/approvals/:id/approve,
+// at which point services/approvals.js logs the executed deactivation.
 router.post('/:id/deactivate', requireRole('admin'), async (req, res) => {
   try {
     if (req.params.id === req.staff.id) {
@@ -81,6 +88,7 @@ router.post('/:id/deactivate', requireRole('admin'), async (req, res) => {
     if (req.staff.role === 'owner') {
       const staff = await deactivateStaffAccount(req.params.id);
       if (!staff) return res.status(404).json({ error: 'Account not found' });
+      await logAction({ staffId: req.staff.id, action: 'staff_account.deactivated', entity: 'staff_accounts', entityId: staff.id, newValue: { email: staff.email } });
       return res.json({ staff });
     }
 
@@ -108,8 +116,8 @@ router.post('/:id/deactivate', requireRole('admin'), async (req, res) => {
   }
 });
 
-// Reactivate — always immediate, for everyone who can reach this route.
-// Restoring access is an addition, not a destructive action.
+// Reactivate — always immediate. Restoring access is an addition, not a
+// destructive action, so it stays outside the approval flow.
 router.post('/:id/reactivate', requireRole('admin'), async (req, res) => {
   try {
     const { rows } = await safeQuery(
@@ -117,35 +125,13 @@ router.post('/:id/reactivate', requireRole('admin'), async (req, res) => {
       [req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Account not found' });
+
+    await logAction({ staffId: req.staff.id, action: 'staff_account.reactivated', entity: 'staff_accounts', entityId: rows[0].id, newValue: { email: rows[0].email } });
+
     res.json({ staff: rows[0] });
   } catch (err) {
     console.error('[staff-accounts:reactivate]', err);
     res.status(500).json({ error: 'Failed to reactivate account' });
-  }
-});
-
-// Link (or re-link) a login to an employee record — this is what makes
-// /employees/me, /me/payslips, /me/leave etc. work for that person.
-// Additive/corrective, not destructive — immediate for admin/owner, no
-// approval workflow needed.
-router.post('/:id/link-employee', requireRole('admin'), async (req, res) => {
-  try {
-    const { employee_id } = req.body;
-    if (!employee_id) return res.status(400).json({ error: 'employee_id is required' });
-
-    const { rows: emp } = await safeQuery(`SELECT id, full_name FROM employees WHERE id = $1`, [employee_id]);
-    if (!emp.length) return res.status(404).json({ error: 'Employee not found' });
-
-    const { rows } = await safeQuery(
-      `UPDATE staff_accounts SET employee_id = $1 WHERE id = $2 RETURNING id, email, employee_id`,
-      [employee_id, req.params.id]
-    );
-    if (!rows.length) return res.status(404).json({ error: 'Account not found' });
-
-    res.json({ staff: rows[0], employee: emp[0] });
-  } catch (err) {
-    console.error('[staff-accounts:link-employee]', err);
-    res.status(500).json({ error: 'Failed to link employee' });
   }
 });
 
@@ -162,6 +148,9 @@ router.post('/:id/reset-password', requireRole('admin'), async (req, res) => {
       [hash, req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Account not found' });
+
+    await logAction({ staffId: req.staff.id, action: 'staff_account.password_reset', entity: 'staff_accounts', entityId: rows[0].id });
+
     res.json({ staff: rows[0] });
   } catch (err) {
     console.error('[staff-accounts:reset-password]', err);
@@ -169,9 +158,49 @@ router.post('/:id/reset-password', requireRole('admin'), async (req, res) => {
   }
 });
 
-// Link (or unlink) an existing login to an employee record — this is what was
-// missing before: the create form already accepted employee_id, but there
-// was never a way to set/fix it after the fact. Not destructive, so immediate.
+// Change someone's role. Only owner can grant/revoke 'owner'; admin can
+// change everything else. Kept immediate + audit-logged, not approval-gated —
+// this is an edit, not a deletion, matching the "no approval needed for
+// additions/edits" rule.
+router.put('/:id/role', requireRole('admin'), async (req, res) => {
+  try {
+    const { role } = req.body;
+    const validRoles = ['owner', 'admin', 'hr', 'finance', 'manager', 'employee'];
+    if (!validRoles.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+
+    if (role === 'owner' && req.staff.role !== 'owner') {
+      return res.status(403).json({ error: 'Only an owner can grant owner-level access' });
+    }
+    if (req.params.id === req.staff.id) {
+      return res.status(400).json({ error: "You can't change your own role" });
+    }
+
+    const { rows: [before] } = await safeQuery(`SELECT id, email, role FROM staff_accounts WHERE id = $1`, [req.params.id]);
+    if (!before) return res.status(404).json({ error: 'Account not found' });
+
+    if (before.role === 'owner' && req.staff.role !== 'owner') {
+      return res.status(403).json({ error: "Only an owner can change another owner's role" });
+    }
+
+    const { rows: [updated] } = await safeQuery(
+      `UPDATE staff_accounts SET role = $1 WHERE id = $2 RETURNING id, email, role`,
+      [role, req.params.id]
+    );
+
+    await logAction({
+      staffId: req.staff.id, action: 'staff_account.role_changed', entity: 'staff_accounts', entityId: updated.id,
+      oldValue: { role: before.role }, newValue: { role: updated.role },
+    });
+
+    res.json({ staff: updated });
+  } catch (err) {
+    console.error('[staff-accounts:role]', err);
+    res.status(500).json({ error: 'Failed to change role' });
+  }
+});
+
+// Link (or unlink) an existing login to an employee record — not destructive,
+// stays immediate.
 router.post('/:id/link-employee', requireRole('admin'), async (req, res) => {
   try {
     const { employee_id } = req.body; // null/omitted = unlink
