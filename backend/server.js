@@ -34,6 +34,9 @@ app.use('/api/departments', require('./routes/departments'));
 app.use('/api/designations', require('./routes/designations'));
 app.use('/api/import', require('./routes/import'));
 app.use('/api/documents', require('./routes/documents'));
+app.use('/api/document-templates', require('./routes/document-templates'));
+app.use('/api/document-engine', require('./routes/document-engine'));
+app.use('/api/document-verify', require('./routes/document-verify')); // public, no auth — QR code target
 app.use('/api/sales', require('./routes/sales'));
 app.use('/api/automation', require('./routes/automation'));
 app.use('/api/ai', require('./routes/ai'));

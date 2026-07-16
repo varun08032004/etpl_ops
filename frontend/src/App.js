@@ -15,6 +15,7 @@ import OrgStructure from './pages/OrgStructure';
 import Team from './pages/Team';
 import Import from './pages/Import';
 import Documents from './pages/Documents';
+import DocumentEngine from './pages/DocumentEngine';
 import Sales from './pages/Sales';
 import Automation from './pages/Automation';
 import AIAssistant from './pages/AIAssistant';
@@ -62,6 +63,7 @@ export default function App() {
               <Route path="/team" element={<Team />} />
               <Route path="/import" element={<Import />} />
               <Route path="/documents" element={<Documents />} />
+              <Route path="/document-engine" element={<DocumentEngine />} />
               <Route path="/sales" element={<Sales />} />
               <Route path="/automation" element={<Automation />} />
               <Route path="/ai-assistant" element={<AIAssistant />} />

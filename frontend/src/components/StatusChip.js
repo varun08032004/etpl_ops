@@ -4,7 +4,7 @@ const COLOR_MAP = {
   paid: 'success', sent: 'info', draft: 'default', overdue: 'error', void: 'default',
   partially_paid: 'warning', active: 'success', exited: 'default', on_leave: 'warning',
   notice_period: 'warning', pending: 'default', approved: 'success', rejected: 'error',
-  processing: 'info', failed: 'error',
+  processing: 'info', failed: 'error', generated: 'info',
 };
 
 export default function StatusChip({ status }) {

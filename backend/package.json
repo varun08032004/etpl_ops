@@ -8,7 +8,9 @@
     "dev": "nodemon server.js",
     "db:migrate": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/schema.sql",
     "db:seed": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/seed_chart_of_accounts.sql",
-    "db:migrate:platform-sync": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/002_platform_sync.sql"
+    "db:migrate:platform-sync": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/002_platform_sync.sql",
+    "db:migrate:document-engine": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/004_document_engine.sql",
+    "db:seed:document-templates": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/seed_document_templates.sql"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -21,7 +23,10 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
+    "nodemailer": "^6.9.16",
+    "pdfkit": "^0.15.1",
     "pg": "^8.11.3",
+    "qrcode": "^1.5.4",
     "razorpay": "^2.9.6"
   },
   "devDependencies": {

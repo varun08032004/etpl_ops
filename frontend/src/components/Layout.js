@@ -10,6 +10,7 @@ import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined';
 import TrendingUpOutlinedIcon from '@mui/icons-material/TrendingUpOutlined';
 import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
@@ -68,6 +69,7 @@ const NAV_GROUPS = [
     label: 'Tools',
     items: [
       { to: '/documents', label: 'Documents', icon: DescriptionOutlinedIcon },
+      { to: '/document-engine', label: 'Document Engine', icon: ArticleOutlinedIcon },
       { to: '/import', label: 'Import CSV', icon: UploadFileOutlinedIcon },
       { to: '/automation', label: 'Automation', icon: BoltOutlinedIcon },
       { to: '/ai-assistant', label: 'AI Assistant', icon: SmartToyOutlinedIcon },
