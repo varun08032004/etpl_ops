@@ -20,6 +20,9 @@ import Automation from './pages/Automation';
 import AIAssistant from './pages/AIAssistant';
 import Analytics from './pages/Analytics';
 import Expenses from './pages/Expenses';
+import Admin from './pages/Admin';
+import Compliance from './pages/Compliance';
+import Finance from './pages/Finance';
 
 const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance'];
 
@@ -64,6 +67,9 @@ export default function App() {
               <Route path="/ai-assistant" element={<AIAssistant />} />
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/expenses" element={<Expenses />} />
+              <Route path="/admin" element={<Admin />} />
+              <Route path="/compliance" element={<Compliance />} />
+              <Route path="/finance" element={<Finance />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

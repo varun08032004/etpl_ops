@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Box, Paper, Typography, Grid, Skeleton, Alert } from '@mui/material';
+import { Link } from 'react-router-dom';
+import { Box, Paper, Typography, Grid, Skeleton, Alert, Chip } from '@mui/material';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as ChartTooltip, CartesianGrid } from 'recharts';
 import client from '../api/client';
 import Money from '../components/Money';
@@ -27,11 +28,12 @@ export default function Dashboard() {
         const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
         const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
 
-        const [employeesRes, invoicesRes, pnlRes, runwayRes] = await Promise.all([
+        const [employeesRes, invoicesRes, pnlRes, runwayRes, complianceRes] = await Promise.all([
           client.get('/employees', { params: { status: 'active' } }),
           client.get('/invoices'),
           client.get('/accounting/reports/profit-and-loss', { params: { from: monthStart, to: monthEnd } }),
           client.get('/accounting/reports/cashflow-runway', { params: { months: 6 } }),
+          client.get('/compliance/due-soon').catch(() => ({ data: { items: [] } })),
         ]);
 
         const unpaidInvoices = invoicesRes.data.invoices.filter((i) => ['sent', 'partially_paid', 'overdue'].includes(i.status));
@@ -43,6 +45,7 @@ export default function Dashboard() {
           outstandingAR,
           unpaidCount: unpaidInvoices.length,
           runway: runwayRes.data.months,
+          compliance: complianceRes.data.items,
         });
       } catch (err) {
         setError('Some dashboard data needs the accounting/employees modules seeded first — this is expected on a fresh install.');
@@ -109,6 +112,36 @@ export default function Dashboard() {
           </Paper>
         </Grid>
       </Grid>
+
+      {/* COMP-03: compliance calendar must be visible on the Dashboard at all times */}
+      <Paper sx={{ p: 2.5, mt: 2.5 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+          <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>Compliance — due soon</Typography>
+          <Typography component={Link} to="/compliance" sx={{ fontSize: '0.78rem', color: 'primary.main', textDecoration: 'none' }}>
+            View all →
+          </Typography>
+        </Box>
+        {data.compliance.length === 0 ? (
+          <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>Nothing due in the next 30 days.</Typography>
+        ) : (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {data.compliance.slice(0, 6).map((item) => (
+              <Box key={item.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+                <Box>
+                  <Typography sx={{ fontSize: '0.85rem' }}>{item.title}</Typography>
+                  <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>{item.owner_name || 'Unassigned'} · {item.category}</Typography>
+                </Box>
+                <Chip
+                  size="small"
+                  label={item.is_overdue ? 'Overdue' : `${item.days_until_due}d left`}
+                  color={item.is_overdue ? 'error' : item.days_until_due <= 7 ? 'warning' : 'default'}
+                  variant={item.is_overdue || item.days_until_due <= 7 ? 'filled' : 'outlined'}
+                />
+              </Box>
+            ))}
+          </Box>
+        )}
+      </Paper>
     </Box>
   );
 }

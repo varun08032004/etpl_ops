@@ -16,6 +16,7 @@ import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import EventRepeatOutlinedIcon from '@mui/icons-material/EventRepeatOutlined';
 import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined';
+import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import PersonOutlinedIcon from '@mui/icons-material/PersonOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import { useAuth } from '../context/AuthContext';
@@ -57,8 +58,10 @@ const NAV_GROUPS = [
     label: 'Finance',
     items: [
       { to: '/accounting', label: 'Accounting', icon: AccountBalanceOutlinedIcon },
+      { to: '/finance', label: 'Finance', icon: PaidOutlinedIcon },
       { to: '/payroll', label: 'Payroll', icon: PaidOutlinedIcon },
       { to: '/expenses', label: 'Recurring Expenses', icon: EventRepeatOutlinedIcon },
+      { to: '/compliance', label: 'Compliance', icon: FactCheckOutlinedIcon },
     ],
   },
   {

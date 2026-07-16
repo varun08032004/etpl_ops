@@ -162,13 +162,26 @@ router.get('/reports/cashflow-runway', requireRole('finance'), async (req, res) 
       results.push({ month: from.slice(0, 7), income: pnl.totalIncome, expense: pnl.totalExpense, net: pnl.netProfit });
     }
     const avgBurn = results.slice(-3).reduce((s, r) => s + (r.net < 0 ? -r.net : 0), 0) / 3;
-    const bank = await safeQuery(`SELECT COALESCE(SUM(opening_balance),0) AS bal FROM bank_accounts WHERE is_active = true`);
-    // NOTE: this is opening_balance only as a placeholder — swap for a live getAccountBalance()
-    // sum across all bank ledger_account_ids once bank_transactions are flowing in.
+
+    // Live cash on hand: opening_balance + every reconciled/imported
+    // transaction since, per active bank account. Previously this only
+    // summed opening_balance and never moved as money actually came in/out.
+    const { rows: [cashRow] } = await safeQuery(
+      `SELECT COALESCE(SUM(ba.opening_balance), 0)
+              + COALESCE((SELECT SUM(bt.amount) FROM bank_transactions bt
+                          JOIN bank_accounts ba2 ON ba2.id = bt.bank_account_id
+                          WHERE ba2.is_active = true), 0) AS bal
+       FROM bank_accounts ba WHERE ba.is_active = true`
+    );
+    const cashOnHand = Math.round(Number(cashRow.bal) * 100) / 100;
+    const runwayMonths = avgBurn > 0 ? Math.round((cashOnHand / avgBurn) * 10) / 10 : null;
+
     res.json({
       months: results,
       avgMonthlyBurnLast3Mo: Math.round(avgBurn * 100) / 100,
-      note: 'Runway calc needs live bank ledger balances wired in — see TODO in accounting.js',
+      cashOnHand,
+      runwayMonths,
+      note: runwayMonths === null ? 'No net burn in the last 3 months — runway is not applicable (cash is stable or growing).' : null,
     });
   } catch (err) {
     console.error('[accounting:runway]', err);
