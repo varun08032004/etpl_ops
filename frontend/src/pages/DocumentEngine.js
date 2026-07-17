@@ -3,7 +3,7 @@ import {
   Box, Typography, Paper, Grid, Card, CardActionArea, CardContent, Chip, Tabs, Tab,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Alert,
   Table, TableHead, TableRow, TableCell, TableBody, IconButton, Checkbox, FormControlLabel,
-  Tooltip,
+  Tooltip, MenuItem,
 } from '@mui/material';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
@@ -21,6 +21,8 @@ export default function DocumentEngine() {
 
   const [templates, setTemplates] = useState([]);
   const [category, setCategory] = useState('all');
+  const [departments, setDepartments] = useState([]);
+  const [departmentFilter, setDepartmentFilter] = useState('all');
   const [generated, setGenerated] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
 
@@ -35,16 +37,19 @@ export default function DocumentEngine() {
   const [successDoc, setSuccessDoc] = useState(null);
 
   const loadTemplates = () => client.get('/document-templates', { params: { is_active: 'true' } }).then(({ data }) => setTemplates(data.templates));
+  const loadDepartments = () => client.get('/departments').then(({ data }) => setDepartments(data.departments || []));
   const loadGenerated = () => {
     setLoadingList(true);
     return client.get('/document-engine/generated').then(({ data }) => setGenerated(data.documents)).finally(() => setLoadingList(false));
   };
 
-  useEffect(() => { loadTemplates(); loadGenerated(); }, []);
+  useEffect(() => { loadTemplates(); loadDepartments(); loadGenerated(); }, []);
 
   const filteredTemplates = useMemo(
-    () => (category === 'all' ? templates : templates.filter((t) => t.category === category)),
-    [templates, category]
+    () => templates
+      .filter((t) => category === 'all' || t.category === category)
+      .filter((t) => departmentFilter === 'all' || t.department_code === departmentFilter),
+    [templates, category, departmentFilter]
   );
   const categoriesPresent = useMemo(() => ['all', ...new Set(templates.map((t) => t.category))], [templates]);
 
@@ -92,9 +97,22 @@ export default function DocumentEngine() {
         document number, version, QR verification, and is stored automatically.
       </Typography>
 
-      <Tabs value={category} onChange={(_, v) => setCategory(v)} sx={{ mb: 2 }}>
-        {categoriesPresent.map((c) => <Tab key={c} value={c} label={CATEGORY_LABELS[c] || c} />)}
-      </Tabs>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2, flexWrap: 'wrap', gap: 2 }}>
+        <Tabs value={category} onChange={(_, v) => setCategory(v)}>
+          {categoriesPresent.map((c) => <Tab key={c} value={c} label={CATEGORY_LABELS[c] || c} />)}
+        </Tabs>
+        <TextField
+          select
+          size="small"
+          label="Department"
+          value={departmentFilter}
+          onChange={(e) => setDepartmentFilter(e.target.value)}
+          sx={{ minWidth: 160 }}
+        >
+          <MenuItem value="all">All departments</MenuItem>
+          {departments.map((d) => <MenuItem key={d.id} value={d.code}>{d.name} ({d.code})</MenuItem>)}
+        </TextField>
+      </Box>
 
       <Grid container spacing={2} sx={{ mb: 4 }}>
         {filteredTemplates.map((t) => (
@@ -106,7 +124,8 @@ export default function DocumentEngine() {
                     <DescriptionOutlinedIcon fontSize="small" color="action" />
                     <Typography variant="subtitle1">{t.name}</Typography>
                   </Box>
-                  <Chip size="small" label={CATEGORY_LABELS[t.category] || t.category} sx={{ textTransform: 'capitalize' }} />
+                  <Chip size="small" label={CATEGORY_LABELS[t.category] || t.category} sx={{ textTransform: 'capitalize', mr: 0.5 }} />
+                  <Chip size="small" variant="outlined" label={t.department_code} />
                 </CardContent>
               </CardActionArea>
             </Card>
@@ -195,6 +214,22 @@ export default function DocumentEngine() {
                         />
                       </Grid>
                     ))}
+
+                    {/* Works for every template without any per-template schema change — */}
+                    {/* if filled in, it replaces the templated body text entirely, but */}
+                    {/* still supports {{placeholder}} substitution server-side. */}
+                    <Grid item xs={12}>
+                      <TextField
+                        fullWidth
+                        label="Custom letter body (optional — overrides the template text above)"
+                        placeholder="Leave blank to use the standard template wording. If you write here, it replaces the body entirely — you can still use placeholders like {{candidate_name}} or {{company_name}}."
+                        multiline
+                        minRows={5}
+                        value={formData.custom_body || ''}
+                        onChange={(e) => setFormData({ ...formData, custom_body: e.target.value })}
+                      />
+                    </Grid>
+
                     <Grid item xs={6}>
                       <TextField fullWidth label="Link to entity type (optional)" placeholder="employee / vendor / customer"
                         value={entityType} onChange={(e) => setEntityType(e.target.value)} />

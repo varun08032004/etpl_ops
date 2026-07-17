@@ -7,7 +7,10 @@ const { authenticate, requireRole } = require('../middleware/auth');
 const storage = require('../services/storage');
 const auditLog = require('../services/auditLog');
 const emailService = require('../services/emailService');
-const { renderTemplate, validateFields, nextDocumentNumber, buildRenderData } = require('../services/documentEngine');
+const {
+  renderTemplate, renderCustomBody, validateFields, nextDocumentNumber,
+  buildRenderData,
+} = require('../services/documentEngine');
 const { buildDocumentPdf } = require('../services/pdfBuilder');
 
 router.use(authenticate);
@@ -21,14 +24,24 @@ async function getCompanyProfile() {
 // Expects a plain https URL (a public Supabase storage URL, or any CDN link) —
 // keeps this module free of bucket-path assumptions. Never throws: a missing
 // or unreachable image just means the PDF falls back to its vector placeholder.
+//
+// IMPORTANT: has a hard timeout. Without one, a stalled network call here
+// (DNS hiccup, firewall, slow/unreachable host) hangs the entire /generate
+// request indefinitely with no error ever logged — exactly the "still
+// generating" symptom with a blank server console. 8s is generous for a
+// small logo/seal/signature image; if it's not back by then, something's
+// wrong with that URL and we fall back rather than block the whole document.
 async function fetchImageBuffer(url) {
   if (!url) return null;
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) {
+      console.warn('[document-engine] image fetch returned', res.status, url);
+      return null;
+    }
     return Buffer.from(await res.arrayBuffer());
   } catch (err) {
-    console.warn('[document-engine] could not fetch image', url, err.message);
+    console.warn('[document-engine] could not fetch image (timed out or network error):', url, err.message);
     return null;
   }
 }
@@ -74,31 +87,61 @@ router.put('/company-profile', requireRole('admin'), async (req, res) => {
   }
 });
 
+// NOTE: department options for dropdowns come from GET /api/departments
+// (routes/departments.js — the real departments table), not from here.
+// An earlier version of this file exposed a redundant /departments route
+// that derived options from distinct document_templates.department_code
+// values, which was empty/stale until templates existed. Removed in favor
+// of the single real source of truth.
+
+// Races any promise against a timeout so a stalled call (network, storage
+// SDK, etc.) fails with a clear error instead of hanging the request
+// forever. Used around storage.uploadFile below.
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
+  ]);
+}
+
 // ── generate a document ──────────────────────────────────────────────────────
 router.post('/generate', async (req, res) => {
   try {
     const { template_code, data, entity_type, entity_id, send_email, email_to } = req.body;
     if (!template_code || !data) return res.status(400).json({ error: 'template_code and data are required' });
+    console.log('[document-engine:generate] start', template_code);
 
     const { rows: [template] } = await safeQuery(
       `SELECT * FROM document_templates WHERE code = $1 AND is_active = true`, [template_code]
     );
     if (!template) return res.status(404).json({ error: 'Template not found or inactive' });
+    console.log('[document-engine:generate] template loaded', template.code);
 
     const missing = validateFields(template.fields, data);
     if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
 
     const companyProfile = await getCompanyProfile();
     if (!companyProfile) return res.status(500).json({ error: 'Company profile is not configured yet — set it up under Admin first' });
+    console.log('[document-engine:generate] company profile loaded');
 
     const renderData = buildRenderData(companyProfile, data);
-    const renderedBody = renderTemplate(template.body, renderData);
+
+    // If the staff member typed a custom body (the "write your own letter"
+    // box on the generate form), it replaces the template's static wording
+    // entirely — but still gets {{placeholder}} substitution against the
+    // same renderData, so {{company_name}}, {{candidate_name}}, etc. still
+    // work inside a freeform letter. Everything else (letterhead, summary
+    // box, signature, seal, QR, footer) is unaffected either way.
+    const renderedBody = (data.custom_body && data.custom_body.trim())
+      ? renderCustomBody(data.custom_body, renderData)
+      : renderTemplate(template.body, renderData);
 
     // Retry a couple of times on the (rare) unique-constraint race between
     // two staff generating in the same department at the same instant.
     let documentNumber, inserted;
     for (let attempt = 0; attempt < 3 && !inserted; attempt++) {
       documentNumber = await nextDocumentNumber(template.department_code);
+      console.log('[document-engine:generate] document number allocated', documentNumber, 'attempt', attempt);
       const generatedAt = new Date();
 
       const [logoBuffer, sealBuffer, signatureBuffer] = await Promise.all([
@@ -106,11 +149,30 @@ router.post('/generate', async (req, res) => {
         template.requires_seal ? fetchImageBuffer(companyProfile.seal_image_url) : null,
         template.requires_signature ? fetchImageBuffer(companyProfile.signature_image_url) : null,
       ]);
+      console.log('[document-engine:generate] images resolved', {
+        logo: !!logoBuffer, seal: !!sealBuffer, signature: !!signatureBuffer,
+      });
+
+      // ── TEMP DIAGNOSTIC ────────────────────────────────────────────────
+      // doc.end() hangs with no error after all three images are resolved
+      // and doc.image() calls succeed — PDFKit embeds images lazily, only
+      // decoding/writing them during finalization (doc.end()), so a bad
+      // PNG wouldn't surface until here. Forcing images to null isolates
+      // whether one of the three fetched images is the trigger. Remove
+      // this block once root-caused — see console.warn below as a
+      // reminder if it's still here later.
+      const DIAGNOSTIC_SKIP_IMAGES = true; // <-- flip to false once done testing
+      console.warn('[document-engine:generate] DIAGNOSTIC_SKIP_IMAGES is', DIAGNOSTIC_SKIP_IMAGES, '— remove this before shipping');
+      const imagesToUse = DIAGNOSTIC_SKIP_IMAGES
+        ? { logoBuffer: null, sealBuffer: null, signatureBuffer: null }
+        : { logoBuffer, sealBuffer, signatureBuffer };
+      // ── END TEMP DIAGNOSTIC ────────────────────────────────────────────
 
       const pdfBuffer = await buildDocumentPdf({
         companyProfile,
         template,
         renderedBody,
+        data,
         generatedDoc: {
           document_number: documentNumber,
           version: 1,
@@ -118,14 +180,16 @@ router.post('/generate', async (req, res) => {
           date_str: generatedAt.toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' }),
           generated_by_name: req.staff.email,
         },
-        images: { logoBuffer, sealBuffer, signatureBuffer },
+        images: imagesToUse,
       });
+      console.log('[document-engine:generate] PDF built, bytes:', pdfBuffer.length);
 
       const fileName = `${documentNumber}.pdf`;
       const storagePath = `generated/${template.department_code}/${new Date().getFullYear()}/${fileName}`;
 
       try {
-        await storage.uploadFile(storagePath, pdfBuffer, 'application/pdf');
+        await withTimeout(storage.uploadFile(storagePath, pdfBuffer, 'application/pdf'), 15000, 'storage.uploadFile');
+        console.log('[document-engine:generate] uploaded to storage', storagePath);
         ({ rows: [inserted] } = await safeQuery(
           `INSERT INTO generated_documents
              (template_id, template_version, document_number, category, department_code, entity_type, entity_id, data, storage_path, file_name, generated_by)
@@ -133,6 +197,7 @@ router.post('/generate', async (req, res) => {
           [template.id, template.version, documentNumber, template.category, template.department_code,
            entity_type || null, entity_id || null, JSON.stringify(data), storagePath, fileName, req.staff.id]
         ));
+        console.log('[document-engine:generate] DB row inserted', inserted.id);
         req._pdfBuffer = pdfBuffer; // stash for optional immediate email below
       } catch (err) {
         if (err.code === '23505') continue; // document_number collision — retry with a fresh number

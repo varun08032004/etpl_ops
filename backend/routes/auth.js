@@ -12,9 +12,11 @@ router.post('/login', async (req, res) => {
     if (!email || !password) return res.status(400).json({ error: 'email and password required' });
 
     const { rows: [staff] } = await safeQuery(`SELECT * FROM staff_accounts WHERE email = $1`, [email.toLowerCase()]);
+    console.log('DEBUG staff found:', staff ? { id: staff.id, email: staff.email, is_active: staff.is_active, hash: staff.password_hash } : null);
     if (!staff || !staff.is_active) return res.status(401).json({ error: 'Invalid credentials' });
 
     const ok = await bcrypt.compare(password, staff.password_hash);
+    console.log('DEBUG bcrypt.compare result:', ok);
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = signToken(staff);
