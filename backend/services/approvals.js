@@ -1,37 +1,38 @@
 'use strict';
 // services/approvals.js
 //
-// Generic "destructive action needs founder sign-off" workflow, layered on
-// top of the audit log rather than replacing it: creating a request,
-// approving it, and rejecting it each write an audit_log entry (via
-// logAction), so the Admin > Audit Log page shows the full lifecycle of a
-// gated action — not just the eventual executed change.
+// Multi-stage "destructive action needs sign-off" workflow. A request carries
+// a `chain` (built by services/approvalChain.js) — an ordered list of stages,
+// each with the staff_ids allowed to act at that stage. approveRequest()
+// checks the reviewer is in the CURRENT stage; if it's the last stage, the
+// action actually executes; otherwise it just advances to the next stage and
+// stays pending. rejectRequest() can be called by anyone in the current
+// stage and ends the request outright.
 //
-// Any module wires in a destructive action by calling registerApprovalAction()
+// Every module wires in a destructive action by calling registerApprovalAction()
 // once at startup with an executor function, then calling
-// createApprovalRequest() instead of performing the action directly when the
-// actor isn't the owner. Only approveRequest() (owner-only, enforced by the
-// route, not this service) actually runs the executor.
+// createApprovalRequest() (with a chain) instead of performing the action
+// directly when the actor isn't authorized to do it immediately.
 
 const { safeQuery } = require('../db/pool');
 const { logAction } = require('./auditLog');
+const { notifyStaff, notifyMany } = require('./notifications');
 
 const executors = {};
 
-/**
- * Registers the function that actually performs an action_type once approved.
- * @param {string} actionType
- * @param {(targetId: string, payload: object|null) => Promise<any>} executorFn
- */
 function registerApprovalAction(actionType, executorFn) {
   executors[actionType] = executorFn;
 }
 
-async function createApprovalRequest({ actionType, targetType, targetId, targetLabel, requestedBy, reason, payload }) {
+async function createApprovalRequest({ actionType, targetType, targetId, targetLabel, requestedBy, reason, payload, chain }) {
+  if (!chain || !chain.length) {
+    throw new Error(`createApprovalRequest for ${actionType} was called without a resolved chain`);
+  }
+
   const { rows: [request] } = await safeQuery(
-    `INSERT INTO approval_requests (action_type, target_type, target_id, target_label, requested_by, reason, payload)
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-    [actionType, targetType, targetId, targetLabel || null, requestedBy, reason || null, payload ? JSON.stringify(payload) : null]
+    `INSERT INTO approval_requests (action_type, target_type, target_id, target_label, requested_by, reason, payload, chain, current_stage)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0) RETURNING *`,
+    [actionType, targetType, targetId, targetLabel || null, requestedBy, reason || null, payload ? JSON.stringify(payload) : null, JSON.stringify(chain)]
   );
 
   await logAction({
@@ -39,10 +40,26 @@ async function createApprovalRequest({ actionType, targetType, targetId, targetL
     action: `${actionType}.requested`,
     entity: targetType,
     entityId: targetId,
-    newValue: { targetLabel, reason: reason || null },
+    newValue: { targetLabel, reason: reason || null, chain: chain.map((s) => s.level) },
+  });
+
+  await notifyMany(chain[0].staff_ids, {
+    type: 'approval.requested',
+    title: `${chain[0].label} approval needed: ${actionType.replace('.', ' ')} — ${targetLabel || targetType}`,
+    body: reason ? `Reason given: "${reason}"` : undefined,
+    link: '/team',
   });
 
   return request;
+}
+
+function currentStageOf(request) {
+  const chain = request.chain || [];
+  return chain[request.current_stage] || null;
+}
+
+function isAuthorizedForStage(stage, staffId) {
+  return !!stage && Array.isArray(stage.staff_ids) && stage.staff_ids.includes(staffId);
 }
 
 async function approveRequest(requestId, reviewedBy) {
@@ -52,11 +69,40 @@ async function approveRequest(requestId, reviewedBy) {
     throw Object.assign(new Error(`Request already ${request.status}`), { status: 400 });
   }
 
+  const stage = currentStageOf(request);
+  if (!isAuthorizedForStage(stage, reviewedBy)) {
+    throw Object.assign(new Error('You are not the current approver for this request'), { status: 403 });
+  }
+
+  const isFinalStage = request.current_stage >= request.chain.length - 1;
+
+  if (!isFinalStage) {
+    const nextStageIndex = request.current_stage + 1;
+    const { rows: [updated] } = await safeQuery(
+      `UPDATE approval_requests SET current_stage = $1 WHERE id = $2 RETURNING *`,
+      [nextStageIndex, requestId]
+    );
+
+    await logAction({
+      staffId: reviewedBy, action: `${request.action_type}.stage_approved`, entity: request.target_type, entityId: request.target_id,
+      oldValue: { stage: stage.level }, newValue: { nextStage: request.chain[nextStageIndex].level, targetLabel: request.target_label },
+    });
+
+    await notifyMany(request.chain[nextStageIndex].staff_ids, {
+      type: 'approval.requested',
+      title: `${request.chain[nextStageIndex].label} approval needed: ${request.action_type.replace('.', ' ')} — ${request.target_label || request.target_type}`,
+      body: `Already cleared ${stage.label}.`,
+      link: '/team',
+    });
+
+    return { request: updated, result: null, finalized: false };
+  }
+
+  // Final stage — actually run the action.
   const executor = executors[request.action_type];
   if (!executor) {
     throw new Error(`No executor registered for action_type "${request.action_type}" — is that module loaded?`);
   }
-
   const result = await executor(request.target_id, request.payload);
 
   const { rows: [updated] } = await safeQuery(
@@ -65,15 +111,17 @@ async function approveRequest(requestId, reviewedBy) {
   );
 
   await logAction({
-    staffId: reviewedBy,
-    action: `${request.action_type}.approved`,
-    entity: request.target_type,
-    entityId: request.target_id,
-    oldValue: { requestedBy: request.requested_by, reason: request.reason },
-    newValue: { targetLabel: request.target_label },
+    staffId: reviewedBy, action: `${request.action_type}.approved`, entity: request.target_type, entityId: request.target_id,
+    oldValue: { requestedBy: request.requested_by, reason: request.reason }, newValue: { targetLabel: request.target_label },
   });
 
-  return { request: updated, result };
+  await notifyStaff({
+    staffId: request.requested_by, type: 'approval.approved',
+    title: `Approved: ${request.action_type.replace('.', ' ')} — ${request.target_label || request.target_type}`,
+    link: '/team',
+  });
+
+  return { request: updated, result, finalized: true };
 }
 
 async function rejectRequest(requestId, reviewedBy, reason) {
@@ -83,21 +131,39 @@ async function rejectRequest(requestId, reviewedBy, reason) {
     throw Object.assign(new Error(`Request already ${request.status}`), { status: 400 });
   }
 
+  const stage = currentStageOf(request);
+  if (!isAuthorizedForStage(stage, reviewedBy)) {
+    throw Object.assign(new Error('You are not the current approver for this request'), { status: 403 });
+  }
+
   const { rows: [updated] } = await safeQuery(
     `UPDATE approval_requests SET status = 'rejected', reviewed_by = $1, reviewed_at = NOW(), rejection_reason = $2 WHERE id = $3 RETURNING *`,
     [reviewedBy, reason || null, requestId]
   );
 
   await logAction({
-    staffId: reviewedBy,
-    action: `${request.action_type}.rejected`,
-    entity: request.target_type,
-    entityId: request.target_id,
-    oldValue: { requestedBy: request.requested_by },
-    newValue: { targetLabel: request.target_label, rejectionReason: reason || null },
+    staffId: reviewedBy, action: `${request.action_type}.rejected`, entity: request.target_type, entityId: request.target_id,
+    oldValue: { requestedBy: request.requested_by }, newValue: { targetLabel: request.target_label, rejectionReason: reason || null },
+  });
+
+  await notifyStaff({
+    staffId: request.requested_by, type: 'approval.rejected',
+    title: `Rejected: ${request.action_type.replace('.', ' ')} — ${request.target_label || request.target_type}`,
+    body: reason || undefined,
+    link: '/team',
   });
 
   return updated;
+}
+
+/** Requests where the given staff member is an eligible approver at the CURRENT stage. */
+async function listPendingForStaff(staffId) {
+  const { rows } = await safeQuery(
+    `SELECT ar.*, req.email AS requested_by_email
+     FROM approval_requests ar LEFT JOIN staff_accounts req ON req.id = ar.requested_by
+     WHERE ar.status = 'pending' ORDER BY ar.created_at DESC LIMIT 200`
+  );
+  return rows.filter((r) => isAuthorizedForStage((r.chain || [])[r.current_stage], staffId));
 }
 
 async function listRequests({ status } = {}) {
@@ -123,4 +189,5 @@ module.exports = {
   approveRequest,
   rejectRequest,
   listRequests,
+  listPendingForStaff,
 };

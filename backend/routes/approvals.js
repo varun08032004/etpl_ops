@@ -1,25 +1,24 @@
 'use strict';
-// routes/approvals.js
-//
-// Endpoints for the generic approval-request workflow (services/approvals.js).
-// Listing is visible to admin+owner (an admin should be able to see the
-// status of their own pending requests). Approve/reject are deliberately
-// NOT gated with requireRole('admin') — that helper lets both owner AND
-// admin through, which would defeat the entire point of "admin requests,
-// founder approves." These two routes check req.staff.role === 'owner'
-// directly instead.
 
 const express = require('express');
 const router = express.Router();
-const { authenticate, requireRole } = require('../middleware/auth');
-const approvals = require('../services/approvals');
+const { authenticate } = require('../middleware/auth');
+const { approveRequest, rejectRequest, listRequests, listPendingForStaff } = require('../services/approvals');
 
 router.use(authenticate);
 
-// GET /api/approvals?status=pending
-router.get('/', requireRole('admin'), async (req, res) => {
+// ?status=pending&forMe=true → only requests where I'm the eligible approver
+// at the current stage (used to badge/list "needs your action").
+// ?status=pending (no forMe) → everything pending, for visibility (e.g. Founder
+// dashboard showing the whole pipeline even for stages not yet reached).
+router.get('/', async (req, res) => {
   try {
-    const rows = await approvals.listRequests({ status: req.query.status });
+    const { status, forMe } = req.query;
+    if (forMe === 'true') {
+      const rows = await listPendingForStaff(req.staff.id);
+      return res.json({ requests: rows });
+    }
+    const rows = await listRequests({ status });
     res.json({ requests: rows });
   } catch (err) {
     console.error('[approvals:list]', err);
@@ -27,28 +26,19 @@ router.get('/', requireRole('admin'), async (req, res) => {
   }
 });
 
-// POST /api/approvals/:id/approve — Founder (owner) only.
 router.post('/:id/approve', async (req, res) => {
-  if (req.staff.role !== 'owner') {
-    return res.status(403).json({ error: 'Only the Founder can approve requests' });
-  }
   try {
-    const { request, result } = await approvals.approveRequest(req.params.id, req.staff.id);
-    res.json({ request, result });
+    const { request, result, finalized } = await approveRequest(req.params.id, req.staff.id);
+    res.json({ request, result, finalized });
   } catch (err) {
     console.error('[approvals:approve]', err);
     res.status(err.status || 500).json({ error: err.message || 'Failed to approve request' });
   }
 });
 
-// POST /api/approvals/:id/reject — Founder (owner) only.
 router.post('/:id/reject', async (req, res) => {
-  if (req.staff.role !== 'owner') {
-    return res.status(403).json({ error: 'Only the Founder can reject requests' });
-  }
   try {
-    const { reason } = req.body;
-    const request = await approvals.rejectRequest(req.params.id, req.staff.id, reason);
+    const request = await rejectRequest(req.params.id, req.staff.id, req.body?.reason);
     res.json({ request });
   } catch (err) {
     console.error('[approvals:reject]', err);

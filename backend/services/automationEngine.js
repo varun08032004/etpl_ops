@@ -10,6 +10,7 @@
 'use strict';
 
 const { safeQuery } = require('../db/pool');
+const emailService = require('./emailService');
 
 function renderTemplate(template, payload) {
   if (!template) return '';
@@ -40,16 +41,36 @@ async function runAction(rule, payload) {
       break;
     }
     case 'send_email': {
-      // STUB — no SMTP/email provider configured. Logs what WOULD be sent so
-      // the automation rule itself can be tested end-to-end, but no actual
-      // email leaves the system. Wire a real provider (SES, Postmark, SMTP)
-      // here when Notification Center (Phase 2+) gets built.
-      console.log('[automation:send_email:STUB] Would send:', {
-        rule: rule.name,
-        to: renderTemplate(rule.config.to_template, payload),
-        subject: renderTemplate(rule.config.subject, payload),
-        body: renderTemplate(rule.config.body_template, payload),
-      });
+      const { target_roles, to_template, subject, body_template } = rule.config;
+
+      let recipients = [];
+      if (target_roles?.length) {
+        const { rows } = await safeQuery(
+          `SELECT email FROM staff_accounts WHERE role = ANY($1) AND is_active = true`,
+          [target_roles]
+        );
+        recipients = rows.map((r) => r.email);
+      } else if (to_template) {
+        const resolved = renderTemplate(to_template, payload);
+        if (resolved && !resolved.includes('{{')) recipients = [resolved];
+      }
+
+      if (!recipients.length) {
+        console.warn(`[automation:send_email] rule "${rule.name}" resolved to zero recipients — check target_roles/to_template in its config`);
+        break;
+      }
+
+      try {
+        await emailService.sendMail({
+          to: recipients.join(','),
+          subject: renderTemplate(subject, payload),
+          text: renderTemplate(body_template, payload),
+        });
+      } catch (err) {
+        // emailService itself falls back to a console-logged stub when unconfigured,
+        // so an error here means something actually went wrong sending, not just "no SMTP set up".
+        console.error(`[automation:send_email] rule "${rule.name}" failed to send:`, err.message);
+      }
       break;
     }
     default:

@@ -62,7 +62,7 @@ router.put('/company-profile', requireRole('admin'), async (req, res) => {
     const existing = await getCompanyProfile();
     const f = req.body;
     const fields = ['name', 'cin', 'gstin', 'registered_address', 'email', 'website', 'phone',
-      'logo_url', 'seal_image_url', 'default_signatory_name', 'default_signatory_title',
+      'logo_url', 'seal_image_url', 'default_signatory_name', 'default_signatory_title', 'default_signatory_din',
       'signature_image_url', 'verification_base_url'];
     let profile;
     if (existing) {
@@ -94,14 +94,46 @@ router.put('/company-profile', requireRole('admin'), async (req, res) => {
 // values, which was empty/stale until templates existed. Removed in favor
 // of the single real source of truth.
 
+const sharp = require('sharp');
+
 // Races any promise against a timeout so a stalled call (network, storage
 // SDK, etc.) fails with a clear error instead of hanging the request
-// forever. Used around storage.uploadFile below.
+// forever. Used around storage.uploadFile and image sanitization below.
+// NOTE: this only helps for calls that yield to the event loop (network
+// I/O, libuv thread-pool work like sharp). It cannot rescue a genuinely
+// synchronous infinite loop on the JS thread itself — see sanitizeImageForPdf.
 function withTimeout(promise, ms, label) {
   return Promise.race([
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
   ]);
+}
+
+// PDFKit's bundled PNG decoder has a known bug: certain PNGs — notably
+// interlaced/progressive exports, which many design tools (Photoshop,
+// online logo makers, etc.) produce by default — send it into an infinite
+// *synchronous* decode loop when embedded via doc.image(). Because it's
+// synchronous, it freezes the entire Node process (every request, even
+// unrelated ones) with no error, no timeout, no log — exactly a silent
+// hang forever. Re-encoding through sharp (libvips — a mature, robust
+// decoder) into a flat, non-interlaced PNG before it ever reaches PDFKit
+// sidesteps the bug entirely. Also caps dimensions so a huge upload can't
+// slow down generation.
+async function sanitizeImageForPdf(buffer, label) {
+  if (!buffer) return null;
+  try {
+    return await withTimeout(
+      sharp(buffer)
+        .resize({ width: 800, height: 800, fit: 'inside', withoutEnlargement: true })
+        .png({ progressive: false, interlace: false })
+        .toBuffer(),
+      8000,
+      `image sanitize (${label})`
+    );
+  } catch (err) {
+    console.warn(`[document-engine] could not sanitize image (${label}), skipping it entirely to avoid a possible PDFKit hang:`, err.message);
+    return null; // safer to drop the image than risk passing something unsanitized to PDFKit
+  }
 }
 
 // ── generate a document ──────────────────────────────────────────────────────
@@ -117,6 +149,24 @@ router.post('/generate', async (req, res) => {
     if (!template) return res.status(404).json({ error: 'Template not found or inactive' });
     console.log('[document-engine:generate] template loaded', template.code);
 
+    // Auto-sequence fields (e.g. a Share Certificate's certificate_number,
+    // a Board Resolution's resolution_number) are assigned here, not typed
+    // by the admin — a field marked auto_sequence:true in the template's
+    // fields[] gets its value computed as "count of this template's
+    // previously generated documents + 1", formatted with an optional
+    // prefix/zero-padding. Mutates `data` in place so validateFields below
+    // sees it as already satisfied, and it flows through renderTemplate and
+    // gets stored in generated_documents.data normally for future counting.
+    for (const f of template.fields || []) {
+      if (!f.auto_sequence) continue;
+      const { rows: [{ count }] } = await safeQuery(
+        `SELECT COUNT(*) FROM generated_documents WHERE template_id = $1`, [template.id]
+      );
+      const next = Number(count) + 1;
+      const padded = String(next).padStart(f.sequence_pad || 4, '0');
+      data[f.key] = `${f.sequence_prefix || ''}${padded}`;
+    }
+
     const missing = validateFields(template.fields, data);
     if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
 
@@ -124,7 +174,7 @@ router.post('/generate', async (req, res) => {
     if (!companyProfile) return res.status(500).json({ error: 'Company profile is not configured yet — set it up under Admin first' });
     console.log('[document-engine:generate] company profile loaded');
 
-    const renderData = buildRenderData(companyProfile, data);
+    const renderData = buildRenderData(companyProfile, data, template.fields);
 
     // If the staff member typed a custom body (the "write your own letter"
     // box on the generate form), it replaces the template's static wording
@@ -144,29 +194,28 @@ router.post('/generate', async (req, res) => {
       console.log('[document-engine:generate] document number allocated', documentNumber, 'attempt', attempt);
       const generatedAt = new Date();
 
-      const [logoBuffer, sealBuffer, signatureBuffer] = await Promise.all([
+      const [logoBufferRaw, sealBufferRaw, signatureBufferRaw] = await Promise.all([
         fetchImageBuffer(companyProfile.logo_url),
         template.requires_seal ? fetchImageBuffer(companyProfile.seal_image_url) : null,
         template.requires_signature ? fetchImageBuffer(companyProfile.signature_image_url) : null,
       ]);
-      console.log('[document-engine:generate] images resolved', {
-        logo: !!logoBuffer, seal: !!sealBuffer, signature: !!signatureBuffer,
+      console.log('[document-engine:generate] images fetched (raw)', {
+        logo: !!logoBufferRaw, seal: !!sealBufferRaw, signature: !!signatureBufferRaw,
       });
 
-      // ── TEMP DIAGNOSTIC ────────────────────────────────────────────────
-      // doc.end() hangs with no error after all three images are resolved
-      // and doc.image() calls succeed — PDFKit embeds images lazily, only
-      // decoding/writing them during finalization (doc.end()), so a bad
-      // PNG wouldn't surface until here. Forcing images to null isolates
-      // whether one of the three fetched images is the trigger. Remove
-      // this block once root-caused — see console.warn below as a
-      // reminder if it's still here later.
-      const DIAGNOSTIC_SKIP_IMAGES = true; // <-- flip to false once done testing
-      console.warn('[document-engine:generate] DIAGNOSTIC_SKIP_IMAGES is', DIAGNOSTIC_SKIP_IMAGES, '— remove this before shipping');
-      const imagesToUse = DIAGNOSTIC_SKIP_IMAGES
-        ? { logoBuffer: null, sealBuffer: null, signatureBuffer: null }
-        : { logoBuffer, sealBuffer, signatureBuffer };
-      // ── END TEMP DIAGNOSTIC ────────────────────────────────────────────
+      // Re-encode every image through sharp before it ever reaches PDFKit —
+      // this is the actual fix for the freeze (see sanitizeImageForPdf's
+      // comment above). Running raw fetched buffers straight into
+      // buildDocumentPdf/doc.image() skips this protection entirely, which
+      // is exactly what was happening before this line was added.
+      const [logoBuffer, sealBuffer, signatureBuffer] = await Promise.all([
+        sanitizeImageForPdf(logoBufferRaw, 'logo'),
+        sanitizeImageForPdf(sealBufferRaw, 'seal'),
+        sanitizeImageForPdf(signatureBufferRaw, 'signature'),
+      ]);
+      console.log('[document-engine:generate] images sanitized', {
+        logo: !!logoBuffer, seal: !!sealBuffer, signature: !!signatureBuffer,
+      });
 
       const pdfBuffer = await buildDocumentPdf({
         companyProfile,
@@ -180,7 +229,7 @@ router.post('/generate', async (req, res) => {
           date_str: generatedAt.toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' }),
           generated_by_name: req.staff.email,
         },
-        images: imagesToUse,
+        images: { logoBuffer, sealBuffer, signatureBuffer },
       });
       console.log('[document-engine:generate] PDF built, bytes:', pdfBuffer.length);
 

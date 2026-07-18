@@ -38,7 +38,11 @@ function normalizeLineEndings(str) {
 const AMOUNT_KEY_PATTERN = /amount|salary|stipend|ctc|price|fee|budget/i;
 
 function formatIndianAmount(n) {
-  const formatted = `\u20B9${n.toLocaleString('en-IN')}`;
+  // No leading ₹ here — template bodies already write ₹{{salary}} etc.
+  // literally in their wording, so adding it here too doubled up the
+  // symbol (₹₹36,00,000). This just handles the Indian comma grouping
+  // and Lacs/Crore suffix; the ₹ comes from the template text itself.
+  const formatted = n.toLocaleString('en-IN');
   if (n >= 10000000) return `${formatted} (${(n / 10000000).toFixed(2)} Cr)`;
   if (n >= 100000) return `${formatted} (${(n / 100000).toFixed(2)} L)`;
   return formatted;
@@ -59,12 +63,142 @@ function formatAmountFields(formData) {
   return out;
 }
 
+// Used only when building a full sentence (e.g. the compensation clause
+// below) — unlike formatAmountFields above, this DOES need to include ₹
+// itself since there's no surrounding template text supplying it.
+function formatIndianAmountWithSymbol(n) {
+  const formatted = `\u20B9${n.toLocaleString('en-IN')}`;
+  if (n >= 10000000) return `${formatted} (${(n / 10000000).toFixed(2)} Cr)`;
+  if (n >= 100000) return `${formatted} (${(n / 100000).toFixed(2)} L)`;
+  return formatted;
+}
+
+/**
+ * Builds the one line of an offer letter that genuinely needs to branch —
+ * what someone is actually paid depends on whether they're Full Time,
+ * Contract Based, a Paid Intern, or an Unpaid Intern, and template bodies
+ * can't do if/else on their own. Computing it here keeps that logic in one
+ * place instead of needing four near-duplicate templates.
+ */
+function buildCompensationClause(data) {
+  const type = data.employee_type;
+  if (type === 'Intern (Unpaid)') {
+    return 'This is an unpaid internship position; no monetary compensation is applicable for the duration of the internship.';
+  }
+  if (type === 'Intern (Paid)') {
+    const n = Number(String(data.stipend || '').replace(/,/g, ''));
+    if (!isNaN(n) && n > 0) return `You will be paid a monthly stipend of ${formatIndianAmountWithSymbol(n)}.`;
+    return 'Stipend details will be confirmed separately.';
+  }
+  // Full Time / Contract Based (or anything else — safe default)
+  const n = Number(String(data.salary || '').replace(/,/g, ''));
+  if (!isNaN(n) && n > 0) return `Your annual CTC will be ${formatIndianAmountWithSymbol(n)}.`;
+  return 'Compensation details will be confirmed separately.';
+}
+
+function formatDateNicely(value) {
+  if (!value) return value;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return value; // not a date-like string, leave as-is
+  return d.toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+/**
+ * Reformats every field of type "date" from the raw ISO string an HTML date
+ * input submits (e.g. "2026-07-13") into "13 July 2026" — the form the
+ * template body actually shows once substituted. Needs the template's
+ * fields[] to know WHICH keys are dates (a plain string like "2026-07-13"
+ * is otherwise indistinguishable from any other text).
+ */
+function formatDateFields(fields, formData) {
+  const out = { ...formData };
+  for (const f of fields || []) {
+    if (f.type === 'date' && out[f.key]) out[f.key] = formatDateNicely(out[f.key]);
+  }
+  return out;
+}
+
+// Converts an integer into Indian-English number words (thousand/lakh/crore
+// grouping, not the Western million/billion grouping) — e.g. 90000 ->
+// "Ninety Thousand", 3600000 -> "Thirty-Six Lakh". Used for the "Rupees ...
+// Only" wording on legal documents like a Share Certificate. Handles 0 to
+// just under 100 crore, which comfortably covers anything a company this
+// size would ever need on a certificate.
+const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+  'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+function twoDigitWords(n) {
+  if (n < 20) return ONES[n];
+  const t = Math.floor(n / 10), o = n % 10;
+  return o ? `${TENS[t]}-${ONES[o]}` : TENS[t];
+}
+function threeDigitWords(n) {
+  const h = Math.floor(n / 100), r = n % 100;
+  const parts = [];
+  if (h) parts.push(`${ONES[h]} Hundred`);
+  if (r) parts.push(twoDigitWords(r));
+  return parts.join(' ') || '';
+}
+function numberToIndianWords(n) {
+  n = Math.round(n);
+  if (n === 0) return 'Zero';
+  const crore = Math.floor(n / 10000000); n %= 10000000;
+  const lakh = Math.floor(n / 100000); n %= 100000;
+  const thousand = Math.floor(n / 1000); n %= 1000;
+  const hundred = n;
+  const parts = [];
+  if (crore) parts.push(`${twoDigitWords(crore)} Crore`);
+  if (lakh) parts.push(`${twoDigitWords(lakh)} Lakh`);
+  if (thousand) parts.push(`${twoDigitWords(thousand)} Thousand`);
+  if (hundred) parts.push(threeDigitWords(hundred));
+  return parts.join(' ');
+}
+
+/**
+ * Builds the "aggregating to ₹90,000 (Rupees Ninety Thousand Only), fully
+ * paid-up." line for a Share Certificate — computed from
+ * number_of_shares × face_value so the admin never has to calculate or
+ * type it themselves.
+ */
+function buildShareCapitalClause(data) {
+  const shares = Number(data.number_of_shares);
+  const faceValue = Number(String(data.face_value || '').replace(/,/g, ''));
+  if (!shares || !faceValue) return '';
+  const total = shares * faceValue;
+  return `aggregating to ${formatIndianAmountWithSymbol(total)} (Rupees ${numberToIndianWords(total)} Only), fully paid-up.`;
+}
+
 function substitutePlaceholders(template, data) {
   if (!template) return '';
   return normalizeLineEndings(template).replace(/\{\{(\w+)\}\}/g, (_, key) => {
     const val = data[key];
     return val === undefined || val === null || val === '' ? '' : normalizeLineEndings(String(val));
   });
+}
+
+/**
+ * Merges the "Directors Present" multi-select dropdown (directors_present_
+ * selected — an array of known directors picked from the company's actual
+ * director list) with a freeform "Additional Directors" box (for anyone
+ * attending who isn't in that dropdown yet — a newly appointed or alternate
+ * director) into one clean line-per-director list for {{directors_present}}.
+ * Only kicks in when directors_present_selected is actually present in the
+ * submitted data — harmless no-op for any template that doesn't use this
+ * pattern (e.g. still returns data.directors_present unchanged if that's
+ * all that was submitted, for backward compatibility).
+ */
+function buildDirectorsPresentList(data) {
+  const selected = Array.isArray(data.directors_present_selected)
+    ? data.directors_present_selected
+    : (data.directors_present_selected ? [data.directors_present_selected] : []);
+  const additional = (data.additional_directors || '')
+    .split(/\n|,/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const merged = [...selected, ...additional];
+  if (merged.length) return merged.join('\n');
+  return data.directors_present || ''; // fall back to a plain textarea if that's what's used instead
 }
 
 function renderTemplate(template, data) {
@@ -82,13 +216,27 @@ function renderCustomBody(customBodyText, data) {
 }
 
 /**
- * @param {Array<{key:string,label:string,required:boolean}>} fields
+ * A field can declare depends_on: { key: 'employee_type', values: ['Intern (Paid)'] }
+ * meaning it only applies (is shown on the form, and only then enforced as
+ * required) when data[key] is one of the listed values. Used for things
+ * like "Monthly Stipend" only applying to paid interns, or "Annual CTC"
+ * only applying to Full Time / Contract Based hires.
+ */
+function isFieldApplicable(field, data) {
+  if (!field.depends_on) return true;
+  const { key, values } = field.depends_on;
+  return values.includes(data[key]);
+}
+
+/**
+ * @param {Array<{key:string,label:string,required:boolean,depends_on?:object}>} fields
  * @param {object} data
  * @returns {string[]} missing field labels (empty array = valid)
  */
 function validateFields(fields, data) {
   const missing = [];
   for (const f of fields || []) {
+    if (!isFieldApplicable(f, data)) continue; // not applicable right now — don't require it
     if (f.required && (data[f.key] === undefined || data[f.key] === null || data[f.key] === '')) {
       missing.push(f.label || f.key);
     }
@@ -129,7 +277,7 @@ async function listDepartmentCodes() {
 }
 
 /** Merges company_profile fields (as company_* keys) with submitted form data. */
-function buildRenderData(companyProfile, formData) {
+function buildRenderData(companyProfile, formData, templateFields) {
   return {
     company_name: companyProfile?.name || '',
     company_cin: companyProfile?.cin || '',
@@ -138,7 +286,10 @@ function buildRenderData(companyProfile, formData) {
     company_email: companyProfile?.email || '',
     company_website: companyProfile?.website || '',
     company_phone: companyProfile?.phone || '',
-    ...formatAmountFields(formData),
+    compensation_clause: buildCompensationClause(formData),
+    directors_present: buildDirectorsPresentList(formData),
+    share_capital_clause: buildShareCapitalClause(formData),
+    ...formatDateFields(templateFields, formatAmountFields(formData)),
   };
 }
 
@@ -146,8 +297,10 @@ module.exports = {
   renderTemplate,
   renderCustomBody,
   validateFields,
+  isFieldApplicable,
   nextDocumentNumber,
   listDepartmentCodes,
   buildRenderData,
   normalizeLineEndings,
+  numberToIndianWords,
 };

@@ -13,6 +13,14 @@
 // Per SRS §41.10's state-machine convention: status never changes via a
 // generic PATCH — only through the dedicated /start and /file actions below,
 // so an illegal transition is structurally impossible, not just discouraged.
+//
+// 2026-07 update: create/edit widened from finance-only to also allow
+// legal_hod/compliance_hod, since Compliance now covers ROC/labour/DPIIT
+// items owned by Legal, not just finance-driven filings (GST/TDS/PF/ESIC).
+// Rows with is_auto_generated=true were spawned automatically from a one-time
+// registration (see routes/oneTimeRegistrations.js) — edits are still allowed
+// but the category/recurring_interval are best left alone since they're
+// matched against services/complianceRules.js by title.
 
 const express = require('express');
 const router = express.Router();
@@ -89,7 +97,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // ── create — COMP-01 requires owner + due date at minimum; document can follow later ──
-router.post('/', requireRole('finance'), async (req, res) => {
+router.post('/', requireRole('finance', 'legal_hod', 'compliance_hod'), async (req, res) => {
   try {
     const { category, title, description, owner_employee_id, due_date, recurring_interval } = req.body;
     if (!category || !title || !due_date) {
@@ -108,7 +116,7 @@ router.post('/', requireRole('finance'), async (req, res) => {
 });
 
 // ── edit metadata (not status — see dedicated transitions below) ───────────
-router.put('/:id', requireRole('finance'), async (req, res) => {
+router.put('/:id', requireRole('finance', 'legal_hod', 'compliance_hod'), async (req, res) => {
   try {
     const allowed = ['category', 'title', 'description', 'owner_employee_id', 'due_date', 'recurring_interval'];
     const sets = [];
@@ -170,12 +178,22 @@ router.post('/:id/file', async (req, res) => {
     // Recurring items spawn their next cycle automatically on filing.
     const item = rows[0];
     if (item.recurring_interval) {
-      const intervalSql = { monthly: '1 month', quarterly: '3 months', annual: '1 year' }[item.recurring_interval];
+      const intervalSql = {
+        monthly: '1 month',
+        quarterly: '3 months',
+        half_yearly: '6 months',
+        annual: '1 year',
+      }[item.recurring_interval];
       if (intervalSql) {
         await safeQuery(
-          `INSERT INTO compliance_items (category, title, description, owner_employee_id, due_date, recurring_interval, created_by)
-           VALUES ($1,$2,$3,$4, ($5::date + $6::interval), $7, $8)`,
-          [item.category, item.title, item.description, item.owner_employee_id, item.due_date, intervalSql, item.recurring_interval, item.created_by]
+          `INSERT INTO compliance_items
+             (category, title, description, owner_employee_id, due_date, recurring_interval, created_by, is_auto_generated, source_registration_slug)
+           VALUES ($1,$2,$3,$4, ($5::date + $6::interval), $7, $8, $9, $10)`,
+          [
+            item.category, item.title, item.description, item.owner_employee_id,
+            item.due_date, intervalSql, item.recurring_interval, item.created_by,
+            item.is_auto_generated || false, item.source_registration_slug || null,
+          ]
         );
       }
     }

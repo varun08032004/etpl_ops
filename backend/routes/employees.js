@@ -7,6 +7,7 @@ const { authenticate, requireRole } = require('../middleware/auth');
 const { fireEvent } = require('../services/automationEngine');
 const { logAction } = require('../services/auditLog');
 const { registerApprovalAction, createApprovalRequest } = require('../services/approvals');
+const { buildEmployeeActionChain } = require('../services/approvalChain');
 
 router.use(authenticate);
 
@@ -36,10 +37,11 @@ router.get('/me', async (req, res) => {
       return res.status(404).json({ error: 'This login is not linked to an employee record' });
     }
     const { rows: [employee] } = await safeQuery(
-      `SELECT e.*, d.name AS department, des.title AS designation
+      `SELECT e.*, d.name AS department, des.title AS designation, t.name AS team
        FROM employees e
        LEFT JOIN departments d ON d.id = e.department_id
        LEFT JOIN designations des ON des.id = e.designation_id
+       LEFT JOIN teams t ON t.id = e.team_id
        WHERE e.id = $1`,
       [req.staff.employee_id]
     );
@@ -80,21 +82,24 @@ router.get('/leave-types', async (req, res) => {
 // ── list / search employees ────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
-    const { status, department_id, search } = req.query;
+    const { status, department_id, team_id, search } = req.query;
     const conditions = [];
     const params = [];
 
     if (status) { params.push(status); conditions.push(`e.status = $${params.length}`); }
     if (department_id) { params.push(department_id); conditions.push(`e.department_id = $${params.length}`); }
+    if (team_id) { params.push(team_id); conditions.push(`e.team_id = $${params.length}`); }
     if (search) { params.push(`%${search}%`); conditions.push(`(e.full_name ILIKE $${params.length} OR e.employee_code ILIKE $${params.length} OR e.work_email ILIKE $${params.length})`); }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const { rows } = await safeQuery(
       `SELECT e.id, e.employee_code, e.full_name, e.work_email, e.status, e.employment_type,
-              e.date_of_joining, d.name AS department, des.title AS designation
+              e.date_of_joining, e.department_id, e.team_id,
+              d.name AS department, des.title AS designation, t.name AS team
        FROM employees e
        LEFT JOIN departments d ON d.id = e.department_id
        LEFT JOIN designations des ON des.id = e.designation_id
+       LEFT JOIN teams t ON t.id = e.team_id
        ${where}
        ORDER BY e.created_at DESC`,
       params
@@ -159,17 +164,17 @@ router.post('/', requireRole('hr'), async (req, res) => {
       `INSERT INTO employees (
          employee_code, full_name, personal_email, work_email, phone, gender, date_of_birth,
          address_line, city, state, pincode, pan_number,
-         department_id, designation_id, manager_id, employment_type, date_of_joining,
+         department_id, team_id, designation_id, manager_id, employment_type, date_of_joining,
          ctc_annual, basic_monthly, hra_monthly, other_allowances_monthly, employer_pf_monthly,
          da_monthly, tax_regime, pf_applicable,
          bank_account_number, bank_ifsc
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
        RETURNING *`,
       [
         next_code, b.full_name, b.personal_email || null, b.work_email || null, b.phone || null,
         b.gender || null, b.date_of_birth || null,
         b.address_line || null, b.city || null, b.state || null, b.pincode || null, b.pan_number || null,
-        b.department_id || null, b.designation_id || null, b.manager_id || null,
+        b.department_id || null, b.team_id || null, b.designation_id || null, b.manager_id || null,
         b.employment_type || 'full_time', b.date_of_joining,
         b.ctc_annual || null, b.basic_monthly || null, b.hra_monthly || null,
         b.other_allowances_monthly || null, b.employer_pf_monthly || 0,
@@ -193,7 +198,7 @@ router.put('/:id', requireRole('hr'), async (req, res) => {
     const allowed = [
       'full_name', 'personal_email', 'work_email', 'phone', 'gender', 'date_of_birth',
       'address_line', 'city', 'state', 'pincode', 'pan_number',
-      'department_id', 'designation_id', 'manager_id', 'employment_type', 'status',
+      'department_id', 'team_id', 'designation_id', 'manager_id', 'employment_type', 'status',
       'ctc_annual', 'basic_monthly', 'hra_monthly', 'other_allowances_monthly', 'employer_pf_monthly',
       'da_monthly', 'tax_regime', 'pf_applicable', 'esic_applicable', 'declared_deductions',
       'bank_account_number', 'bank_ifsc', 'trackpilot_user_id', 'notes',
@@ -204,6 +209,15 @@ router.put('/:id', requireRole('hr'), async (req, res) => {
     // through as a bare status flip that skips all of that.
     if (req.body.status === 'exited') {
       return res.status(400).json({ error: 'Use POST /employees/:id/exit to offboard an employee, not a status update' });
+    }
+    // Symmetric guard: bringing an exited employee back to any active-ish
+    // status here would skip login reactivation and leave date_of_exit /
+    // exit_reason stale. That has to go through POST /:id/reinstate instead.
+    if ('status' in req.body) {
+      const { rows: [current] } = await safeQuery(`SELECT status FROM employees WHERE id = $1`, [req.params.id]);
+      if (current?.status === 'exited') {
+        return res.status(400).json({ error: 'Use POST /employees/:id/reinstate to bring back an exited employee, not a status update' });
+      }
     }
 
     const sets = [];
@@ -254,6 +268,8 @@ router.post('/:id/exit', requireRole('hr'), async (req, res) => {
     const { rows: [emp] } = await safeQuery(`SELECT id, full_name FROM employees WHERE id = $1`, [req.params.id]);
     if (!emp) return res.status(404).json({ error: 'Employee not found' });
 
+    const chain = await buildEmployeeActionChain(emp.id, req.staff.id);
+
     const request = await createApprovalRequest({
       actionType: 'employee.exit',
       targetType: 'employee',
@@ -262,16 +278,51 @@ router.post('/:id/exit', requireRole('hr'), async (req, res) => {
       requestedBy: req.staff.id,
       reason: reason || null,
       payload: { exit_date, reason },
+      chain,
     });
 
     res.status(202).json({
       pending: true,
       request,
-      message: `Exit for ${emp.full_name} requested — awaiting Founder approval.`,
+      message: `Exit for ${emp.full_name} requested — next approver: ${chain[0].label}.`,
     });
   } catch (err) {
     console.error('[employees:exit]', err);
     res.status(500).json({ error: 'Failed to process exit' });
+  }
+});
+
+// ── reinstate — undo an accidental exit. Immediate for hr/admin/owner alike,
+// since this corrects a mistake rather than performing a new destructive
+// action, so it's not routed through Founder approval. Clears date_of_exit /
+// exit_reason and reactivates the linked login in the same step so the two
+// can't end up out of sync (employee active but login still off, or vice versa).
+// Department/team/designation/manager are left exactly as they were — HR can
+// change those afterwards via Edit if the employee is coming back into a
+// different role.
+router.post('/:id/reinstate', requireRole('hr'), async (req, res) => {
+  try {
+    const { rows } = await safeQuery(
+      `UPDATE employees SET status = 'active', date_of_exit = NULL, exit_reason = NULL
+       WHERE id = $1 AND status = 'exited' RETURNING id, full_name, status`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Employee not found, or is not currently exited' });
+
+    const { rows: [reactivatedLogin] } = await safeQuery(
+      `UPDATE staff_accounts SET is_active = true WHERE employee_id = $1 RETURNING id, email`,
+      [req.params.id]
+    );
+
+    await logAction({
+      staffId: req.staff.id, action: 'employee.reinstated', entity: 'employees', entityId: rows[0].id,
+      newValue: { full_name: rows[0].full_name, reactivated_login: reactivatedLogin?.email || null },
+    });
+
+    res.json({ employee: rows[0], reactivated_login: reactivatedLogin || null });
+  } catch (err) {
+    console.error('[employees:reinstate]', err);
+    res.status(500).json({ error: 'Failed to reinstate employee' });
   }
 });
 

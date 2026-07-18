@@ -6,21 +6,16 @@ const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { logAction } = require('../services/auditLog');
 const { registerApprovalAction, createApprovalRequest } = require('../services/approvals');
+const { buildDepartmentChain } = require('../services/approvalChain');
 
 router.use(authenticate);
 
-// The actual deletion, run either immediately (owner) or later by
-// approveRequest() once the Founder signs off (the admin-initiated path).
-// The approved-via-Founder path is logged inside approveRequest() itself
-// (services/approvals.js); the owner-immediate path is logged explicitly
-// below, same pattern as staff_account.deactivate and employee.exit.
 async function deleteDepartment(targetId) {
   const { rows } = await safeQuery(`DELETE FROM departments WHERE id = $1 RETURNING id, name`, [targetId]);
   return rows[0];
 }
 registerApprovalAction('department.delete', deleteDepartment);
 
-// ── list departments, with head name + employee count ──────────────────────
 router.get('/', async (req, res) => {
   try {
     const { rows } = await safeQuery(
@@ -43,7 +38,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ── single department with its members ──────────────────────────────────────
 router.get('/:id', async (req, res) => {
   try {
     const { rows: [dept] } = await safeQuery(
@@ -70,7 +64,6 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// ── create — immediate, additions don't need approval ───────────────────────
 router.post('/', requireRole('admin'), async (req, res) => {
   try {
     const { name, description, head_employee_id, code, cost_center, location, budget, status, parent_department_id } = req.body;
@@ -96,10 +89,6 @@ router.post('/', requireRole('admin'), async (req, res) => {
   }
 });
 
-// ── update (rename, change description, change head, etc.) — immediate ─────
-// Editing metadata isn't destructive, so this stays outside the approval
-// flow — only deleting the department itself is gated. Not audit-logged
-// either, matching the "not every CRUD action" scoping in services/auditLog.js.
 router.put('/:id', requireRole('admin'), async (req, res) => {
   try {
     const allowed = ['name', 'description', 'head_employee_id', 'code', 'cost_center', 'location', 'budget', 'status', 'parent_department_id'];
@@ -127,11 +116,7 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
   }
 });
 
-// ── delete — destructive, routed through Founder approval for admins ───────
-// Owner: immediate, logged directly below. Admin: creates a pending request
-// (logged by services/approvals.js at request-creation and again on
-// eventual approval/rejection). Blocked outright if employees are still
-// assigned — reassign them first.
+// ── delete — destructive, routed through the resolved approval chain unless owner ──
 router.delete('/:id', requireRole('admin'), async (req, res) => {
   try {
     const { rows: [dept] } = await safeQuery(`SELECT id, name FROM departments WHERE id = $1`, [req.params.id]);
@@ -151,6 +136,7 @@ router.delete('/:id', requireRole('admin'), async (req, res) => {
       return res.json({ department: deleted });
     }
 
+    const chain = await buildDepartmentChain(dept.id, req.staff.id);
     const request = await createApprovalRequest({
       actionType: 'department.delete',
       targetType: 'department',
@@ -158,12 +144,13 @@ router.delete('/:id', requireRole('admin'), async (req, res) => {
       targetLabel: dept.name,
       requestedBy: req.staff.id,
       reason: req.body.reason || null,
+      chain,
     });
 
     res.status(202).json({
       pending: true,
       request,
-      message: `Deletion of "${dept.name}" requested — awaiting Founder approval.`,
+      message: `Deletion of "${dept.name}" requested — next approver: ${chain[0].label}.`,
     });
   } catch (err) {
     console.error('[departments:delete]', err);

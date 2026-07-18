@@ -7,14 +7,10 @@ const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { logAction } = require('../services/auditLog');
 const { registerApprovalAction, createApprovalRequest } = require('../services/approvals');
+const { buildStaffAccountChain } = require('../services/approvalChain');
 
 router.use(authenticate);
 
-// The actual deactivation, run either immediately (owner, below) or later
-// by approveRequest() once the Founder signs off (the admin-initiated path).
-// The executed deactivation gets logged inside approveRequest() (via
-// services/approvals.js) for the admin path, and explicitly here for the
-// owner-immediate path — both end up in the audit log either way.
 async function deactivateStaffAccount(targetId) {
   const { rows } = await safeQuery(
     `UPDATE staff_accounts SET is_active = false WHERE id = $1 RETURNING id, email, is_active`,
@@ -24,8 +20,6 @@ async function deactivateStaffAccount(targetId) {
 }
 registerApprovalAction('staff_account.deactivate', deactivateStaffAccount);
 
-// Only owner/admin can see the team's login list (requireRole lets owner/admin through
-// regardless of the roles listed, per the RBAC helper — 'admin' here is just the floor).
 router.get('/', requireRole('admin'), async (req, res) => {
   try {
     const { rows } = await safeQuery(
@@ -42,7 +36,6 @@ router.get('/', requireRole('admin'), async (req, res) => {
   }
 });
 
-// Create a login for a team member. Only owner (or admin, for non-owner roles) can do this.
 router.post('/', requireRole('admin'), async (req, res) => {
   try {
     const { email, password, role, employee_id } = req.body;
@@ -52,8 +45,6 @@ router.post('/', requireRole('admin'), async (req, res) => {
     if (password.length < 8) {
       return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
-    // Only an existing owner can grant the owner role to someone else — an admin
-    // creating accounts can't hand out owner-level access.
     if (role === 'owner' && req.staff.role !== 'owner') {
       return res.status(403).json({ error: 'Only an owner can create another owner account' });
     }
@@ -75,10 +66,7 @@ router.post('/', requireRole('admin'), async (req, res) => {
   }
 });
 
-// Deactivate a login. Owner: happens immediately (same as before), logged
-// directly. Admin: creates a pending approval request instead — the account
-// stays active until the Founder approves it via /api/approvals/:id/approve,
-// at which point services/approvals.js logs the executed deactivation.
+// ── deactivate — destructive, routed through the resolved chain unless owner ──
 router.post('/:id/deactivate', requireRole('admin'), async (req, res) => {
   try {
     if (req.params.id === req.staff.id) {
@@ -92,10 +80,10 @@ router.post('/:id/deactivate', requireRole('admin'), async (req, res) => {
       return res.json({ staff });
     }
 
-    // Admin path: request instead of act.
     const { rows: [target] } = await safeQuery(`SELECT id, email FROM staff_accounts WHERE id = $1`, [req.params.id]);
     if (!target) return res.status(404).json({ error: 'Account not found' });
 
+    const chain = await buildStaffAccountChain(target.id, req.staff.id);
     const request = await createApprovalRequest({
       actionType: 'staff_account.deactivate',
       targetType: 'staff_account',
@@ -103,12 +91,13 @@ router.post('/:id/deactivate', requireRole('admin'), async (req, res) => {
       targetLabel: target.email,
       requestedBy: req.staff.id,
       reason: req.body.reason || null,
+      chain,
     });
 
     res.status(202).json({
       pending: true,
       request,
-      message: `Deactivation of ${target.email} requested — awaiting Founder approval.`,
+      message: `Deactivation of ${target.email} requested — next approver: ${chain[0].label}.`,
     });
   } catch (err) {
     console.error('[staff-accounts:deactivate]', err);
@@ -116,8 +105,6 @@ router.post('/:id/deactivate', requireRole('admin'), async (req, res) => {
   }
 });
 
-// Reactivate — always immediate. Restoring access is an addition, not a
-// destructive action, so it stays outside the approval flow.
 router.post('/:id/reactivate', requireRole('admin'), async (req, res) => {
   try {
     const { rows } = await safeQuery(
@@ -135,7 +122,6 @@ router.post('/:id/reactivate', requireRole('admin'), async (req, res) => {
   }
 });
 
-// Reset someone else's password (e.g. they're locked out) — owner/admin only
 router.post('/:id/reset-password', requireRole('admin'), async (req, res) => {
   try {
     const { password } = req.body;
@@ -158,10 +144,6 @@ router.post('/:id/reset-password', requireRole('admin'), async (req, res) => {
   }
 });
 
-// Change someone's role. Only owner can grant/revoke 'owner'; admin can
-// change everything else. Kept immediate + audit-logged, not approval-gated —
-// this is an edit, not a deletion, matching the "no approval needed for
-// additions/edits" rule.
 router.put('/:id/role', requireRole('admin'), async (req, res) => {
   try {
     const { role } = req.body;
@@ -199,11 +181,9 @@ router.put('/:id/role', requireRole('admin'), async (req, res) => {
   }
 });
 
-// Link (or unlink) an existing login to an employee record — not destructive,
-// stays immediate.
 router.post('/:id/link-employee', requireRole('admin'), async (req, res) => {
   try {
-    const { employee_id } = req.body; // null/omitted = unlink
+    const { employee_id } = req.body;
     if (employee_id) {
       const { rows: [emp] } = await safeQuery(`SELECT id FROM employees WHERE id = $1`, [employee_id]);
       if (!emp) return res.status(404).json({ error: 'Employee not found' });
