@@ -9,8 +9,39 @@ const ledger = require('../services/ledger');
 const { convertToINR } = require('../services/fxConversion');
 const { syncBankAccount, autoMatch } = require('../services/bankFeeds/bankReconciliationEngine');
 const ExcelJS = require('exceljs'); // npm install exceljs — used only by the /export endpoint below
+const rateLimit = require('express-rate-limit'); // npm install express-rate-limit
 
 router.use(authenticate);
+
+// General ceiling for this module: generous enough for normal use, low enough
+// to blunt a runaway script or compromised token from hammering the DB/FX API.
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120, // 120 requests/minute per IP across all expense routes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests to the expenses module — please slow down and try again shortly.' },
+});
+router.use(generalLimiter);
+
+// Tighter limit specifically on the routes that create bills, post ledger
+// entries, or move money — these should never be hit dozens of times a
+// minute by legitimate use, so a lower ceiling here catches abuse faster
+// without affecting normal browsing/reading.
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30, // 30 write requests/minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many changes made too quickly — please slow down and try again shortly.' },
+});
+
+router.use((req, res, next) => {
+  if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
+    return writeLimiter(req, res, next);
+  }
+  next();
+});
 
 // ── date math for advancing a recurring expense to its next occurrence ─────
 function advanceDate(date, frequency, customDays) {
@@ -34,6 +65,11 @@ function validateFrequency(frequency) {
 }
 function validateCurrency(currency) {
   return currency == null || ALLOWED_CURRENCIES.includes((currency || '').toUpperCase().trim());
+}
+function validateAmount(value) {
+  // Must be a finite, non-negative number. 0 is valid (free tiers), negative is not.
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0;
 }
 
 async function getEnvironment() {
@@ -152,7 +188,7 @@ router.put('/settings/approval-threshold', requireRole(), async (req, res) => {
   // requireRole() with no args → only owner/admin pass. Threshold changes are owner/admin-only.
   try {
     const { thresholdInr } = req.body;
-    if (thresholdInr == null || Number(thresholdInr) < 0) return res.status(400).json({ error: 'thresholdInr must be a non-negative number' });
+    if (!validateAmount(thresholdInr)) return res.status(400).json({ error: 'thresholdInr must be a number ≥ 0' });
     await safeQuery(
       `INSERT INTO app_settings_numeric (key, value) VALUES ('recurring_expense_approval_threshold_inr', $1)
        ON CONFLICT (key) DO UPDATE SET value = $1`,
@@ -170,12 +206,22 @@ router.get('/recurring', async (req, res) => {
   try {
     const env = await getEnvironment();
     const { category_id } = req.query;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
     const params = [env];
     let categoryClause = '';
     if (category_id) {
       params.push(category_id);
       categoryClause = `WHERE re.category_id = $${params.length}`;
     }
+
+    const { rows: [{ count }] } = await safeQuery(
+      `SELECT COUNT(*) AS count FROM recurring_expenses re ${categoryClause}`,
+      category_id ? [category_id] : []
+    );
+
+    params.push(limit, offset);
     const { rows } = await safeQuery(
       `SELECT re.*, p.name AS vendor_name, ec.name AS category_name,
               CASE WHEN $1 = 'production' THEN re.prod_amount ELSE re.testnet_amount END AS effective_amount
@@ -183,10 +229,11 @@ router.get('/recurring', async (req, res) => {
        LEFT JOIN parties p ON p.id = re.vendor_id
        LEFT JOIN expense_categories ec ON ec.id = re.category_id
        ${categoryClause}
-       ORDER BY re.next_due_date ASC`,
+       ORDER BY re.next_due_date ASC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
-    res.json({ recurringExpenses: rows, environment: env });
+    res.json({ recurringExpenses: rows, environment: env, pagination: { total: Number(count), limit, offset } });
   } catch (err) {
     console.error('[expenses:recurring:list]', err);
     res.status(500).json({ error: 'Failed to fetch recurring expenses' });
@@ -195,15 +242,23 @@ router.get('/recurring', async (req, res) => {
 
 router.get('/recurring/:id/audit-log', requireRole('finance'), async (req, res) => {
   try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+    const { rows: [{ count }] } = await safeQuery(
+      `SELECT COUNT(*) AS count FROM recurring_expense_audit_log WHERE recurring_expense_id = $1`,
+      [req.params.id]
+    );
     const { rows } = await safeQuery(
       `SELECT al.*, sa.email AS changed_by_email
        FROM recurring_expense_audit_log al
        LEFT JOIN staff_accounts sa ON sa.id = al.changed_by
        WHERE al.recurring_expense_id = $1
-       ORDER BY al.created_at DESC`,
-      [req.params.id]
+       ORDER BY al.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [req.params.id, limit, offset]
     );
-    res.json({ auditLog: rows });
+    res.json({ auditLog: rows, pagination: { total: Number(count), limit, offset } });
   } catch (err) {
     console.error('[expenses:recurring:audit-log]', err);
     res.status(500).json({ error: 'Failed to fetch audit log' });
@@ -333,7 +388,7 @@ router.get('/budget-vs-actual', requireRole('finance'), async (req, res) => {
 router.put('/category-budgets/:categoryId', requireRole('finance'), async (req, res) => {
   try {
     const { monthly_budget_inr } = req.body;
-    if (monthly_budget_inr == null) return res.status(400).json({ error: 'monthly_budget_inr is required' });
+    if (!validateAmount(monthly_budget_inr)) return res.status(400).json({ error: 'monthly_budget_inr must be a number ≥ 0' });
     const { rows: [budget] } = await safeQuery(
       `INSERT INTO category_budgets (category_id, monthly_budget_inr) VALUES ($1,$2)
        ON CONFLICT (category_id) DO UPDATE SET monthly_budget_inr = $2, updated_at = NOW() RETURNING *`,
@@ -387,11 +442,18 @@ router.post('/bank-accounts/:bankAccountId/auto-match', requireRole('finance'), 
 
 router.get('/bank-accounts/:bankAccountId/transactions', requireRole('finance'), async (req, res) => {
   try {
-    const { rows } = await safeQuery(
-      `SELECT * FROM expense_bank_transactions WHERE bank_account_id = $1 ORDER BY transaction_date DESC LIMIT 200`,
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+    const { rows: [{ count }] } = await safeQuery(
+      `SELECT COUNT(*) AS count FROM expense_bank_transactions WHERE bank_account_id = $1`,
       [req.params.bankAccountId]
     );
-    res.json({ transactions: rows });
+    const { rows } = await safeQuery(
+      `SELECT * FROM expense_bank_transactions WHERE bank_account_id = $1 ORDER BY transaction_date DESC LIMIT $2 OFFSET $3`,
+      [req.params.bankAccountId, limit, offset]
+    );
+    res.json({ transactions: rows, pagination: { total: Number(count), limit, offset } });
   } catch (err) {
     console.error('[expenses:bank-transactions:list]', err);
     res.status(500).json({ error: 'Failed to fetch bank transactions' });
@@ -588,6 +650,9 @@ router.post('/recurring', requireRole('finance'), async (req, res) => {
     if (!validateCurrency(currency)) {
       return res.status(400).json({ error: `currency must be one of: ${ALLOWED_CURRENCIES.join(', ')}` });
     }
+    if (!validateAmount(testnet_amount) || !validateAmount(prod_amount)) {
+      return res.status(400).json({ error: 'testnet_amount and prod_amount must be numbers ≥ 0' });
+    }
 
     const expenseCurrency = (currency || 'USD').toUpperCase();
     const env = await getEnvironment();
@@ -648,6 +713,12 @@ router.put('/recurring/:id', requireRole('finance'), async (req, res) => {
     }
     if ('currency' in req.body && !validateCurrency(req.body.currency)) {
       return res.status(400).json({ error: `currency must be one of: ${ALLOWED_CURRENCIES.join(', ')}` });
+    }
+    if ('testnet_amount' in req.body && !validateAmount(req.body.testnet_amount)) {
+      return res.status(400).json({ error: 'testnet_amount must be a number ≥ 0' });
+    }
+    if ('prod_amount' in req.body && !validateAmount(req.body.prod_amount)) {
+      return res.status(400).json({ error: 'prod_amount must be a number ≥ 0' });
     }
 
     const { rows: [before] } = await safeQuery(`SELECT * FROM recurring_expenses WHERE id = $1`, [req.params.id]);
