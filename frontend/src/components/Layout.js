@@ -1,5 +1,6 @@
+import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Box, Typography, Avatar, IconButton, Tooltip, Divider } from '@mui/material';
+import { Box, Typography, Avatar, IconButton, Tooltip, Divider, Collapse } from '@mui/material';
 import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined';
 import PeopleOutlinedIcon from '@mui/icons-material/PeopleOutlined';
 import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
@@ -13,6 +14,7 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined';
 import ListAltOutlinedIcon from '@mui/icons-material/ListAltOutlined';
 import TrendingUpOutlinedIcon from '@mui/icons-material/TrendingUpOutlined';
+import BusinessOutlinedIcon from '@mui/icons-material/BusinessOutlined';
 import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
@@ -21,14 +23,15 @@ import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettin
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import PersonOutlinedIcon from '@mui/icons-material/PersonOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from './NotificationBell';
 
-// Owner/admin/hr/finance get the full operational console.
+// Owner/admin/hr/finance/legal_hod/compliance_hod get the full operational console.
 // Everyone else (manager/employee) gets a scoped self-service view —
 // they should not see company-wide financials, other people's records,
 // or admin tools like Team logins / CSV import.
-const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance'];
+const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod'];
 const ADMIN_ROLES = ['owner', 'admin'];
 
 // Grouped instead of one flat list — 13+ items in a row was too much to scan.
@@ -41,7 +44,7 @@ const NAV_GROUPS = [
     ],
   },
   {
-    label: 'People',
+    label: 'HR',
     items: [
       { to: '/employees', label: 'People', icon: PeopleOutlinedIcon },
       { to: '/attendance', label: 'Attendance', icon: AccessTimeOutlinedIcon },
@@ -52,17 +55,29 @@ const NAV_GROUPS = [
   {
     label: 'Revenue',
     items: [
+      { to: '/crm', label: 'CRM', icon: BusinessOutlinedIcon },
       { to: '/sales', label: 'Sales', icon: TrendingUpOutlinedIcon },
       { to: '/invoices', label: 'Invoices', icon: ReceiptLongOutlinedIcon },
     ],
   },
   {
-    label: 'Finance',
+    label: 'Accounting',
     items: [
       { to: '/accounting', label: 'Accounting', icon: AccountBalanceOutlinedIcon },
+    ],
+  },
+  {
+    label: 'Finance',
+    items: [
       { to: '/finance', label: 'Finance', icon: PaidOutlinedIcon },
       { to: '/payroll', label: 'Payroll', icon: PaidOutlinedIcon },
       { to: '/expenses', label: 'Recurring Expenses', icon: EventRepeatOutlinedIcon },
+    ],
+  },
+  {
+    label: 'Legal',
+    items: [
+      { to: '/one-time-compliance', label: 'Registrations', icon: FactCheckOutlinedIcon },
       { to: '/compliance', label: 'Compliance', icon: FactCheckOutlinedIcon },
     ],
   },
@@ -90,12 +105,41 @@ const SELF_SERVICE_NAV = [
   { to: '/', label: 'My Profile', icon: PersonOutlinedIcon, end: true },
 ];
 
+// Groups open by default so nothing is hidden on first load.
+const ALL_GROUP_LABELS = [...NAV_GROUPS, ADMIN_NAV_GROUP].map((g) => g.label);
+const DEFAULT_OPEN_STATE = Object.fromEntries(ALL_GROUP_LABELS.map((label) => [label, true]));
+const STORAGE_KEY = 'sidebar-open-groups';
+
+// Merge saved collapse state on top of defaults, so any newly-added group
+// still defaults to open even if the user's saved state predates it.
+function getInitialOpenState() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return { ...DEFAULT_OPEN_STATE, ...JSON.parse(saved) };
+  } catch {
+    // ignore malformed/blocked storage, fall back to default
+  }
+  return DEFAULT_OPEN_STATE;
+}
+
 export default function Layout() {
   const { staff, logout } = useAuth();
   const navigate = useNavigate();
   const isPrivileged = PRIVILEGED_ROLES.includes(staff?.role);
   const isAdmin = ADMIN_ROLES.includes(staff?.role);
   const navGroups = isAdmin ? [...NAV_GROUPS, ADMIN_NAV_GROUP] : NAV_GROUPS;
+
+  const [openGroups, setOpenGroups] = useState(getInitialOpenState);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(openGroups));
+    } catch {
+      // storage may be unavailable (private mode, quota) — non-critical, skip
+    }
+  }, [openGroups]);
+
+  const toggleGroup = (label) => setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -118,42 +162,66 @@ export default function Layout() {
 
         <Box sx={{ px: 1.5, display: 'flex', flexDirection: 'column', gap: 0.5, flex: 1, overflowY: 'auto' }}>
           {isPrivileged ? (
-            navGroups.map((group) => (
-              <Box key={group.label} sx={{ mb: 1 }}>
-                <Typography sx={{ px: 1.5, pt: 1.5, pb: 0.5, fontSize: '0.65rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                  {group.label}
-                </Typography>
-                {group.items.map(({ to, label, icon: Icon, end }) => (
+            navGroups.map((group) => {
+              const isOpen = openGroups[group.label] ?? true;
+              return (
+                <Box key={group.label} sx={{ mb: 1 }}>
                   <Box
-                    key={to} component={NavLink} to={to} end={end}
+                    onClick={() => toggleGroup(group.label)}
                     sx={{
-                      display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1,
-                      borderRadius: 1.5, color: 'text.secondary', fontSize: '0.875rem', fontWeight: 500,
-                      position: 'relative',
-                      '&.active': {
-                        color: 'text.primary', bgcolor: 'rgba(47,191,113,0.08)',
-                        '& .nav-icon': { color: 'primary.main' },
-                        '&::before': {
-                          content: '""', position: 'absolute', left: -6, top: '20%', bottom: '20%',
-                          width: 3, borderRadius: 3, bgcolor: 'primary.main',
-                        },
-                      },
-                      '&:hover': { color: 'text.primary', bgcolor: 'rgba(255,255,255,0.03)' },
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      px: 1.5, pt: 1.5, pb: 0.5, cursor: 'pointer', userSelect: 'none',
+                      '&:hover .group-label': { color: 'text.primary' },
                     }}
                   >
-                    <Icon className="nav-icon" sx={{ fontSize: 20 }} />
-                    {label}
+                    <Typography
+                      className="group-label"
+                      sx={{ fontSize: '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}
+                    >
+                      {group.label}
+                    </Typography>
+                    <ExpandMoreIcon
+                      sx={{
+                        fontSize: 16, color: 'text.secondary',
+                        transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+                        transition: 'transform 0.15s ease',
+                      }}
+                    />
                   </Box>
-                ))}
-              </Box>
-            ))
+                  <Collapse in={isOpen} timeout={150}>
+                    {group.items.map(({ to, label, icon: Icon, end }) => (
+                      <Box
+                        key={to} component={NavLink} to={to} end={end}
+                        sx={{
+                          display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1,
+                          borderRadius: 1.5, color: 'text.secondary', fontSize: '0.9375rem', fontWeight: 500,
+                          position: 'relative',
+                          '&.active': {
+                            color: 'text.primary', bgcolor: 'rgba(47,191,113,0.08)',
+                            '& .nav-icon': { color: 'primary.main' },
+                            '&::before': {
+                              content: '""', position: 'absolute', left: -6, top: '20%', bottom: '20%',
+                              width: 3, borderRadius: 3, bgcolor: 'primary.main',
+                            },
+                          },
+                          '&:hover': { color: 'text.primary', bgcolor: 'rgba(255,255,255,0.03)' },
+                        }}
+                      >
+                        <Icon className="nav-icon" sx={{ fontSize: 21 }} />
+                        {label}
+                      </Box>
+                    ))}
+                  </Collapse>
+                </Box>
+              );
+            })
           ) : (
             SELF_SERVICE_NAV.map(({ to, label, icon: Icon, end }) => (
               <Box
                 key={to} component={NavLink} to={to} end={end}
                 sx={{
                   display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1,
-                  borderRadius: 1.5, color: 'text.secondary', fontSize: '0.875rem', fontWeight: 500,
+                  borderRadius: 1.5, color: 'text.secondary', fontSize: '0.9375rem', fontWeight: 500,
                   position: 'relative',
                   '&.active': {
                     color: 'text.primary', bgcolor: 'rgba(47,191,113,0.08)',
@@ -166,7 +234,7 @@ export default function Layout() {
                   '&:hover': { color: 'text.primary', bgcolor: 'rgba(255,255,255,0.03)' },
                 }}
               >
-                <Icon className="nav-icon" sx={{ fontSize: 20 }} />
+                <Icon className="nav-icon" sx={{ fontSize: 21 }} />
                 {label}
               </Box>
             ))
@@ -179,9 +247,9 @@ export default function Layout() {
             {staff?.email?.[0]?.toUpperCase()}
           </Avatar>
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography noWrap sx={{ fontSize: '0.8rem', fontWeight: 600 }}>{staff?.email}</Typography>
-            <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', textTransform: 'capitalize' }}>
-              {staff?.role === 'owner' ? 'Founder' : staff?.role}
+            <Typography noWrap sx={{ fontSize: '0.85rem', fontWeight: 600 }}>{staff?.email}</Typography>
+            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', textTransform: 'capitalize' }}>
+              {staff?.role === 'owner' ? 'Founder' : staff?.role?.replace('_', ' ')}
             </Typography>
           </Box>
           <Tooltip title="Log out">

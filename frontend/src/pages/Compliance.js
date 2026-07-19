@@ -9,7 +9,7 @@ import client from '../api/client';
 const CATEGORIES = ['gst', 'tds', 'roc', 'pf', 'esic', 'iso', 'trademark', 'labour', 'dpiit', 'other'];
 const STATUS_COLOR = { not_started: 'default', in_progress: 'info', filed: 'success' };
 
-const emptyForm = { category: 'gst', title: '', description: '', owner_employee_id: '', due_date: '', recurring_interval: '' };
+const emptyForm = { category: 'gst', title: '', description: '', owner_employee_id: '', due_date: '', recurring_interval: '', valid_from: '', valid_till: '' };
 
 export default function Compliance() {
   const [items, setItems] = useState([]);
@@ -95,6 +95,7 @@ export default function Compliance() {
               <TableCell>Category</TableCell>
               <TableCell>Owner</TableCell>
               <TableCell>Due date</TableCell>
+              <TableCell>Valid till</TableCell>
               <TableCell>Status</TableCell>
               <TableCell align="right">Action</TableCell>
             </TableRow>
@@ -109,6 +110,9 @@ export default function Compliance() {
                   {item.due_date?.slice(0, 10)}
                   {item.is_overdue && <Chip size="small" color="error" label="Overdue" sx={{ ml: 1 }} />}
                 </TableCell>
+                <TableCell className="figure" sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>
+                  {item.valid_till ? item.valid_till.slice(0, 10) : '—'}
+                </TableCell>
                 <TableCell><Chip size="small" label={item.status.replace('_', ' ')} color={STATUS_COLOR[item.status]} variant={item.status === 'not_started' ? 'outlined' : 'filled'} /></TableCell>
                 <TableCell align="right">
                   {item.status === 'not_started' && <Button size="small" onClick={() => startItem(item.id)}>Start</Button>}
@@ -117,7 +121,7 @@ export default function Compliance() {
               </TableRow>
             ))}
             {!items.length && (
-              <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No compliance items.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No compliance items.</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
@@ -136,6 +140,10 @@ export default function Compliance() {
             {employees.map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
           </TextField>
           <TextField fullWidth type="date" label="Due date" InputLabelProps={{ shrink: true }} margin="normal" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <TextField fullWidth type="date" label="Valid from" InputLabelProps={{ shrink: true }} margin="normal" value={form.valid_from} onChange={(e) => setForm({ ...form, valid_from: e.target.value })} helperText="When this registration/license starts" />
+            <TextField fullWidth type="date" label="Valid till" InputLabelProps={{ shrink: true }} margin="normal" value={form.valid_till} onChange={(e) => setForm({ ...form, valid_till: e.target.value })} helperText="When it expires/needs renewal" />
+          </Box>
           <TextField fullWidth select label="Recurs" margin="normal" value={form.recurring_interval} onChange={(e) => setForm({ ...form, recurring_interval: e.target.value })}>
             <MenuItem value="">One-off</MenuItem>
             <MenuItem value="monthly">Monthly</MenuItem>

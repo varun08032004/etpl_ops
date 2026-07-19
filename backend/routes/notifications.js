@@ -16,11 +16,11 @@ router.get('/', async (req, res) => {
     if (unread === 'true') where += ` AND is_read = false`;
 
     const { rows } = await safeQuery(
-      `SELECT * FROM notifications ${where} ORDER BY created_at DESC LIMIT 100`,
+      `SELECT * FROM staff_notifications ${where} ORDER BY created_at DESC LIMIT 100`,
       params
     );
     const { rows: [{ count }] } = await safeQuery(
-      `SELECT COUNT(*) FROM notifications WHERE staff_id = $1 AND is_read = false`,
+      `SELECT COUNT(*) FROM staff_notifications WHERE staff_id = $1 AND is_read = false`,
       [req.staff.id]
     );
     res.json({ notifications: rows, unreadCount: Number(count) });
@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
 router.post('/:id/read', async (req, res) => {
   try {
     const { rows } = await safeQuery(
-      `UPDATE notifications SET is_read = true WHERE id = $1 AND staff_id = $2 RETURNING *`,
+      `UPDATE staff_notifications SET is_read = true WHERE id = $1 AND staff_id = $2 RETURNING *`,
       [req.params.id, req.staff.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Notification not found' });
@@ -46,7 +46,7 @@ router.post('/:id/read', async (req, res) => {
 
 router.post('/read-all', async (req, res) => {
   try {
-    await safeQuery(`UPDATE notifications SET is_read = true WHERE staff_id = $1 AND is_read = false`, [req.staff.id]);
+    await safeQuery(`UPDATE staff_notifications SET is_read = true WHERE staff_id = $1 AND is_read = false`, [req.staff.id]);
     res.json({ ok: true });
   } catch (err) {
     console.error('[notifications:read-all]', err);

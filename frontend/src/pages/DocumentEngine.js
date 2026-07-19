@@ -15,6 +15,19 @@ import { useAuth } from '../context/AuthContext';
 
 const CATEGORY_LABELS = { all: 'All', hr: 'HR', legal: 'Legal', finance: 'Finance', compliance: 'Compliance', operations: 'Operations' };
 
+// Mirrors services/documentEngine.js's isFieldApplicable — a field with
+// depends_on only shows (and only then counts as required) when the field
+// it depends on currently holds one of the listed values. Keeping this
+// logic in both places is intentional: the frontend needs it to decide
+// what to render, the backend needs it to decide what to validate — they
+// operate on different data (form state vs. submitted request body) so a
+// shared import isn't a clean fit here.
+function isFieldApplicable(field, data) {
+  if (!field.depends_on) return true;
+  const { key, values } = field.depends_on;
+  return values.includes(data[key]);
+}
+
 export default function DocumentEngine() {
   const { staff } = useAuth();
   const canApprove = ['owner', 'admin', 'hr', 'finance'].includes(staff?.role);
@@ -58,6 +71,20 @@ export default function DocumentEngine() {
     setFormData({});
     setEntityType(''); setEntityId(''); setSendEmail(false); setEmailTo('');
     setError(''); setSuccessDoc(null);
+  };
+
+  const handleFieldChange = (key, value) => {
+    const next = { ...formData, [key]: value };
+    // Any field that depends on this one and is no longer applicable
+    // gets its stored value cleared, so switching e.g. Employee Type away
+    // from "Intern (Paid)" doesn't silently keep submitting a stipend
+    // amount the person can no longer see or edit.
+    for (const f of activeTemplate?.fields || []) {
+      if (f.depends_on && f.depends_on.key === key && !isFieldApplicable(f, next)) {
+        delete next[f.key];
+      }
+    }
+    setFormData(next);
   };
 
   const handleGenerate = async () => {
@@ -199,21 +226,70 @@ export default function DocumentEngine() {
                 <>
                   {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
                   <Grid container spacing={2}>
-                    {(activeTemplate.fields || []).map((f) => (
+                    {(activeTemplate.fields || [])
+                      .filter((f) => isFieldApplicable(f, formData))
+                      .filter((f) => !f.auto_sequence) // assigned automatically on generation — never shown as an input
+                      .map((f) => (
                       <Grid item xs={12} sm={f.type === 'textarea' ? 12 : 6} key={f.key}>
-                        <TextField
-                          fullWidth
-                          label={f.label}
-                          required={f.required}
-                          type={f.type === 'date' ? 'date' : f.type === 'number' ? 'number' : 'text'}
-                          multiline={f.type === 'textarea'}
-                          minRows={f.type === 'textarea' ? 3 : undefined}
-                          InputLabelProps={f.type === 'date' ? { shrink: true } : undefined}
-                          value={formData[f.key] || ''}
-                          onChange={(e) => setFormData({ ...formData, [f.key]: e.target.value })}
-                        />
+                        {f.key === 'department' ? (
+                          // Live dropdown sourced from the real departments table —
+                          // not a hardcoded options list — so it always reflects
+                          // whatever departments actually exist right now.
+                          <TextField
+                            select
+                            fullWidth
+                            label={f.label}
+                            required={f.required}
+                            value={formData[f.key] || ''}
+                            onChange={(e) => handleFieldChange(f.key, e.target.value)}
+                          >
+                            {departments.map((d) => <MenuItem key={d.id} value={d.name}>{d.name}</MenuItem>)}
+                          </TextField>
+                        ) : f.type === 'select' && f.multiple ? (
+                          <TextField
+                            select
+                            fullWidth
+                            label={f.label}
+                            required={f.required}
+                            SelectProps={{ multiple: true }}
+                            value={formData[f.key] || []}
+                            onChange={(e) => handleFieldChange(f.key, e.target.value)}
+                          >
+                            {(f.options || []).map((opt) => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
+                          </TextField>
+                        ) : f.type === 'select' ? (
+                          <TextField
+                            select
+                            fullWidth
+                            label={f.label}
+                            required={f.required}
+                            value={formData[f.key] || ''}
+                            onChange={(e) => handleFieldChange(f.key, e.target.value)}
+                          >
+                            {(f.options || []).map((opt) => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
+                          </TextField>
+                        ) : (
+                          <TextField
+                            fullWidth
+                            label={f.label}
+                            required={f.required}
+                            type={f.type === 'date' ? 'date' : f.type === 'number' ? 'number' : 'text'}
+                            multiline={f.type === 'textarea'}
+                            minRows={f.type === 'textarea' ? (f.rows || 3) : undefined}
+                            InputLabelProps={f.type === 'date' ? { shrink: true } : undefined}
+                            value={formData[f.key] || ''}
+                            onChange={(e) => handleFieldChange(f.key, e.target.value)}
+                          />
+                        )}
                       </Grid>
                     ))}
+                    {(activeTemplate.fields || []).some((f) => f.auto_sequence) && (
+                      <Grid item xs={12}>
+                        <Alert severity="info" sx={{ py: 0.5 }}>
+                          {(activeTemplate.fields || []).filter((f) => f.auto_sequence).map((f) => f.label).join(', ')} will be assigned automatically when this document is generated.
+                        </Alert>
+                      </Grid>
+                    )}
 
                     {/* Works for every template without any per-template schema change — */}
                     {/* if filled in, it replaces the templated body text entirely, but */}

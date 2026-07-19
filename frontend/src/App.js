@@ -24,9 +24,14 @@ import Analytics from './pages/Analytics';
 import Expenses from './pages/Expenses';
 import Admin from './pages/Admin';
 import Compliance from './pages/Compliance';
+import OneTimeCompliance from './pages/OneTimeCompliance';
 import Finance from './pages/Finance';
+import { CompanyList, CompanyDetail } from './pages/CRM';
 
-const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance'];
+// Widened to include legal_hod/compliance_hod — matches Layout.jsx's
+// PRIVILEGED_ROLES, so those roles get Dashboard as their home screen too
+// instead of the self-service MyProfile view.
+const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod'];
 
 function ProtectedRoutes() {
   const { staff, loading } = useAuth();
@@ -38,7 +43,8 @@ function ProtectedRoutes() {
 }
 
 // The root path shows different content depending on role — company-wide
-// financials for owner/admin/hr/finance, a personal profile for everyone else.
+// financials for owner/admin/hr/finance/legal_hod/compliance_hod, a personal
+// profile for everyone else.
 function Home() {
   const { staff } = useAuth();
   return PRIVILEGED_ROLES.includes(staff?.role) ? <Dashboard /> : <MyProfile />;
@@ -67,12 +73,15 @@ export default function App() {
               <Route path="/document-engine" element={<DocumentEngine />} />
               <Route path="/templates" element={<TemplateManager />} />
               <Route path="/sales" element={<Sales />} />
+              <Route path="/crm" element={<CompanyList />} />
+              <Route path="/crm/:id" element={<CompanyDetail />} />
               <Route path="/automation" element={<Automation />} />
               <Route path="/ai-assistant" element={<AIAssistant />} />
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/expenses" element={<Expenses />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/compliance" element={<Compliance />} />
+              <Route path="/one-time-compliance" element={<OneTimeCompliance />} />
               <Route path="/finance" element={<Finance />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

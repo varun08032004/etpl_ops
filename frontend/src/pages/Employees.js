@@ -13,6 +13,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import EditIcon from '@mui/icons-material/Edit';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import RestoreIcon from '@mui/icons-material/Restore';
 import client from '../api/client';
 import StatusChip from '../components/StatusChip';
 import Money from '../components/Money';
@@ -26,7 +27,7 @@ const emptyForm = {
   full_name: '', personal_email: '', work_email: '', phone: '', date_of_birth: '',
   city: '', state: 'Maharashtra', pan_number: '',
   date_of_joining: '', employment_type: 'full_time',
-  department_id: '', designation_title: '', manager_id: '',
+  department_id: '', team_id: '', designation_title: '', manager_id: '',
   ctc_annual: '', basic_monthly: '', hra_monthly: '', other_allowances_monthly: '', da_monthly: '',
   tax_regime: 'new', pf_applicable: true,
   bank_account_number: '', bank_ifsc: '',
@@ -44,6 +45,7 @@ async function resolveDesignationId(title, departmentId) {
 function EmployeeList() {
   const [employees, setEmployees] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [teams, setTeams] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
@@ -62,6 +64,7 @@ function EmployeeList() {
   useEffect(() => {
     load();
     client.get('/departments').then(({ data }) => setDepartments(data.departments)).catch(() => {});
+    client.get('/teams').then(({ data }) => setTeams(data.teams)).catch(() => {});
     client.get('/designations').then(({ data }) => setDesignations(data.designations)).catch(() => {});
   }, []);
 
@@ -78,13 +81,28 @@ function EmployeeList() {
     setError('');
   };
 
+  // Department picked first → Team dropdown scopes to that department →
+  // Designation is a free-typed / existing-title field. Changing department
+  // clears whatever team was picked, since a team belongs to exactly one department.
+  const handleDepartmentChange = (e) => {
+    setForm({ ...form, department_id: e.target.value, team_id: '' });
+  };
+
+  const teamsInDepartment = teams.filter((t) => t.department_id === form.department_id);
+
   const handleCreate = async () => {
     setSaving(true);
     setError('');
     try {
       const designation_id = await resolveDesignationId(form.designation_title, form.department_id);
-      const { department_id, designation_title, manager_id, ...rest } = form;
-      const payload = { ...rest, department_id: department_id || null, designation_id, manager_id: manager_id || null };
+      const { department_id, team_id, designation_title, manager_id, ...rest } = form;
+      const payload = {
+        ...rest,
+        department_id: department_id || null,
+        team_id: team_id || null,
+        designation_id,
+        manager_id: manager_id || null,
+      };
 
       const { data } = await client.post('/employees', payload);
       const employeeId = data.employee.id;
@@ -142,6 +160,7 @@ function EmployeeList() {
               <TableCell>Employee</TableCell>
               <TableCell>Code</TableCell>
               <TableCell>Department</TableCell>
+              <TableCell>Team</TableCell>
               <TableCell>Designation</TableCell>
               <TableCell>Joined</TableCell>
               <TableCell>Status</TableCell>
@@ -157,13 +176,14 @@ function EmployeeList() {
                 </TableCell>
                 <TableCell className="figure">{e.employee_code}</TableCell>
                 <TableCell>{e.department || '—'}</TableCell>
+                <TableCell>{e.team || '—'}</TableCell>
                 <TableCell>{e.designation || '—'}</TableCell>
                 <TableCell className="figure">{e.date_of_joining?.slice(0, 10)}</TableCell>
                 <TableCell><StatusChip status={e.status} /></TableCell>
               </TableRow>
             ))}
             {!employees.length && (
-              <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No employees yet.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No employees yet.</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
@@ -204,10 +224,23 @@ function EmployeeList() {
                   {['full_time', 'part_time', 'contract', 'intern'].map((t) => <MenuItem key={t} value={t}>{t.replace('_', ' ')}</MenuItem>)}
                 </TextField>
               </Grid>
-              <Grid item xs={6}>
-                <TextField fullWidth select label="Department" value={form.department_id} onChange={set('department_id')}>
+
+              {/* Ordering intentionally mirrors the org chart: Department first,
+                  then Team (scoped to that department), then Designation. */}
+              <Grid item xs={12}>
+                <TextField fullWidth select label="Department" value={form.department_id} onChange={handleDepartmentChange}>
                   <MenuItem value="">Unassigned</MenuItem>
                   {departments.map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
+                </TextField>
+              </Grid>
+              <Grid item xs={6}>
+                <TextField
+                  fullWidth select label="Team" value={form.team_id} onChange={set('team_id')}
+                  disabled={!form.department_id}
+                  helperText={!form.department_id ? 'Pick a department first' : (teamsInDepartment.find((t) => t.id === form.team_id)?.head_name ? `Team head: ${teamsInDepartment.find((t) => t.id === form.team_id).head_name}` : undefined)}
+                >
+                  <MenuItem value="">No team / department-level</MenuItem>
+                  {teamsInDepartment.map((t) => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
                 </TextField>
               </Grid>
               <Grid item xs={6}>
@@ -219,7 +252,7 @@ function EmployeeList() {
                   renderInput={(params) => <TextField {...params} fullWidth label="Designation" helperText="Type a new title or pick an existing one" />}
                 />
               </Grid>
-              <Grid item xs={6}>
+              <Grid item xs={12}>
                 <TextField fullWidth select label="Reports to (manager)" value={form.manager_id} onChange={set('manager_id')}>
                   <MenuItem value="">No manager set</MenuItem>
                   {employees.map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
@@ -306,6 +339,7 @@ function EmployeeDetail() {
   const [error, setError] = useState('');
   const [checklist, setChecklist] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [teams, setTeams] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [allEmployees, setAllEmployees] = useState([]);
   const [message, setMessage] = useState(null);
@@ -313,6 +347,7 @@ function EmployeeDetail() {
   const [exitOpen, setExitOpen] = useState(false);
   const [exitForm, setExitForm] = useState({ exit_date: '', reason: '' });
   const [exiting, setExiting] = useState(false);
+  const [reinstating, setReinstating] = useState(false);
 
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '', role: 'employee' });
@@ -321,6 +356,7 @@ function EmployeeDetail() {
 
   const canEdit = ['owner', 'admin', 'hr'].includes(staff?.role);
   const canExit = ['owner', 'admin', 'hr'].includes(staff?.role);
+  const canReinstate = ['owner', 'admin', 'hr'].includes(staff?.role);
 
   const loadDocs = () => client.get('/documents', { params: { entity_type: 'employee', entity_id: id } }).then(({ data }) => setDocs(data.documents));
   const loadEmployee = () => client.get(`/employees/${id}`).then(({ data }) => setEmployee(data.employee));
@@ -331,6 +367,7 @@ function EmployeeDetail() {
     loadDocs();
     loadChecklist();
     client.get('/departments').then(({ data }) => setDepartments(data.departments)).catch(() => {});
+    client.get('/teams').then(({ data }) => setTeams(data.teams)).catch(() => {});
     client.get('/designations').then(({ data }) => setDesignations(data.designations)).catch(() => {});
     client.get('/employees').then(({ data }) => setAllEmployees(data.employees)).catch(() => {});
   }, [id]);
@@ -369,7 +406,8 @@ function EmployeeDetail() {
       work_email: employee.work_email || '', phone: employee.phone || '',
       city: employee.city || '', state: employee.state || '', pan_number: employee.pan_number || '',
       employment_type: employee.employment_type || 'full_time',
-      department_id: employee.department_id || '', designation_id: employee.designation_id || '', manager_id: employee.manager_id || '',
+      department_id: employee.department_id || '', team_id: employee.team_id || '',
+      designation_id: employee.designation_id || '', manager_id: employee.manager_id || '',
       bank_account_number: employee.bank_account_number || '', bank_ifsc: employee.bank_ifsc || '',
       ctc_annual: employee.ctc_annual || '', basic_monthly: employee.basic_monthly || '',
       da_monthly: employee.da_monthly || '', hra_monthly: employee.hra_monthly || '',
@@ -394,6 +432,11 @@ function EmployeeDetail() {
     }
   };
 
+  // Changing department in the Edit dialog clears whatever team was set,
+  // same as the Add-employee flow — a team belongs to exactly one department.
+  const setEditDepartment = (e) => setEditForm({ ...editForm, department_id: e.target.value, team_id: '' });
+  const editTeamsInDepartment = teams.filter((t) => t.department_id === editForm?.department_id);
+
   const setEdit = (key) => (e) => setEditForm({ ...editForm, [key]: e.target.value });
 
   const handleExit = async () => {
@@ -412,6 +455,24 @@ function EmployeeDetail() {
       setMessage({ severity: 'error', text: err.response?.data?.error || 'Failed to process exit' });
     } finally {
       setExiting(false);
+    }
+  };
+
+  // Undo an accidental exit — immediate for owner/admin/hr, no approval step,
+  // since this is correcting a mistake rather than a new destructive action.
+  // Also flips their old login back on if they had one.
+  const handleReinstate = async () => {
+    setReinstating(true);
+    setMessage(null);
+    try {
+      const { data } = await client.post(`/employees/${id}/reinstate`);
+      const loginNote = data.reactivated_login ? ` Their login (${data.reactivated_login.email}) was reactivated too.` : '';
+      setMessage({ severity: 'success', text: `${employee.full_name} has been reinstated.${loginNote}` });
+      loadEmployee();
+    } catch (err) {
+      setMessage({ severity: 'error', text: err.response?.data?.error || 'Failed to reinstate employee' });
+    } finally {
+      setReinstating(false);
     }
   };
 
@@ -446,18 +507,28 @@ function EmployeeDetail() {
           <Typography sx={{ color: 'text.secondary' }}>{employee.employee_code} · {employee.work_email}</Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
-          {canEdit && employee.status !== 'exited' && (
-            employee.linked_staff_account
-              ? <Button size="small" variant="outlined" disabled sx={{ fontSize: '0.75rem' }}>
-                  Login linked: {employee.linked_staff_account.email}
+          {employee.status === 'exited' ? (
+            canReinstate && (
+              <Button variant="outlined" color="success" startIcon={<RestoreIcon />} onClick={handleReinstate} disabled={reinstating}>
+                {reinstating ? 'Reinstating…' : 'Reinstate'}
+              </Button>
+            )
+          ) : (
+            <>
+              {canEdit && (
+                employee.linked_staff_account
+                  ? <Button size="small" variant="outlined" disabled sx={{ fontSize: '0.75rem' }}>
+                      Login linked: {employee.linked_staff_account.email}
+                    </Button>
+                  : <Button size="small" variant="outlined" startIcon={<PersonAddIcon />} onClick={openCreateLogin}>Create login</Button>
+              )}
+              {canEdit && <Button variant="outlined" startIcon={<EditIcon />} onClick={openEdit}>Edit</Button>}
+              {canExit && (
+                <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={() => { setExitForm({ exit_date: '', reason: '' }); setExitOpen(true); }}>
+                  Exit
                 </Button>
-              : <Button size="small" variant="outlined" startIcon={<PersonAddIcon />} onClick={openCreateLogin}>Create login</Button>
-          )}
-          {canEdit && <Button variant="outlined" startIcon={<EditIcon />} onClick={openEdit}>Edit</Button>}
-          {canExit && employee.status !== 'exited' && (
-            <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={() => { setExitForm({ exit_date: '', reason: '' }); setExitOpen(true); }}>
-              Exit
-            </Button>
+              )}
+            </>
           )}
         </Box>
       </Box>
@@ -466,6 +537,7 @@ function EmployeeDetail() {
       {employee.status === 'exited' && (
         <Alert severity="warning" sx={{ mb: 2.5 }}>
           Exited on {employee.date_of_exit?.slice(0, 10)}{employee.exit_reason ? ` — ${employee.exit_reason}` : ''}
+          {canReinstate ? ' — click "Reinstate" above if this was a mistake.' : ''}
         </Alert>
       )}
 
@@ -481,6 +553,7 @@ function EmployeeDetail() {
             <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Status</Typography><StatusChip status={employee.status} /></Grid>
             <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Employment type</Typography><Typography sx={{ textTransform: 'capitalize' }}>{employee.employment_type?.replace('_', ' ')}</Typography></Grid>
             <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Department</Typography><Typography>{departments.find((d) => d.id === employee.department_id)?.name || '—'}</Typography></Grid>
+            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Team</Typography><Typography>{teams.find((t) => t.id === employee.team_id)?.name || '—'}</Typography></Grid>
             <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Designation</Typography><Typography>{designations.find((d) => d.id === employee.designation_id)?.title || '—'}</Typography></Grid>
             <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Reports to</Typography><Typography>{allEmployees.find((e) => e.id === employee.manager_id)?.full_name || '—'}</Typography></Grid>
             <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Date of joining</Typography><Typography className="figure">{employee.date_of_joining?.slice(0, 10)}</Typography></Grid>
@@ -588,9 +661,15 @@ function EmployeeDetail() {
                 </TextField>
               </Grid>
               <Grid item xs={6}>
-                <TextField fullWidth select label="Department" value={editForm.department_id} onChange={setEdit('department_id')}>
+                <TextField fullWidth select label="Department" value={editForm.department_id} onChange={setEditDepartment}>
                   <MenuItem value="">Unassigned</MenuItem>
                   {departments.map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
+                </TextField>
+              </Grid>
+              <Grid item xs={6}>
+                <TextField fullWidth select label="Team" value={editForm.team_id} onChange={setEdit('team_id')} disabled={!editForm.department_id}>
+                  <MenuItem value="">No team / department-level</MenuItem>
+                  {editTeamsInDepartment.map((t) => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
                 </TextField>
               </Grid>
               <Grid item xs={6}>
@@ -599,7 +678,7 @@ function EmployeeDetail() {
                   {designations.map((d) => <MenuItem key={d.id} value={d.id}>{d.title}</MenuItem>)}
                 </TextField>
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={6}>
                 <TextField fullWidth select label="Reports to (manager)" value={editForm.manager_id} onChange={setEdit('manager_id')}>
                   <MenuItem value="">No manager set</MenuItem>
                   {allEmployees.filter((e) => e.id !== id).map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
@@ -641,7 +720,7 @@ function EmployeeDetail() {
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 1 }}>
             This sets status to Exited and deactivates their login (if any). This does not delete their record —
-            payroll and leave history are preserved.
+            payroll and leave history are preserved, and it can be undone with "Reinstate" if it was a mistake.
             {staff?.role === 'admin' && ' As Admin, this will be sent to the Founder for approval before it takes effect.'}
           </Alert>
           <TextField fullWidth type="date" label="Exit date" InputLabelProps={{ shrink: true }} margin="normal"

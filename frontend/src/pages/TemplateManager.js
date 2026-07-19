@@ -11,9 +11,18 @@ import BlockOutlinedIcon from '@mui/icons-material/BlockOutlined';
 import client from '../api/client';
 
 const CATEGORIES = ['hr', 'legal', 'finance', 'compliance', 'operations'];
-const FIELD_TYPES = ['text', 'textarea', 'date', 'number'];
+const FIELD_TYPES = ['text', 'textarea', 'date', 'number', 'select'];
 
-const emptyField = () => ({ key: '', label: '', type: 'text', required: true, highlight: false });
+const emptyField = () => ({
+  key: '', label: '', type: 'text', required: true, highlight: false,
+  options: [], // used when type === 'select'
+  multiple: false, // used when type === 'select' — allow picking more than one option
+  rows: undefined, // used when type === 'textarea' — how many rows visible on the Generate form (default 3)
+  depends_on: null, // { key: 'other_field_key', values: ['A','B'] } — only shows/required when other_field_key's value is one of values
+  auto_sequence: false, // if true, value is assigned automatically (count of previously generated docs + 1) instead of shown as an input
+  sequence_prefix: '', // e.g. "SC-" — only used when auto_sequence is true
+  sequence_pad: 4, // zero-padding width — e.g. 4 -> "0007"
+});
 
 const emptyTemplate = () => ({
   id: null,
@@ -75,6 +84,14 @@ export default function TemplateManager() {
     const keys = form.fields.map((f) => f.key);
     if (keys.some((k) => !k)) return 'Every field needs a key (derived from its label)';
     if (new Set(keys).size !== keys.length) return 'Field keys must be unique';
+    for (const f of form.fields) {
+      if (f.type === 'select' && (!f.options || f.options.length < 2)) {
+        return `"${f.label || f.key}" is a dropdown but has fewer than 2 options`;
+      }
+      if (f.depends_on && (!f.depends_on.key || !f.depends_on.values?.length)) {
+        return `"${f.label || f.key}" has an incomplete "only show when" condition`;
+      }
+    }
     return '';
   };
 
@@ -237,6 +254,10 @@ export default function TemplateManager() {
                 "amount", "price", "fee", or "budget" are automatically formatted as ₹ with Indian comma grouping and a
                 Lacs/Crore suffix — both inline in the letter text and in the summary box — so admins can just type
                 <code>3600000</code> or <code>36,00,000</code> and it renders as <code>₹36,00,000 (36.00 L)</code>.
+                Use <strong>select</strong> type for a dropdown with fixed options. A field named exactly <code>department</code>
+                always renders as a live dropdown of your actual departments regardless of its declared type or options.
+                Use <strong>"Only show when…"</strong> to make a field conditional — e.g. a Stipend field that only
+                appears when Employee Type is "Intern (Paid)".
               </Typography>
 
               {form.fields.map((f, idx) => (
@@ -276,6 +297,91 @@ export default function TemplateManager() {
                     <Grid item xs={6} sm={0.75}>
                       <IconButton size="small" onClick={() => removeField(idx)}><DeleteOutlineIcon fontSize="small" /></IconButton>
                     </Grid>
+
+                    {f.type === 'textarea' && (
+                      <Grid item xs={6} sm={3}>
+                        <TextField
+                          fullWidth size="small" type="number" label="Rows (default 3)"
+                          placeholder="e.g. 12 for a big paste box"
+                          value={f.rows || ''}
+                          onChange={(e) => updateField(idx, { rows: e.target.value ? Number(e.target.value) : undefined })}
+                        />
+                      </Grid>
+                    )}
+
+                    {(f.type === 'text' || f.type === 'number') && (
+                      <Grid item xs={12}>
+                        <FormControlLabel
+                          control={<Checkbox size="small" checked={f.auto_sequence} onChange={(e) => updateField(idx, { auto_sequence: e.target.checked, required: e.target.checked ? false : f.required })} />}
+                          label="Auto-assign sequence number (not shown as an input — computed from previous documents of this type)"
+                        />
+                        {f.auto_sequence && (
+                          <Box sx={{ display: 'flex', gap: 1.5, mt: 0.5, ml: 4 }}>
+                            <TextField
+                              size="small" label="Prefix (optional)" placeholder="SC-"
+                              value={f.sequence_prefix || ''}
+                              onChange={(e) => updateField(idx, { sequence_prefix: e.target.value })}
+                              sx={{ width: 140 }}
+                            />
+                            <TextField
+                              size="small" type="number" label="Zero-pad width"
+                              value={f.sequence_pad ?? 4}
+                              onChange={(e) => updateField(idx, { sequence_pad: Number(e.target.value) || 4 })}
+                              sx={{ width: 140 }}
+                            />
+                            <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
+                              Example: {(f.sequence_prefix || '')}{String(7).padStart(f.sequence_pad || 4, '0')}
+                            </Typography>
+                          </Box>
+                        )}
+                      </Grid>
+                    )}
+
+                    {f.type === 'select' && (
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth size="small" label="Dropdown options (comma-separated)"
+                          placeholder="Full Time, Contract Based, Intern (Paid), Intern (Unpaid)"
+                          value={(f.options || []).join(', ')}
+                          onChange={(e) => updateField(idx, { options: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
+                        />
+                        <FormControlLabel
+                          sx={{ mt: 0.5 }}
+                          control={<Checkbox size="small" checked={f.multiple} onChange={(e) => updateField(idx, { multiple: e.target.checked })} />}
+                          label="Allow selecting more than one (e.g. Directors Present)"
+                        />
+                      </Grid>
+                    )}
+
+                    <Grid item xs={12} sm={5}>
+                      <TextField
+                        select fullWidth size="small" label="Only show when…"
+                        value={f.depends_on?.key || ''}
+                        onChange={(e) => {
+                          const key = e.target.value;
+                          updateField(idx, { depends_on: key ? { key, values: f.depends_on?.key === key ? f.depends_on.values : [] } : null });
+                        }}
+                        helperText="Optional — leave blank to always show this field"
+                      >
+                        <MenuItem value="">Always show</MenuItem>
+                        {form.fields.filter((other) => other.key && other.key !== f.key).map((other) => (
+                          <MenuItem key={other.key} value={other.key}>{other.label || other.key}</MenuItem>
+                        ))}
+                      </TextField>
+                    </Grid>
+                    {f.depends_on?.key && (
+                      <Grid item xs={12} sm={7}>
+                        <TextField
+                          fullWidth size="small"
+                          label={`...equals one of (comma-separated)`}
+                          placeholder="Intern (Paid)"
+                          value={(f.depends_on.values || []).join(', ')}
+                          onChange={(e) => updateField(idx, {
+                            depends_on: { key: f.depends_on.key, values: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) },
+                          })}
+                        />
+                      </Grid>
+                    )}
                   </Grid>
                 </Paper>
               ))}

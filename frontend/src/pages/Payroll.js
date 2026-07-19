@@ -9,6 +9,7 @@ import StatusChip from '../components/StatusChip';
 import Money from '../components/Money';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const PAYOUT_MODES = ['IMPS', 'NEFT', 'RTGS'];
 
 export default function Payroll() {
   const [runs, setRuns] = useState([]);
@@ -18,9 +19,12 @@ export default function Payroll() {
   const now = new Date();
   const [form, setForm] = useState({ month: now.getMonth() + 1, year: now.getFullYear() });
   const [detail, setDetail] = useState(null);
+  const [disburseDialog, setDisburseDialog] = useState(null);
+  const [payoutMode, setPayoutMode] = useState('IMPS');
+  const [disbursing, setDisbursing] = useState(false);
+  const [disburseError, setDisburseError] = useState('');
+  const [syncingRunId, setSyncingRunId] = useState(null);
 
-  // Not built as its own list endpoint yet — the backend has GET /payroll/runs/:id.
-  // Adjust once you add a GET /payroll/runs list endpoint (small addition to routes/payroll.js).
   const load = () => client.get('/payroll/runs').then(({ data }) => setRuns(data.payrollRuns || [])).catch(() => setRuns([]));
 
   useEffect(() => { load(); }, []);
@@ -39,10 +43,37 @@ export default function Payroll() {
     }
   };
 
-  const handleDisburse = async (id) => {
-    if (!window.confirm('This will trigger real bank transfers via RazorpayX. Continue?')) return;
-    await client.post(`/payroll/runs/${id}/disburse`);
-    load();
+  const openDisburseDialog = (run, e) => {
+    e.stopPropagation();
+    setDisburseError('');
+    setPayoutMode('IMPS');
+    setDisburseDialog(run);
+  };
+
+  const confirmDisburse = async () => {
+    setDisbursing(true);
+    setDisburseError('');
+    try {
+      await client.post(`/payroll/runs/${disburseDialog.id}/disburse`, { mode: payoutMode });
+      setDisburseDialog(null);
+      load();
+    } catch (err) {
+      setDisburseError(err.response?.data?.error || 'Failed to disburse payroll');
+    } finally {
+      setDisbursing(false);
+    }
+  };
+
+  const syncPayoutStatus = async (runId, e) => {
+    e.stopPropagation();
+    setSyncingRunId(runId);
+    try {
+      await client.post(`/payroll/runs/${runId}/sync-payout-status`);
+      load();
+      if (detail?.run?.id === runId) openDetail(runId);
+    } finally {
+      setSyncingRunId(null);
+    }
   };
 
   const openDetail = async (id) => {
@@ -76,17 +107,29 @@ export default function Payroll() {
                 <TableCell align="right"><Money amount={r.total_gross} /></TableCell>
                 <TableCell align="right"><Money amount={r.total_deductions} /></TableCell>
                 <TableCell align="right"><Money amount={r.total_net} /></TableCell>
-                <TableCell><StatusChip status={r.status} /></TableCell>
+                <TableCell>
+                  <StatusChip status={r.status} />
+                  {r.status === 'disbursal_error' && (
+                    <Typography sx={{ fontSize: '0.7rem', color: 'error.main', mt: 0.25 }}>
+                      Some payouts may have gone out before this failed — check payslip statuses below, don't re-disburse.
+                    </Typography>
+                  )}
+                </TableCell>
                 <TableCell align="right">
                   {r.status === 'draft' && (
-                    <Button size="small" onClick={(e) => { e.stopPropagation(); handleDisburse(r.id); }}>Disburse</Button>
+                    <Button size="small" onClick={(e) => openDisburseDialog(r, e)}>Disburse</Button>
+                  )}
+                  {(r.status === 'processing' || r.status === 'paid') && (
+                    <Button size="small" disabled={syncingRunId === r.id} onClick={(e) => syncPayoutStatus(r.id, e)}>
+                      {syncingRunId === r.id ? 'Syncing…' : 'Sync status'}
+                    </Button>
                   )}
                 </TableCell>
               </TableRow>
             ))}
             {!runs.length && (
               <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
-                No payroll runs yet. (Also: add a <code>GET /api/payroll/runs</code> list endpoint — see note in this file.)
+                No payroll runs yet.
               </TableCell></TableRow>
             )}
           </TableBody>
@@ -109,7 +152,12 @@ export default function Payroll() {
                   <TableCell align="right"><Money amount={it.professional_tax} /></TableCell>
                   <TableCell align="right" className="figure">{it.loss_of_pay_days}</TableCell>
                   <TableCell align="right"><Money amount={it.net_pay} /></TableCell>
-                  <TableCell><StatusChip status={it.status} /></TableCell>
+                  <TableCell>
+                    <StatusChip status={it.status} />
+                    {it.status === 'failed' && it.failure_reason && (
+                      <Typography sx={{ fontSize: '0.7rem', color: 'error.main', mt: 0.25 }}>{it.failure_reason}</Typography>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -136,6 +184,25 @@ export default function Payroll() {
         <DialogActions>
           <Button onClick={() => setOpen(false)}>Cancel</Button>
           <Button variant="contained" onClick={handleCreate} disabled={saving}>{saving ? 'Creating…' : 'Create run'}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={!!disburseDialog} onClose={() => !disbursing && setDisburseDialog(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Disburse {disburseDialog && `${MONTHS[disburseDialog.period_month - 1]} ${disburseDialog.period_year}`}</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mb: 2 }}>
+            This sends real bank transfers via Axis Bank to every employee on this run. This cannot be undone by clicking again — the button disables once submitted.
+          </Typography>
+          <TextField fullWidth select label="Transfer mode" value={payoutMode} onChange={(e) => setPayoutMode(e.target.value)}>
+            {PAYOUT_MODES.map((m) => <MenuItem key={m} value={m}>{m}</MenuItem>)}
+          </TextField>
+          {disburseError && <Alert severity="error" sx={{ mt: 2 }}>{disburseError}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDisburseDialog(null)} disabled={disbursing}>Cancel</Button>
+          <Button variant="contained" color="warning" onClick={confirmDisburse} disabled={disbursing}>
+            {disbursing ? 'Disbursing…' : 'Confirm disburse'}
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

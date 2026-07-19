@@ -43,7 +43,7 @@ async function sendEmail({ to, subject, html }) {
  */
 async function notifyStaff({ staffId, type, title, body, link }) {
   const { rows: [row] } = await safeQuery(
-    `INSERT INTO notifications (staff_id, type, title, body, link) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    `INSERT INTO staff_notifications (staff_id, type, title, body, link) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
     [staffId, type, title, body || null, link || null]
   );
 
