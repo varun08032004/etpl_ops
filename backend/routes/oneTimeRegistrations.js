@@ -2,31 +2,42 @@
 // routes/oneTimeRegistrations.js
 //
 // One-time compliance registrations (fixed checklist — seeded by migration,
-// never created/deleted freely). Editable by legal/compliance HODs (and
-// owner/admin, via requireRole's built-in bypass). Marking one "done" spawns
-// the first cycle of every recurring filing tied to it, per
-// services/complianceRules.js — those land in the existing compliance_items
-// table and are picked up automatically by the existing /compliance/run-reminders
-// cron, so no new scheduler is needed.
+// never created/deleted freely). Editable by whoever heads the
+// "Legal & Compliance" department (checked dynamically against
+// departments.head_employee_id — see middleware/auth.js's
+// requireDepartmentHead), plus owner/admin via the usual bypass.
+//
+// 2026-07 update: switched from a legal_hod/compliance_hod role-enum check
+// to requireDepartmentHead('Legal & Compliance'), matching this codebase's
+// existing pattern (departments.head_employee_id, teams.team_head_id) for
+// representing "who heads what" — this scales to any number of departments
+// without ever touching the staff_role enum again.
+//
+// Marking one "done" spawns the first cycle of every recurring filing tied
+// to it, per services/complianceRules.js — those land in the existing
+// compliance_items table and are picked up automatically by the existing
+// /compliance/run-reminders cron, so no new scheduler is needed.
 //
 // Deletion here means "reset the registration" — it's a fixed checklist item,
 // not a free-form record, so nothing is DELETE-d from the table. It requires
 // two sequential approvals: admin first, then founder (owner). This is a
-// separate, self-contained flow from services/approvals.js's single-stage
-// admin-requests/owner-approves pattern used for departments/teams — that
-// system doesn't support a two-stage chain, so this route implements its own.
+// separate, self-contained flow from services/approvals.js's chain-based
+// approval system (buildDepartmentChain) — that system resolves a dynamic
+// chain per department, not a fixed two-stage admin-then-founder sequence,
+// so this route keeps its own simple version rather than forcing a fit.
 
 const express = require('express');
 const router = express.Router();
 const { safeQuery } = require('../db/pool');
-const { authenticate, requireRole } = require('../middleware/auth');
+const { authenticate, requireDepartmentHead } = require('../middleware/auth');
 const { getRulesForSlug, computeFirstDueDate, toISODate } = require('../services/complianceRules');
 
 router.use(authenticate);
 
-// requireRole('legal_hod', 'compliance_hod') already lets owner/admin through
-// too, via the built-in bypass in middleware/auth.js.
-const EDITOR_ROLE_CHECK = requireRole('legal_hod', 'compliance_hod');
+// Change this string if your department is ever renamed — it must match
+// departments.name exactly (case-sensitive).
+const COMPLIANCE_DEPARTMENT_NAME = 'Legal & Compliance';
+const EDITOR_ROLE_CHECK = requireDepartmentHead(COMPLIANCE_DEPARTMENT_NAME);
 
 router.get('/', async (req, res) => {
   try {
@@ -64,6 +75,9 @@ router.get('/:slug', async (req, res) => {
 
 // Mark done / update details — also spawns the first cycle of every recurring
 // filing tied to this registration, the moment it flips from not-done to done.
+// Also usable to correct a mistake on an already-done registration (e.g. a
+// wrong date) without going through the deletion-approval flow, since
+// becomingDone only fires on the not-done -> done transition.
 router.put('/:slug', EDITOR_ROLE_CHECK, async (req, res) => {
   try {
     const { is_done, registration_number, registered_on, proof_document_id, notes } = req.body;
@@ -134,10 +148,10 @@ router.post('/:slug/request-deletion', EDITOR_ROLE_CHECK, async (req, res) => {
   }
 });
 
-// Deliberately NOT using requireRole here — requireRole treats owner and admin
-// as interchangeable (either bypasses any role check), which would let admin
-// approve BOTH stages. This needs the two roles kept strictly separate, so the
-// checks are done explicitly against req.staff.role below.
+// Deliberately NOT using requireRole/requireDepartmentHead here — those both
+// treat owner and admin as interchangeable bypasses, which would let admin
+// approve BOTH stages. This needs the two roles kept strictly separate, so
+// the checks are done explicitly against req.staff.role below.
 router.post('/:slug/approve-deletion', async (req, res) => {
   try {
     const { rows: [item] } = await safeQuery(`SELECT * FROM one_time_registrations WHERE slug = $1`, [req.params.slug]);

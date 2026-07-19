@@ -14,9 +14,12 @@
 // generic PATCH — only through the dedicated /start and /file actions below,
 // so an illegal transition is structurally impossible, not just discouraged.
 //
-// 2026-07 update: create/edit widened from finance-only to also allow
-// legal_hod/compliance_hod, since Compliance now covers ROC/labour/DPIIT
-// items owned by Legal, not just finance-driven filings (GST/TDS/PF/ESIC).
+// 2026-07 update: create/edit widened from finance-only to also allow the
+// head of the "Legal & Compliance" department, since Compliance now covers
+// ROC/labour/DPIIT items owned by Legal, not just finance-driven filings
+// (GST/TDS/PF/ESIC). Uses requireDepartmentHead (checks departments.
+// head_employee_id dynamically) rather than a fixed role name — see
+// middleware/auth.js and routes/oneTimeRegistrations.js for the same pattern.
 // Rows with is_auto_generated=true were spawned automatically from a one-time
 // registration (see routes/oneTimeRegistrations.js) — edits are still allowed
 // but the category/recurring_interval are best left alone since they're
@@ -25,12 +28,20 @@
 const express = require('express');
 const router = express.Router();
 const { safeQuery } = require('../db/pool');
-const { authenticate, requireRole } = require('../middleware/auth');
+const { authenticate, requireRole, requireDepartmentHead } = require('../middleware/auth');
 const { fireEvent } = require('../services/automationEngine');
 
 router.use(authenticate);
 
 const REMINDER_STAGES = [30, 15, 7, 1]; // days before due_date, per SRS §2320
+const COMPLIANCE_DEPARTMENT_NAME = 'Legal & Compliance';
+
+// Passes for owner/admin (via requireRole's bypass), finance role, OR the
+// head of Legal & Compliance (via requireDepartmentHead's dynamic lookup).
+function requireFinanceOrComplianceHead(req, res, next) {
+  if (['owner', 'admin', 'finance'].includes(req.staff.role)) return next();
+  return requireDepartmentHead(COMPLIANCE_DEPARTMENT_NAME)(req, res, next);
+}
 
 // ── list, with computed "is overdue" and days-until-due for the UI ─────────
 router.get('/', async (req, res) => {
@@ -97,7 +108,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // ── create — COMP-01 requires owner + due date at minimum; document can follow later ──
-router.post('/', requireRole('finance', 'legal_hod', 'compliance_hod'), async (req, res) => {
+router.post('/', requireFinanceOrComplianceHead, async (req, res) => {
   try {
     const { category, title, description, owner_employee_id, due_date, recurring_interval } = req.body;
     if (!category || !title || !due_date) {
@@ -116,7 +127,7 @@ router.post('/', requireRole('finance', 'legal_hod', 'compliance_hod'), async (r
 });
 
 // ── edit metadata (not status — see dedicated transitions below) ───────────
-router.put('/:id', requireRole('finance', 'legal_hod', 'compliance_hod'), async (req, res) => {
+router.put('/:id', requireFinanceOrComplianceHead, async (req, res) => {
   try {
     const allowed = ['category', 'title', 'description', 'owner_employee_id', 'due_date', 'recurring_interval'];
     const sets = [];

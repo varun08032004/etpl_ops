@@ -5,6 +5,13 @@
 // Sourced from GSTN, EPFO/ESIC and MCA public due-date schedules (checked July 2026).
 // Statutory due dates can shift with government notifications — review this
 // file at least once a year, or whenever a compliance owner flags a mismatch.
+//
+// 2026-07 update: added trademark, shops_establishment, professional_tax,
+// iec, contract_labour_license as available one-time registration slugs
+// (see migration for seed rows). professional_tax and shops_establishment
+// due dates are STATE-DEPENDENT — the rules below use commonly-seen
+// defaults and are flagged NEEDS_STATE_INPUT. Confirm against your actual
+// state's rules before relying on the auto-generated due date.
 
 const RECURRING_RULES = {
   incorporation: [
@@ -32,10 +39,46 @@ const RECURRING_RULES = {
     { key: 'tds_q2', title: 'TDS Return — Q2 (Jul–Sep)', category: 'tds', interval: 'quarterly', dueRule: { type: 'fixed_annual', month: 10, day: 31 } },
     { key: 'tds_q3', title: 'TDS Return — Q3 (Oct–Dec)', category: 'tds', interval: 'quarterly', dueRule: { type: 'fixed_annual', month: 1, day: 31 } },
     { key: 'tds_q4', title: 'TDS Return — Q4 (Jan–Mar)', category: 'tds', interval: 'quarterly', dueRule: { type: 'fixed_annual', month: 5, day: 31 } },
+    { key: 'advance_tax_q1', title: 'Advance Tax — 1st Installment (15%)', category: 'tds', interval: 'annual', dueRule: { type: 'fixed_annual', month: 6, day: 15 } },
+    { key: 'advance_tax_q2', title: 'Advance Tax — 2nd Installment (45% cumulative)', category: 'tds', interval: 'annual', dueRule: { type: 'fixed_annual', month: 9, day: 15 } },
+    { key: 'advance_tax_q3', title: 'Advance Tax — 3rd Installment (75% cumulative)', category: 'tds', interval: 'annual', dueRule: { type: 'fixed_annual', month: 12, day: 15 } },
+    { key: 'advance_tax_q4', title: 'Advance Tax — 4th Installment (100% cumulative)', category: 'tds', interval: 'annual', dueRule: { type: 'fixed_annual', month: 3, day: 15 } },
   ],
   dpiit: [], // No recurring statutory filing tied to DPIIT recognition itself.
   udyam: [], // Udyam has no renewal/recurring filing by itself.
   epan: [],  // PAN is permanent, no recurring filing.
+
+  // ── added 2026-07 ──────────────────────────────────────────────────────
+  trademark: [], // No recurring filing until renewal — that's a single 10-year-out event,
+                  // not a fit for monthly/quarterly/half_yearly/annual. Track renewal manually.
+
+  shops_establishment: [
+    // NEEDS_STATE_INPUT: renewal cycle and due date vary by state (some annual,
+    // some multi-year depending on establishment size). Defaulting to an
+    // annual reminder on the registration's own anniversary is NOT implemented
+    // here since it needs the actual registration date, which the one-time
+    // registration record already stores — confirm your state's actual cycle
+    // and adjust this rule (or the spawned item's due date) accordingly.
+    { key: 'shops_est_renewal', title: 'Shops & Establishment — Renewal (verify your state\'s cycle)', category: 'labour', interval: 'annual', dueRule: { type: 'fixed_annual', month: 3, day: 31 }, note: 'NEEDS_STATE_INPUT: placeholder due date — confirm actual renewal cycle for your state; some states are multi-year, not annual.' },
+  ],
+
+  professional_tax: [
+    // NEEDS_STATE_INPUT: PT return frequency and due date vary significantly
+    // by state (e.g. Maharashtra: monthly by end of month; Karnataka: monthly
+    // by 20th; some states: annual). Using a generic monthly-by-20th default —
+    // CONFIRM against your actual state's PT rules before relying on this.
+    { key: 'pt_return', title: 'Professional Tax Return (verify your state\'s frequency)', category: 'other', interval: 'monthly', dueRule: { type: 'day_of_next_month', day: 20 }, note: 'NEEDS_STATE_INPUT: placeholder — PT return frequency/due date varies by state.' },
+  ],
+
+  iec: [
+    { key: 'iec_annual_update', title: 'IEC Annual Update (DGFT)', category: 'other', interval: 'annual', dueRule: { type: 'fixed_annual', month: 6, day: 30 }, note: 'Mandatory annual confirmation/update of IEC details on the DGFT portal between April–June, even with no changes.' },
+  ],
+
+  contract_labour_license: [
+    // Renewal date depends on original issue date, not a fixed calendar date —
+    // placeholder annual reminder; adjust to your license's actual issue anniversary.
+    { key: 'cll_renewal', title: 'Contract Labour License — Renewal (confirm issue-date anniversary)', category: 'labour', interval: 'annual', dueRule: { type: 'fixed_annual', month: 3, day: 31 }, note: 'Placeholder date — renewal is typically due before expiry, tied to your license\'s original issue date. Adjust once known.' },
+  ],
 };
 
 // ── due-date computation ────────────────────────────────────────────────

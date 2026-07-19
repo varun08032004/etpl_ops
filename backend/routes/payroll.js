@@ -10,8 +10,48 @@ const axisPayoutAdapter = require('../services/bankFeeds/axisPayoutAdapter');
 const { generatePayslipPDF } = require('../services/payslipGenerator'); // npm install pdfkit
 const archiver = require('archiver'); // npm install archiver — used only for the bulk zip download
 const storage = require('../services/storage'); // your existing Supabase Storage wrapper
+const rateLimit = require('express-rate-limit'); // npm install express-rate-limit (skip if already installed for expenses.js)
 
 router.use(authenticate);
+
+// General ceiling for this module — same reasoning as expenses.js.
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests to the payroll module — please slow down and try again shortly.' },
+});
+router.use(generalLimiter);
+
+// Tighter limit on anything that writes — run creation, settlements, etc.
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many changes made too quickly — please slow down and try again shortly.' },
+});
+router.use((req, res, next) => {
+  if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
+    return writeLimiter(req, res, next);
+  }
+  next();
+});
+
+// Disburse is the single highest-stakes action in this entire module — it
+// sends real bank transfers. It already has an idempotency lock, but a much
+// tighter rate limit on top costs nothing and closes off any scenario where
+// something (a broken retry loop, a compromised token) hammers this specific
+// endpoint. 5/minute is generous for a human clicking a button, useless for
+// an abuse pattern.
+const disburseLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many disbursal attempts — please wait a minute before trying again.' },
+});
 
 // ── self-service: own payslip history — any logged-in employee can see their own ──
 router.get('/me/payslips', async (req, res) => {
@@ -426,7 +466,7 @@ router.get('/me/payslips/:itemId/pdf', async (req, res) => {
 
 // ── disburse via direct Axis Bank payouts + post the accounting entry ──────
 // Requires each employee to have bank_account_number + bank_ifsc_code on file.
-router.post('/runs/:id/disburse', requireRole('finance'), async (req, res) => {
+router.post('/runs/:id/disburse', requireRole('finance'), disburseLimiter, async (req, res) => {
   try {
     const payoutMode = (req.body?.mode || 'IMPS').toUpperCase();
     if (!VALID_PAYOUT_MODES.includes(payoutMode)) {
