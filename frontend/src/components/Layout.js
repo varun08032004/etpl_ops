@@ -26,6 +26,7 @@ import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from './NotificationBell';
+import client from '../api/client';
 
 // Owner/admin/hr/finance/legal_hod/compliance_hod get the full operational console.
 // Everyone else (manager/employee) gets a scoped self-service view —
@@ -94,6 +95,19 @@ const NAV_GROUPS = [
   },
 ];
 
+// Maps a department's granted_roles entries to the existing NAV_GROUPS
+// labels they should unlock for a non-privileged member. E.g. a plain
+// 'employee' login sitting in a department with granted_roles=['finance']
+// sees the Revenue/Accounting/Finance groups (the same routes finance.js/
+// accounting.js/invoices.js/expenses.js already gate behind requireRole
+// ('finance') — see middleware/auth.js + services/departmentAccess.js).
+const ROLE_TO_NAV_GROUP_LABELS = {
+  finance: ['Revenue', 'Accounting', 'Finance'],
+  hr: ['HR'],
+  legal_hod: ['Legal'],
+  compliance_hod: ['Legal'],
+};
+
 const ADMIN_NAV_GROUP = {
   label: 'Admin',
   items: [
@@ -130,6 +144,27 @@ export default function Layout() {
   const navGroups = isAdmin ? [...NAV_GROUPS, ADMIN_NAV_GROUP] : NAV_GROUPS;
 
   const [openGroups, setOpenGroups] = useState(getInitialOpenState);
+  const [deptAccess, setDeptAccess] = useState(null);
+
+  // Non-privileged staff (plain 'employee'/'manager') can still unlock whole
+  // nav groups if their department grants a functional role — e.g. someone
+  // in the Finance department sees Revenue/Accounting/Finance even though
+  // their login role is just 'employee'. Privileged roles already see
+  // everything, so this only matters for the self-service branch below.
+  useEffect(() => {
+    if (isPrivileged) return;
+    client.get('/departments/my-access').then(({ data }) => setDeptAccess(data)).catch(() => setDeptAccess(null));
+  }, [isPrivileged]);
+
+  const deptGrantedGroupLabels = new Set(
+    (deptAccess?.effectiveRoles || []).flatMap((role) => ROLE_TO_NAV_GROUP_LABELS[role] || [])
+  );
+  const deptGrantedNav = NAV_GROUPS
+    .filter((group) => deptGrantedGroupLabels.has(group.label))
+    .flatMap((group) => group.items)
+    // "My Profile" (self-service home) always comes first, dedupe just in case.
+    .filter((item) => item.to !== '/');
+  const selfServiceNav = [...SELF_SERVICE_NAV, ...deptGrantedNav];
 
   useEffect(() => {
     try {
@@ -216,7 +251,7 @@ export default function Layout() {
               );
             })
           ) : (
-            SELF_SERVICE_NAV.map(({ to, label, icon: Icon, end }) => (
+            selfServiceNav.map(({ to, label, icon: Icon, end }) => (
               <Box
                 key={to} component={NavLink} to={to} end={end}
                 sx={{
@@ -250,6 +285,7 @@ export default function Layout() {
             <Typography noWrap sx={{ fontSize: '0.85rem', fontWeight: 600 }}>{staff?.email}</Typography>
             <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', textTransform: 'capitalize' }}>
               {staff?.role === 'owner' ? 'Founder' : staff?.role?.replace('_', ' ')}
+              {deptAccess?.deptAccess?.isHOD ? ` · ${deptAccess.deptAccess.departmentName} Head` : ''}
             </Typography>
           </Box>
           <Tooltip title="Log out">

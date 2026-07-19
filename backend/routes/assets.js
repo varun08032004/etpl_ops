@@ -13,9 +13,21 @@ router.use(authenticate);
 router.get('/', async (req, res) => {
   try {
     const { employee_id, status, category } = req.query;
+    const isPrivileged = ['owner', 'admin', 'hr', 'finance'].includes(req.staff.role) || (req.staff.effectiveRoles || []).includes('hr');
+
+    // Non-privileged staff can only ever see their own assigned assets — if
+    // they ask for someone else's employee_id, or ask with no filter at all,
+    // silently scope it down to themselves (keeps the self-service "my
+    // assets" call simple: just GET /assets, no params needed).
+    let effectiveEmployeeId = employee_id;
+    if (!isPrivileged) {
+      if (!req.staff.employee_id) return res.status(403).json({ error: 'This login is not linked to an employee record' });
+      effectiveEmployeeId = req.staff.employee_id;
+    }
+
     const conditions = [];
     const params = [];
-    if (employee_id) { params.push(employee_id); conditions.push(`a.assigned_to = $${params.length}`); }
+    if (effectiveEmployeeId) { params.push(effectiveEmployeeId); conditions.push(`a.assigned_to = $${params.length}`); }
     if (status) { params.push(status); conditions.push(`a.status = $${params.length}`); }
     if (category) { params.push(category); conditions.push(`a.category = $${params.length}`); }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';

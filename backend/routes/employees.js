@@ -351,12 +351,63 @@ router.post('/:id/leave', async (req, res) => {
   }
 });
 
-router.post('/leave/:leaveId/decision', requireRole('hr'), async (req, res) => {
+// ── pending leave requests I can act on — HR/owner/admin (or anyone whose
+//    department grants 'hr') see everything; a manager sees their direct
+//    reports'; a department head sees their whole department's. ───────────
+router.get('/leave/pending', async (req, res) => {
+  try {
+    const isBroad = ['owner', 'admin', 'hr'].includes(req.staff.role) || (req.staff.effectiveRoles || []).includes('hr');
+    const conditions = [`lr.status = 'pending'`];
+    const params = [];
+
+    if (!isBroad) {
+      if (!req.staff.employee_id) return res.json({ leaveRequests: [] });
+      params.push(req.staff.employee_id);
+      conditions.push(`(e.manager_id = $${params.length} OR e.department_id IN (SELECT id FROM departments WHERE head_employee_id = $${params.length}))`);
+    }
+
+    const { rows } = await safeQuery(
+      `SELECT lr.*, lt.name AS leave_type_name, e.full_name AS employee_name
+       FROM leave_requests lr
+       JOIN leave_types lt ON lt.id = lr.leave_type_id
+       JOIN employees e ON e.id = lr.employee_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY lr.start_date ASC`,
+      params
+    );
+    res.json({ leaveRequests: rows });
+  } catch (err) {
+    console.error('[employees:leave:pending]', err);
+    res.status(500).json({ error: 'Failed to fetch pending leave requests' });
+  }
+});
+
+// requireRole('hr') covers owner/admin/hr and anyone whose department grants
+// 'hr'. On top of that, we ALSO let the specific requester's direct manager
+// (employees.manager_id) or their department head (departments.head_employee_id)
+// approve — that's the "HOD can action anything in their own department"
+// behavior, scoped to just their own people rather than a blanket role grant.
+router.post('/leave/:leaveId/decision', async (req, res) => {
   try {
     const { decision } = req.body; // 'approved' | 'rejected'
     if (!['approved', 'rejected'].includes(decision)) {
       return res.status(400).json({ error: "decision must be 'approved' or 'rejected'" });
     }
+
+    const { rows: [leaveRequest] } = await safeQuery(`SELECT employee_id FROM leave_requests WHERE id = $1`, [req.params.leaveId]);
+    if (!leaveRequest) return res.status(404).json({ error: 'Leave request not found' });
+
+    const { rows: [requester] } = await safeQuery(`SELECT manager_id, department_id FROM employees WHERE id = $1`, [leaveRequest.employee_id]);
+    let isAuthorized = ['owner', 'admin', 'hr'].includes(req.staff.role) || (req.staff.effectiveRoles || []).includes('hr');
+    if (!isAuthorized && req.staff.employee_id && requester) {
+      isAuthorized = req.staff.employee_id === requester.manager_id;
+      if (!isAuthorized && requester.department_id) {
+        const { rows: [dept] } = await safeQuery(`SELECT head_employee_id FROM departments WHERE id = $1`, [requester.department_id]);
+        isAuthorized = dept?.head_employee_id === req.staff.employee_id;
+      }
+    }
+    if (!isAuthorized) return res.status(403).json({ error: 'Only HR, this employee\'s manager, or their department head can decide on this request' });
+
     const { rows } = await safeQuery(
       `UPDATE leave_requests SET status = $1, approved_by = $2, approved_at = NOW() WHERE id = $3 RETURNING *`,
       [decision, req.staff.id, req.params.leaveId]

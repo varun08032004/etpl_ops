@@ -6,12 +6,20 @@
 // Statutory due dates can shift with government notifications — review this
 // file at least once a year, or whenever a compliance owner flags a mismatch.
 //
-// 2026-07 update: added trademark, shops_establishment, professional_tax,
-// iec, contract_labour_license as available one-time registration slugs
-// (see migration for seed rows). professional_tax and shops_establishment
-// due dates are STATE-DEPENDENT — the rules below use commonly-seen
-// defaults and are flagged NEEDS_STATE_INPUT. Confirm against your actual
-// state's rules before relying on the auto-generated due date.
+// 2026-07 update: professional_tax no longer uses one generic placeholder.
+// getRulesForSlug() is now ASYNC — when called with 'professional_tax', it
+// queries YOUR pt_slabs table (see services/payrollCompliance.js) for the
+// distinct states you've actually configured, and generates one recurring
+// filing per state using STATE_PT_DUE_DATES below. States found in pt_slabs
+// but not in that lookup still fall back to a flagged placeholder, rather
+// than silently guessing.
+//
+// PT due dates sourced from public guidance current as of mid-2026 —
+// confirm against each state's PT portal, since these can and do change
+// (e.g. Maharashtra's PTRC due date moved from end-of-month to the 15th
+// effective March 2026).
+
+const { safeQuery } = require('../db/pool');
 
 const RECURRING_RULES = {
   incorporation: [
@@ -44,30 +52,13 @@ const RECURRING_RULES = {
     { key: 'advance_tax_q3', title: 'Advance Tax — 3rd Installment (75% cumulative)', category: 'tds', interval: 'annual', dueRule: { type: 'fixed_annual', month: 12, day: 15 } },
     { key: 'advance_tax_q4', title: 'Advance Tax — 4th Installment (100% cumulative)', category: 'tds', interval: 'annual', dueRule: { type: 'fixed_annual', month: 3, day: 15 } },
   ],
-  dpiit: [], // No recurring statutory filing tied to DPIIT recognition itself.
-  udyam: [], // Udyam has no renewal/recurring filing by itself.
-  epan: [],  // PAN is permanent, no recurring filing.
-
-  // ── added 2026-07 ──────────────────────────────────────────────────────
-  trademark: [], // No recurring filing until renewal — that's a single 10-year-out event,
-                  // not a fit for monthly/quarterly/half_yearly/annual. Track renewal manually.
+  dpiit: [],
+  udyam: [],
+  epan: [],
+  trademark: [],
 
   shops_establishment: [
-    // NEEDS_STATE_INPUT: renewal cycle and due date vary by state (some annual,
-    // some multi-year depending on establishment size). Defaulting to an
-    // annual reminder on the registration's own anniversary is NOT implemented
-    // here since it needs the actual registration date, which the one-time
-    // registration record already stores — confirm your state's actual cycle
-    // and adjust this rule (or the spawned item's due date) accordingly.
     { key: 'shops_est_renewal', title: 'Shops & Establishment — Renewal (verify your state\'s cycle)', category: 'labour', interval: 'annual', dueRule: { type: 'fixed_annual', month: 3, day: 31 }, note: 'NEEDS_STATE_INPUT: placeholder due date — confirm actual renewal cycle for your state; some states are multi-year, not annual.' },
-  ],
-
-  professional_tax: [
-    // NEEDS_STATE_INPUT: PT return frequency and due date vary significantly
-    // by state (e.g. Maharashtra: monthly by end of month; Karnataka: monthly
-    // by 20th; some states: annual). Using a generic monthly-by-20th default —
-    // CONFIRM against your actual state's PT rules before relying on this.
-    { key: 'pt_return', title: 'Professional Tax Return (verify your state\'s frequency)', category: 'other', interval: 'monthly', dueRule: { type: 'day_of_next_month', day: 20 }, note: 'NEEDS_STATE_INPUT: placeholder — PT return frequency/due date varies by state.' },
   ],
 
   iec: [
@@ -75,10 +66,29 @@ const RECURRING_RULES = {
   ],
 
   contract_labour_license: [
-    // Renewal date depends on original issue date, not a fixed calendar date —
-    // placeholder annual reminder; adjust to your license's actual issue anniversary.
     { key: 'cll_renewal', title: 'Contract Labour License — Renewal (confirm issue-date anniversary)', category: 'labour', interval: 'annual', dueRule: { type: 'fixed_annual', month: 3, day: 31 }, note: 'Placeholder date — renewal is typically due before expiry, tied to your license\'s original issue date. Adjust once known.' },
   ],
+
+  // professional_tax is intentionally NOT a static array here — see
+  // getProfessionalTaxRules() below, which builds it dynamically per state.
+};
+
+// ── per-state PT return due dates ───────────────────────────────────────
+// Sourced from public guidance current as of mid-2026. Frequency and dates
+// vary by state and DO change — verify against the state's own PT portal.
+// State names below must match exactly what's stored in pt_slabs.state.
+const STATE_PT_DUE_DATES = {
+  'Maharashtra':   { interval: 'monthly', dueRule: { type: 'day_of_next_month', day: 15 }, note: 'PTRC payment due date moved from end-of-month to the 15th, effective March 2026 — reconfirm if this changes again.' },
+  'Karnataka':      { interval: 'monthly', dueRule: { type: 'day_of_next_month', day: 20 } },
+  'West Bengal':    { interval: 'annual',  dueRule: { type: 'fixed_annual', month: 7, day: 31 }, note: 'Paid once per FY, not monthly, despite being a "monthly slab" state — confirm current GRIPS portal guidance.' },
+  'Telangana':      { interval: 'monthly', dueRule: { type: 'day_of_next_month', day: 10 } },
+  'Andhra Pradesh': { interval: 'monthly', dueRule: { type: 'day_of_next_month', day: 10 } },
+  'Gujarat':        { interval: 'annual',  dueRule: { type: 'fixed_annual', month: 3, day: 31 } },
+  'Madhya Pradesh': { interval: 'monthly', dueRule: { type: 'day_of_next_month', day: 10 } },
+  'Odisha':         { interval: 'annual',  dueRule: { type: 'fixed_annual', month: 3, day: 31 } },
+  'Bihar':          { interval: 'annual',  dueRule: { type: 'fixed_annual', month: 3, day: 31 } },
+  'Tamil Nadu':     { interval: 'half_yearly', dueRule: { type: 'fixed_annual', month: 10, day: 31 }, note: 'Half-yearly: Apr–Sep due 31 Oct, Oct–Mar due 30 Apr. Only the first cycle is auto-spawned; the second half-year cycle follows automatically once this one is filed.' },
+  'Kerala':         { interval: 'half_yearly', dueRule: { type: 'fixed_annual', month: 8, day: 31 }, note: 'Half-yearly: due 31 Aug and 28 Feb.' },
 };
 
 // ── due-date computation ────────────────────────────────────────────────
@@ -90,7 +100,7 @@ function computeFirstDueDate(dueRule, fromDate = new Date()) {
   if (dueRule.type === 'fixed_annual') {
     const year = d.getFullYear();
     const candidate = new Date(year, dueRule.month - 1, dueRule.day);
-    if (candidate < d) candidate.setFullYear(year + 1); // roll to next occurrence if this year's date already passed
+    if (candidate < d) candidate.setFullYear(year + 1);
     return candidate;
   }
   throw new Error(`Unknown dueRule type: ${dueRule.type}`);
@@ -100,8 +110,54 @@ function toISODate(date) {
   return date.toISOString().slice(0, 10);
 }
 
-function getRulesForSlug(slug) {
+// Builds recurring PT filing rules dynamically from whichever states you
+// actually have pt_slabs rows for — one filing per state, using a known
+// due date where available, or a flagged placeholder if not.
+async function getProfessionalTaxRules() {
+  const { rows } = await safeQuery(`SELECT DISTINCT state FROM pt_slabs ORDER BY state`);
+  if (!rows.length) {
+    // No pt_slabs configured at all yet — fall back to one generic reminder
+    // so nothing silently disappears, but flag it clearly.
+    return [{
+      key: 'pt_return_unconfigured',
+      title: 'Professional Tax Return (no pt_slabs configured yet)',
+      category: 'other',
+      interval: 'monthly',
+      dueRule: { type: 'day_of_next_month', day: 20 },
+      note: 'NEEDS_STATE_INPUT: no rows in pt_slabs yet — add your state(s) there, then re-mark this registration to regenerate accurate per-state filings.',
+    }];
+  }
+
+  return rows.map(({ state }) => {
+    const known = STATE_PT_DUE_DATES[state];
+    if (known) {
+      return {
+        key: `pt_return_${state.toLowerCase().replace(/\s+/g, '_')}`,
+        title: `Professional Tax Return — ${state}`,
+        category: 'other',
+        interval: known.interval,
+        dueRule: known.dueRule,
+        note: known.note || null,
+      };
+    }
+    // State has pt_slabs configured but isn't in our verified lookup yet.
+    return {
+      key: `pt_return_${state.toLowerCase().replace(/\s+/g, '_')}`,
+      title: `Professional Tax Return — ${state} (verify due date)`,
+      category: 'other',
+      interval: 'monthly',
+      dueRule: { type: 'day_of_next_month', day: 20 },
+      note: `NEEDS_STATE_INPUT: "${state}" isn't in the verified STATE_PT_DUE_DATES lookup — confirm the actual filing frequency/due date and add it to services/complianceRules.js.`,
+    };
+  });
+}
+
+// getRulesForSlug is now ASYNC. Callers must `await` it.
+async function getRulesForSlug(slug) {
+  if (slug === 'professional_tax') {
+    return getProfessionalTaxRules();
+  }
   return RECURRING_RULES[slug] || [];
 }
 
-module.exports = { RECURRING_RULES, computeFirstDueDate, toISODate, getRulesForSlug };
+module.exports = { RECURRING_RULES, STATE_PT_DUE_DATES, computeFirstDueDate, toISODate, getRulesForSlug };

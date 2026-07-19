@@ -2,27 +2,52 @@
 // routes/finance.js — SRS §8.7, §10.4/§10.5
 //
 // Two things live here:
-//   1. approval_thresholds — configurable amount bands (SET-01). Would
-//      eventually move under a full Settings module (§8.23, not yet built);
-//      exposed here directly for now since Finance is the only consumer.
+//   1. approval_thresholds — configurable amount bands (SET-01).
 //   2. expense_claims — employee-submitted reimbursement requests, routed
 //      through a sequential L1 (Reporting Manager) -> L2 (Finance
 //      Controller) -> L3 (CFO/Founder) chain, with how many levels required
-//      determined by amount at submission time (snapshotted, so a later
-//      threshold config change never retroactively changes an in-flight
-//      claim's required chain).
-//
-// Deliberately separate from services/approvals.js (the RBAC governance
-// system for destructive actions like deactivating a login) — different
-// shape, different purpose, same underlying idea of "gate before act."
+//      determined by amount at submission time (snapshotted).
 
 const express = require('express');
 const router = express.Router();
-const { safeQuery } = require('../db/pool');
+const rateLimit = require('express-rate-limit'); // npm install express-rate-limit (skip if already installed)
+const { safeQuery, withTransaction } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { fireEvent } = require('../services/automationEngine');
 
 router.use(authenticate);
+
+// Same rate-limiting pattern as expenses.js and payroll.js.
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests to the finance module — please slow down and try again shortly.' },
+});
+router.use(generalLimiter);
+
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many changes made too quickly — please slow down and try again shortly.' },
+});
+router.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    return writeLimiter(req, res, next);
+  }
+  next();
+});
+
+const ALLOWED_CLAIM_CATEGORIES = ['travel', 'meals', 'software', 'office_supplies', 'client_entertainment', 'training', 'other'];
+
+function paginationParams(req) {
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  return { limit, offset };
+}
 
 // ── approval thresholds — view (anyone) / edit (owner/admin only) ──────────
 router.get('/thresholds', async (req, res) => {
@@ -39,12 +64,34 @@ router.get('/thresholds', async (req, res) => {
 
 router.put('/thresholds/:id', requireRole('admin'), async (req, res) => {
   try {
+    const { rows: [existing] } = await safeQuery(`SELECT * FROM approval_thresholds WHERE id = $1`, [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Threshold band not found' });
+
     const { min_amount, max_amount, levels_required } = req.body;
+
+    // Validate against the MERGED state (existing + incoming), so a partial
+    // update can't produce an inconsistent band (e.g. only patching max_amount
+    // to something below the existing min_amount).
+    const mergedMin = min_amount !== undefined ? Number(min_amount) : Number(existing.min_amount);
+    const mergedMaxRaw = max_amount !== undefined ? (max_amount === '' || max_amount === null ? null : Number(max_amount)) : existing.max_amount;
+    const mergedMax = mergedMaxRaw === null ? null : Number(mergedMaxRaw);
+    const mergedLevels = levels_required !== undefined ? Number(levels_required) : existing.levels_required;
+
+    if (!Number.isFinite(mergedMin) || mergedMin < 0) {
+      return res.status(400).json({ error: 'min_amount must be a number ≥ 0' });
+    }
+    if (mergedMax !== null && (!Number.isFinite(mergedMax) || mergedMax <= mergedMin)) {
+      return res.status(400).json({ error: 'max_amount must be greater than min_amount, or left blank for unlimited' });
+    }
+    if (!Number.isInteger(mergedLevels) || mergedLevels < 0 || mergedLevels > 3) {
+      return res.status(400).json({ error: 'levels_required must be an integer between 0 and 3' });
+    }
+
     const sets = [];
     const params = [];
-    if (min_amount !== undefined) { params.push(min_amount); sets.push(`min_amount = $${params.length}`); }
-    if (max_amount !== undefined) { params.push(max_amount === '' ? null : max_amount); sets.push(`max_amount = $${params.length}`); }
-    if (levels_required !== undefined) { params.push(levels_required); sets.push(`levels_required = $${params.length}`); }
+    if (min_amount !== undefined) { params.push(mergedMin); sets.push(`min_amount = $${params.length}`); }
+    if (max_amount !== undefined) { params.push(mergedMax); sets.push(`max_amount = $${params.length}`); }
+    if (levels_required !== undefined) { params.push(mergedLevels); sets.push(`levels_required = $${params.length}`); }
     if (!sets.length) return res.status(400).json({ error: 'No valid fields to update' });
 
     params.push(req.params.id);
@@ -52,7 +99,6 @@ router.put('/thresholds/:id', requireRole('admin'), async (req, res) => {
       `UPDATE approval_thresholds SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
       params
     );
-    if (!rows.length) return res.status(404).json({ error: 'Threshold band not found' });
     res.json({ threshold: rows[0] });
   } catch (err) {
     console.error('[finance:thresholds:update]', err);
@@ -87,30 +133,37 @@ async function canActAtLevel(level, claim, staff) {
 }
 
 // ── submit a claim ──────────────────────────────────────────────────────────
+// Receipt attachment is a SEPARATE step now (see PATCH /:id/receipt below) —
+// the claim must exist first so the receipt's entity_id is a real UUID, not
+// the placeholder string the old frontend code used to send.
 router.post('/expense-claims', async (req, res) => {
   try {
     if (!req.staff.employee_id) {
       return res.status(400).json({ error: 'This login is not linked to an employee record — cannot submit an expense claim' });
     }
-    const { category, description, amount, expense_date, receipt_document_id } = req.body;
+    const { category, description, amount, expense_date } = req.body;
     if (!category || !amount || !expense_date) {
       return res.status(400).json({ error: 'category, amount, and expense_date are required' });
     }
+    if (!ALLOWED_CLAIM_CATEGORIES.includes(category)) {
+      return res.status(400).json({ error: `category must be one of: ${ALLOWED_CLAIM_CATEGORIES.join(', ')}` });
+    }
     const amt = Number(amount);
-    if (!(amt > 0)) return res.status(400).json({ error: 'amount must be positive' });
+    if (!Number.isFinite(amt) || !(amt > 0)) return res.status(400).json({ error: 'amount must be a positive number' });
 
     const levelsRequired = await getLevelsRequired('expense_claim', amt);
     const status = levelsRequired === 0 ? 'approved' : 'pending';
 
     const { rows: [claim] } = await safeQuery(
-      `INSERT INTO expense_claims (employee_id, category, description, amount, expense_date, receipt_document_id, levels_required, current_level, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8) RETURNING *`,
-      [req.staff.employee_id, category, description || null, amt, expense_date, receipt_document_id || null, levelsRequired, status]
+      `INSERT INTO expense_claims (employee_id, category, description, amount, expense_date, levels_required, current_level, status)
+       VALUES ($1,$2,$3,$4,$5,$6,0,$7) RETURNING *`,
+      [req.staff.employee_id, category, description || null, amt, expense_date, levelsRequired, status]
     );
 
     if (levelsRequired > 0) {
       const { rows: [emp] } = await safeQuery(`SELECT full_name FROM employees WHERE id = $1`, [req.staff.employee_id]);
-      fireEvent('expense_claim.submitted', { employee_name: emp?.full_name, amount: amt, category, link: '/finance' });
+      fireEvent('expense_claim.submitted', { employee_name: emp?.full_name, amount: amt, category, link: '/finance' })
+        .catch((err) => console.error('[finance:fireEvent] expense_claim.submitted failed:', err));
     }
 
     res.status(201).json({ claim });
@@ -120,15 +173,59 @@ router.post('/expense-claims', async (req, res) => {
   }
 });
 
+// ── attach a receipt to an already-created claim ────────────────────────────
+// Call this AFTER uploading the receipt via POST /documents with
+// entity_type='expense_claim' and entity_id=<this claim's real id>.
+// Validates the document actually belongs to this claim and was uploaded by
+// the same person submitting it — otherwise anyone could attach any document
+// (including another employee's file) to their own claim just by guessing an id.
+router.patch('/expense-claims/:id/receipt', async (req, res) => {
+  try {
+    const { receipt_document_id } = req.body;
+    if (!receipt_document_id) return res.status(400).json({ error: 'receipt_document_id is required' });
+
+    const { rows: [claim] } = await safeQuery(`SELECT * FROM expense_claims WHERE id = $1`, [req.params.id]);
+    if (!claim) return res.status(404).json({ error: 'Claim not found' });
+    if (claim.employee_id !== req.staff.employee_id) return res.status(403).json({ error: 'You can only attach receipts to your own claims' });
+    if (claim.status !== 'pending' && claim.status !== 'approved') {
+      // Allow attaching even after approval (e.g. forgot the receipt), but not on a rejected/paid claim.
+      return res.status(400).json({ error: `Cannot attach a receipt to a claim that is ${claim.status}` });
+    }
+
+    const { rows: [doc] } = await safeQuery(`SELECT * FROM documents WHERE id = $1`, [receipt_document_id]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (doc.entity_type !== 'expense_claim' || doc.entity_id !== claim.id) {
+      return res.status(400).json({ error: 'This document was not uploaded against this claim' });
+    }
+    if (doc.uploaded_by !== req.staff.id) {
+      return res.status(403).json({ error: 'You did not upload this document' });
+    }
+
+    const { rows: [updated] } = await safeQuery(
+      `UPDATE expense_claims SET receipt_document_id = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [receipt_document_id, req.params.id]
+    );
+    res.json({ claim: updated });
+  } catch (err) {
+    console.error('[finance:expense-claims:attach-receipt]', err);
+    res.status(500).json({ error: 'Failed to attach receipt' });
+  }
+});
+
 // ── self-service: my own claims ─────────────────────────────────────────────
 router.get('/expense-claims/mine', async (req, res) => {
   try {
     if (!req.staff.employee_id) return res.status(404).json({ error: 'This login is not linked to an employee record' });
-    const { rows } = await safeQuery(
-      `SELECT * FROM expense_claims WHERE employee_id = $1 ORDER BY created_at DESC`,
+    const { limit, offset } = paginationParams(req);
+    const { rows: [{ count }] } = await safeQuery(
+      `SELECT COUNT(*) AS count FROM expense_claims WHERE employee_id = $1`,
       [req.staff.employee_id]
     );
-    res.json({ claims: rows });
+    const { rows } = await safeQuery(
+      `SELECT * FROM expense_claims WHERE employee_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+      [req.staff.employee_id, limit, offset]
+    );
+    res.json({ claims: rows, pagination: { total: Number(count), limit, offset } });
   } catch (err) {
     console.error('[finance:expense-claims:mine]', err);
     res.status(500).json({ error: 'Failed to fetch your claims' });
@@ -160,15 +257,24 @@ router.get('/expense-claims/pending-my-approval', async (req, res) => {
 router.get('/expense-claims', requireRole('finance'), async (req, res) => {
   try {
     const { status } = req.query;
+    const { limit, offset } = paginationParams(req);
     const params = [];
     let where = '';
-    if (status) { params.push(status); where = `WHERE ec.status = $1`; }
-    const { rows } = await safeQuery(
-      `SELECT ec.*, e.full_name AS employee_name FROM expense_claims ec
-       JOIN employees e ON e.id = ec.employee_id ${where} ORDER BY ec.created_at DESC LIMIT 200`,
+    if (status) { params.push(status); where = `WHERE ec.status = $${params.length}`; }
+
+    const { rows: [{ count }] } = await safeQuery(
+      `SELECT COUNT(*) AS count FROM expense_claims ec ${where}`,
       params
     );
-    res.json({ claims: rows });
+
+    params.push(limit, offset);
+    const { rows } = await safeQuery(
+      `SELECT ec.*, e.full_name AS employee_name FROM expense_claims ec
+       JOIN employees e ON e.id = ec.employee_id ${where}
+       ORDER BY ec.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+    res.json({ claims: rows, pagination: { total: Number(count), limit, offset } });
   } catch (err) {
     console.error('[finance:expense-claims:list]', err);
     res.status(500).json({ error: 'Failed to fetch expense claims' });
@@ -185,8 +291,19 @@ router.get('/expense-claims/:id', async (req, res) => {
     if (!claim) return res.status(404).json({ error: 'Claim not found' });
 
     const isSelf = req.staff.employee_id === claim.employee_id;
-    if (!isSelf && !['owner', 'admin', 'finance'].includes(req.staff.role) &&
-        !(await canActAtLevel(claim.current_level + 1, claim, req.staff))) {
+    const isPrivileged = ['owner', 'admin', 'finance'].includes(req.staff.role);
+    const isNextApprover = await canActAtLevel(claim.current_level + 1, claim, req.staff);
+
+    // Anyone who has ALREADY acted on this claim keeps visibility into it even
+    // after it moves past their level — otherwise an L1 manager who approved
+    // loses all access the moment it reaches L2, which is a real gap for
+    // "what happened to that claim I approved last week?"
+    const { rows: [actedBefore] } = await safeQuery(
+      `SELECT 1 FROM finance_approval_actions WHERE expense_claim_id = $1 AND approver_id = $2 LIMIT 1`,
+      [claim.id, req.staff.id]
+    );
+
+    if (!isSelf && !isPrivileged && !isNextApprover && !actedBefore) {
       return res.status(403).json({ error: 'Not authorized to view this claim' });
     }
 
@@ -204,6 +321,12 @@ router.get('/expense-claims/:id', async (req, res) => {
 });
 
 // ── decide at the current level — approve advances the chain, reject stops it ──
+// Wrapped in a transaction with SELECT ... FOR UPDATE: this is what actually
+// closes the race condition. Two near-simultaneous decide calls on the same
+// claim used to both pass the "is it still pending" check before either write
+// landed — now the second request blocks on the row lock until the first
+// transaction commits, then re-reads the ALREADY-UPDATED row and correctly
+// sees the claim is no longer pending.
 router.post('/expense-claims/:id/decide', async (req, res) => {
   try {
     const { decision, comment } = req.body;
@@ -211,42 +334,52 @@ router.post('/expense-claims/:id/decide', async (req, res) => {
       return res.status(400).json({ error: "decision must be 'approved' or 'rejected'" });
     }
 
-    const { rows: [claim] } = await safeQuery(`SELECT * FROM expense_claims WHERE id = $1`, [req.params.id]);
-    if (!claim) return res.status(404).json({ error: 'Claim not found' });
-    if (claim.status !== 'pending') return res.status(400).json({ error: `Claim is already ${claim.status}` });
+    const result = await withTransaction(async (client) => {
+      const { rows: [claim] } = await client.query(`SELECT * FROM expense_claims WHERE id = $1 FOR UPDATE`, [req.params.id]);
+      if (!claim) { const e = new Error('Claim not found'); e.httpStatus = 404; throw e; }
+      if (claim.status !== 'pending') { const e = new Error(`Claim is already ${claim.status}`); e.httpStatus = 400; throw e; }
 
-    const nextLevel = claim.current_level + 1;
-    if (!(await canActAtLevel(nextLevel, claim, req.staff))) {
-      return res.status(403).json({ error: `You are not the required approver for level ${nextLevel} of this claim` });
-    }
+      const nextLevel = claim.current_level + 1;
+      if (!(await canActAtLevel(nextLevel, claim, req.staff))) {
+        const e = new Error(`You are not the required approver for level ${nextLevel} of this claim`);
+        e.httpStatus = 403;
+        throw e;
+      }
 
-    await safeQuery(
-      `INSERT INTO finance_approval_actions (expense_claim_id, level, approver_id, decision, comment)
-       VALUES ($1,$2,$3,$4,$5)`,
-      [claim.id, nextLevel, req.staff.id, decision, comment || null]
-    );
-
-    if (decision === 'rejected') {
-      const { rows: [updated] } = await safeQuery(
-        `UPDATE expense_claims SET status = 'rejected', updated_at = NOW() WHERE id = $1 RETURNING *`,
-        [claim.id]
+      await client.query(
+        `INSERT INTO finance_approval_actions (expense_claim_id, level, approver_id, decision, comment) VALUES ($1,$2,$3,$4,$5)`,
+        [claim.id, nextLevel, req.staff.id, decision, comment || null]
       );
-      fireEvent('expense_claim.rejected', { claimId: claim.id, level: nextLevel, link: '/finance' });
-      return res.json({ claim: updated });
+
+      if (decision === 'rejected') {
+        const { rows: [updated] } = await client.query(
+          `UPDATE expense_claims SET status = 'rejected', updated_at = NOW() WHERE id = $1 RETURNING *`,
+          [claim.id]
+        );
+        return { updated, event: { name: 'expense_claim.rejected', payload: { claimId: claim.id, level: nextLevel, link: '/finance' } } };
+      }
+
+      const isFinal = nextLevel >= claim.levels_required;
+      const { rows: [updated] } = await client.query(
+        `UPDATE expense_claims SET current_level = $1, status = $2, updated_at = NOW() WHERE id = $3 RETURNING *`,
+        [nextLevel, isFinal ? 'approved' : 'pending', claim.id]
+      );
+      return {
+        updated,
+        event: isFinal ? { name: 'expense_claim.approved', payload: { claimId: claim.id, amount: claim.amount, link: '/finance' } } : null,
+      };
+    });
+
+    // Fire the event AFTER the transaction commits, and never let it fail the request.
+    if (result.event) {
+      fireEvent(result.event.name, result.event.payload)
+        .catch((err) => console.error(`[finance:fireEvent] ${result.event.name} failed:`, err));
     }
 
-    const isFinal = nextLevel >= claim.levels_required;
-    const { rows: [updated] } = await safeQuery(
-      `UPDATE expense_claims SET current_level = $1, status = $2, updated_at = NOW() WHERE id = $3 RETURNING *`,
-      [nextLevel, isFinal ? 'approved' : 'pending', claim.id]
-    );
-    if (isFinal) {
-      fireEvent('expense_claim.approved', { claimId: claim.id, amount: claim.amount, link: '/finance' });
-    }
-    res.json({ claim: updated });
+    res.json({ claim: result.updated });
   } catch (err) {
     console.error('[finance:expense-claims:decide]', err);
-    res.status(500).json({ error: 'Failed to record decision' });
+    res.status(err.httpStatus || 500).json({ error: err.httpStatus ? err.message : 'Failed to record decision' });
   }
 });
 

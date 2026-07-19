@@ -21,18 +21,26 @@ function SubmitClaimDialog({ open, onClose, onSubmitted }) {
     setSaving(true);
     setError('');
     try {
-      let receipt_document_id = null;
+      // 1. Create the claim FIRST — this gives us a real claim id to attach
+      // a receipt to. Uploading the receipt before the claim exists (the old
+      // flow) sent entity_id='pending', which isn't a valid UUID and made
+      // every receipt upload fail outright.
+      const { data } = await client.post('/finance/expense-claims', form);
+      const claim = data.claim;
+
       if (receiptFile) {
         const fd = new FormData();
         fd.append('file', receiptFile);
         fd.append('title', `Receipt — ${form.category}`);
         fd.append('doc_type', 'expense_receipt');
         fd.append('entity_type', 'expense_claim');
-        fd.append('entity_id', 'pending'); // linked properly once claim exists; acceptable for a receipt attachment
-        const { data } = await client.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-        receipt_document_id = data.document.id;
+        fd.append('entity_id', claim.id); // real id now, not a placeholder string
+        const { data: docData } = await client.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+
+        // 2. Attach the uploaded receipt to the claim we just created.
+        await client.patch(`/finance/expense-claims/${claim.id}/receipt`, { receipt_document_id: docData.document.id });
       }
-      await client.post('/finance/expense-claims', { ...form, receipt_document_id });
+
       setForm({ category: 'travel', description: '', amount: '', expense_date: '' });
       setReceiptFile(null);
       onClose();
@@ -70,7 +78,7 @@ function SubmitClaimDialog({ open, onClose, onSubmitted }) {
   );
 }
 
-function ClaimsTable({ claims, showEmployee, onDecide }) {
+function ClaimsTable({ claims, showEmployee, onDecide, onLoadMore, hasMore }) {
   return (
     <Paper>
       <Table size="small">
@@ -107,6 +115,11 @@ function ClaimsTable({ claims, showEmployee, onDecide }) {
           )}
         </TableBody>
       </Table>
+      {hasMore && (
+        <Box sx={{ textAlign: 'center', py: 1.5 }}>
+          <Button size="small" onClick={onLoadMore}>Load more</Button>
+        </Box>
+      )}
     </Paper>
   );
 }
@@ -114,16 +127,22 @@ function ClaimsTable({ claims, showEmployee, onDecide }) {
 function ThresholdsTab() {
   const [thresholds, setThresholds] = useState([]);
   const [editing, setEditing] = useState(null);
+  const [error, setError] = useState('');
 
   const load = () => client.get('/finance/thresholds').then(({ data }) => setThresholds(data.thresholds)).catch(() => {});
   useEffect(() => { load(); }, []);
 
   const save = async () => {
-    await client.put(`/finance/thresholds/${editing.id}`, {
-      min_amount: editing.min_amount, max_amount: editing.max_amount, levels_required: editing.levels_required,
-    });
-    setEditing(null);
-    load();
+    setError('');
+    try {
+      await client.put(`/finance/thresholds/${editing.id}`, {
+        min_amount: editing.min_amount, max_amount: editing.max_amount, levels_required: editing.levels_required,
+      });
+      setEditing(null);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to save threshold');
+    }
   };
 
   return (
@@ -144,7 +163,7 @@ function ThresholdsTab() {
                 <TableCell align="right"><Money amount={t.min_amount} size="0.8rem" /></TableCell>
                 <TableCell align="right">{t.max_amount ? <Money amount={t.max_amount} size="0.8rem" /> : '∞'}</TableCell>
                 <TableCell align="right">{t.levels_required}</TableCell>
-                <TableCell align="right"><Button size="small" onClick={() => setEditing({ ...t })}>Edit</Button></TableCell>
+                <TableCell align="right"><Button size="small" onClick={() => { setError(''); setEditing({ ...t }); }}>Edit</Button></TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -160,6 +179,7 @@ function ThresholdsTab() {
             <TextField fullWidth select type="number" label="Levels required" margin="normal" value={editing.levels_required} onChange={(e) => setEditing({ ...editing, levels_required: Number(e.target.value) })}>
               {[0, 1, 2, 3].map((n) => <MenuItem key={n} value={n}>{n}</MenuItem>)}
             </TextField>
+            {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
           </DialogContent>
         )}
         <DialogActions>
@@ -175,17 +195,32 @@ export default function Finance() {
   const { staff } = useAuth();
   const isAdmin = ['owner', 'admin'].includes(staff?.role);
   const canSeeAll = ['owner', 'admin', 'finance'].includes(staff?.role);
+  const PAGE_SIZE = 50;
 
   const [tab, setTab] = useState(0);
   const [myClaims, setMyClaims] = useState([]);
+  const [myClaimsTotal, setMyClaimsTotal] = useState(0);
   const [pendingApproval, setPendingApproval] = useState([]);
   const [allClaims, setAllClaims] = useState([]);
+  const [allClaimsTotal, setAllClaimsTotal] = useState(0);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [message, setMessage] = useState(null);
 
-  const loadMine = () => client.get('/finance/expense-claims/mine').then(({ data }) => setMyClaims(data.claims)).catch(() => setMyClaims([]));
+  const loadMine = () => client.get('/finance/expense-claims/mine', { params: { limit: PAGE_SIZE, offset: 0 } })
+    .then(({ data }) => { setMyClaims(data.claims); setMyClaimsTotal(data.pagination?.total ?? data.claims.length); })
+    .catch(() => setMyClaims([]));
+
+  const loadMoreMine = () => client.get('/finance/expense-claims/mine', { params: { limit: PAGE_SIZE, offset: myClaims.length } })
+    .then(({ data }) => setMyClaims((prev) => [...prev, ...data.claims]));
+
   const loadPending = () => client.get('/finance/expense-claims/pending-my-approval').then(({ data }) => setPendingApproval(data.claims)).catch(() => setPendingApproval([]));
-  const loadAll = () => canSeeAll && client.get('/finance/expense-claims').then(({ data }) => setAllClaims(data.claims)).catch(() => setAllClaims([]));
+
+  const loadAll = () => canSeeAll && client.get('/finance/expense-claims', { params: { limit: PAGE_SIZE, offset: 0 } })
+    .then(({ data }) => { setAllClaims(data.claims); setAllClaimsTotal(data.pagination?.total ?? data.claims.length); })
+    .catch(() => setAllClaims([]));
+
+  const loadMoreAll = () => client.get('/finance/expense-claims', { params: { limit: PAGE_SIZE, offset: allClaims.length } })
+    .then(({ data }) => setAllClaims((prev) => [...prev, ...data.claims]));
 
   useEffect(() => { loadMine(); loadPending(); loadAll(); }, []);
 
@@ -207,15 +242,15 @@ export default function Finance() {
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => setSubmitOpen(true)}>Submit expense</Button>
       </Box>
 
-      {message && <Alert severity={message.severity} sx={{ mb: 2.5 }}>{message.text}</Alert>}
+      {message && <Alert severity={message.severity} sx={{ mb: 2.5 }} onClose={() => setMessage(null)}>{message.text}</Alert>}
 
       <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: 3, borderBottom: '1px solid', borderColor: 'divider' }}>
         {TABS.map((t) => <Tab key={t} label={t} />)}
       </Tabs>
 
-      {tab === 0 && <ClaimsTable claims={myClaims} showEmployee={false} />}
+      {tab === 0 && <ClaimsTable claims={myClaims} showEmployee={false} onLoadMore={loadMoreMine} hasMore={myClaims.length < myClaimsTotal} />}
       {tab === 1 && <ClaimsTable claims={pendingApproval} showEmployee onDecide={decide} />}
-      {tab === 2 && canSeeAll && <ClaimsTable claims={allClaims} showEmployee />}
+      {tab === 2 && canSeeAll && <ClaimsTable claims={allClaims} showEmployee onLoadMore={loadMoreAll} hasMore={allClaims.length < allClaimsTotal} />}
       {((canSeeAll && tab === 3) || (!canSeeAll && tab === 2)) && isAdmin && <ThresholdsTab />}
 
       <SubmitClaimDialog open={submitOpen} onClose={() => setSubmitOpen(false)} onSubmitted={loadMine} />

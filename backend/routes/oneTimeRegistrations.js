@@ -109,7 +109,7 @@ router.put('/:slug', EDITOR_ROLE_CHECK, async (req, res) => {
 
     let spawned = 0;
     if (becomingDone) {
-      const rules = getRulesForSlug(req.params.slug);
+      const rules = await getRulesForSlug(req.params.slug);
       for (const rule of rules) {
         const dueDate = toISODate(computeFirstDueDate(rule.dueRule));
         await safeQuery(

@@ -16,6 +16,8 @@ export default function MyProfile() {
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [leaveTypes, setLeaveTypes] = useState([]);
   const [docs, setDocs] = useState([]);
+  const [assets, setAssets] = useState([]);
+  const [pendingLeave, setPendingLeave] = useState([]);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [leaveForm, setLeaveForm] = useState({ leave_type_id: '', start_date: '', end_date: '', reason: '' });
   const [error, setError] = useState('');
@@ -26,22 +28,31 @@ export default function MyProfile() {
     try {
       const { data } = await client.get('/employees/me');
       setEmployee(data.employee);
-      const [payslipRes, leaveRes, leaveTypesRes, docsRes] = await Promise.all([
+      const [payslipRes, leaveRes, leaveTypesRes, docsRes, assetsRes] = await Promise.all([
         client.get('/payroll/me/payslips'),
         client.get('/employees/me/leave'),
         client.get('/employees/leave-types'),
         client.get('/documents', { params: { entity_type: 'employee' } }),
+        client.get('/assets'),
       ]);
       setPayslips(payslipRes.data.payslips);
       setLeaveRequests(leaveRes.data.leaveRequests);
       setLeaveTypes(leaveTypesRes.data.leaveTypes);
       setDocs(docsRes.data.documents);
+      setAssets(assetsRes.data.assets);
+      // Best-effort — empty array if this login doesn't manage anyone or isn't HR.
+      client.get('/employees/leave/pending').then(({ data }) => setPendingLeave(data.leaveRequests)).catch(() => setPendingLeave([]));
     } catch (err) {
       if (err.response?.status === 404) setNotLinked(true);
     }
   };
 
   useEffect(() => { loadAll(); }, []);
+
+  const decideLeave = async (leaveId, decision) => {
+    await client.post(`/employees/leave/${leaveId}/decision`, { decision });
+    client.get('/employees/leave/pending').then(({ data }) => setPendingLeave(data.leaveRequests)).catch(() => {});
+  };
 
   const handleLeaveSubmit = async () => {
     setSaving(true);
@@ -91,12 +102,34 @@ export default function MyProfile() {
       <Typography variant="h5">My Profile</Typography>
       <Typography sx={{ color: 'text.secondary', mb: 3 }}>{employee.employee_code} · {employee.designation || 'No designation set'} · {employee.department || 'No department set'}</Typography>
 
+      {pendingLeave.length > 0 && (
+        <Paper sx={{ p: 2.5, mb: 3 }}>
+          <Typography sx={{ fontWeight: 600, mb: 1.5 }}>Leave requests waiting on you ({pendingLeave.length})</Typography>
+          {pendingLeave.map((r) => (
+            <Box key={r.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+              <Box>
+                <Typography sx={{ fontSize: '0.875rem' }}>{r.employee_name} — {r.leave_type_name}</Typography>
+                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }} className="figure">
+                  {r.start_date?.slice(0, 10)} → {r.end_date?.slice(0, 10)} · {r.num_days} day{r.num_days === 1 ? '' : 's'}
+                  {r.reason ? ` · "${r.reason}"` : ''}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button size="small" color="error" onClick={() => decideLeave(r.id, 'rejected')}>Reject</Button>
+                <Button size="small" variant="contained" onClick={() => decideLeave(r.id, 'approved')}>Approve</Button>
+              </Box>
+            </Box>
+          ))}
+        </Paper>
+      )}
+
       <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: 3, borderBottom: '1px solid', borderColor: 'divider' }}>
         <Tab label="Overview" />
         <Tab label="Compensation" />
         <Tab label="Payslips" />
         <Tab label="Leave" />
         <Tab label="Documents" />
+        <Tab label="Assets" />
       </Tabs>
 
       {tab === 0 && (
@@ -212,6 +245,26 @@ export default function MyProfile() {
             </Table>
           </Paper>
         </Box>
+      )}
+
+      {tab === 5 && (
+        <Paper>
+          <Table size="small">
+            <TableHead>
+              <TableRow><TableCell>Item</TableCell><TableCell>Tag</TableCell><TableCell>Assigned since</TableCell></TableRow>
+            </TableHead>
+            <TableBody>
+              {assets.map((a) => (
+                <TableRow key={a.id}>
+                  <TableCell>{a.category}{a.description ? ` — ${a.description}` : ''}</TableCell>
+                  <TableCell className="figure">{a.asset_tag || '—'}</TableCell>
+                  <TableCell className="figure">{a.assigned_date?.slice(0, 10)}</TableCell>
+                </TableRow>
+              ))}
+              {!assets.length && <TableRow><TableCell colSpan={3} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No company assets assigned to you.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </Paper>
       )}
 
       <Dialog open={leaveOpen} onClose={() => setLeaveOpen(false)} maxWidth="xs" fullWidth>

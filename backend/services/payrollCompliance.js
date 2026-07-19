@@ -12,6 +12,16 @@
 // under 89(1), etc.) that a general-purpose engine like this simplifies.
 // Have your CA review this against a real payroll run before trusting it
 // for actual statutory filings.
+//
+// 2026-07 fix: calculateEPF and calculatePT used to silently return a ₹0
+// contribution/deduction when their required config (epf_wage_ceiling /
+// a matching pt_slabs row) was missing, instead of erroring like
+// computeAnnualTax already does for missing tax slabs. That meant a
+// misconfigured org could run payroll "successfully" while quietly
+// deducting no PF or no PT for real employees — a compliance violation
+// that would accumulate silently. Both now throw, matching the existing
+// computeAnnualTax pattern. Callers (the payroll run job/UI) MUST catch
+// and surface these as blocking errors, not swallow them.
 // ─────────────────────────────────────────────────────────────────────────
 'use strict';
 
@@ -53,7 +63,15 @@ async function isEPFMandatoryOrgWide() {
 
 async function calculateEPF({ basicPlusDA, pfApplicable }) {
   if (!pfApplicable) return { employeeContribution: 0, employerContribution: 0, wageBase: 0 };
+
   const ceiling = await getComplianceSetting('epf_wage_ceiling');
+  if (ceiling == null) {
+    // Previously: Math.min(basicPlusDA, null) silently coerced to 0, so PF
+    // came out ₹0 for everyone with no error. That's a compliance violation
+    // hiding as a successful payroll run — fail loudly instead.
+    throw new Error('epf_wage_ceiling is not configured in compliance_settings — cannot compute EPF safely. Set it before running payroll.');
+  }
+
   const wageBase = Math.min(basicPlusDA, ceiling);
   const employeeContribution = Math.round(wageBase * 0.12 * 100) / 100;
   const employerContribution = Math.round(wageBase * 0.12 * 100) / 100;
@@ -88,7 +106,13 @@ async function calculatePT({ grossMonthly, state, month }) {
      ORDER BY gross_from DESC LIMIT 1`,
     [state, grossMonthly]
   );
-  if (!rows.length) return { amount: 0, note: `No PT slab configured for state "${state}" — verify and add via pt_slabs table` };
+  if (!rows.length) {
+    // Previously: returned { amount: 0, note: '...' } — silent unless the
+    // caller specifically checks `note`. An employee in an unconfigured
+    // state got ₹0 PT deducted every month indefinitely, with nothing
+    // forcing anyone to notice. Fail loudly instead, matching computeAnnualTax.
+    throw new Error(`No PT slab configured for state "${state}" at gross ₹${grossMonthly} — add a row to pt_slabs before running payroll for this employee, or explicitly mark them PT-exempt if that's correct.`);
+  }
 
   const slab = rows[0];
   const amount = (month === 2 && slab.applies_in_february_override != null) ? Number(slab.applies_in_february_override) : Number(slab.monthly_amount);

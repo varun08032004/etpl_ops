@@ -189,7 +189,7 @@ export default function OrgStructure() {
 
   const [deptDialogOpen, setDeptDialogOpen] = useState(false);
   const [deptForm, setDeptForm] = useState({
-    id: null, name: '', description: '', head_employee_id: '',
+    id: null, name: '', description: '', head_employee_id: '', granted_roles: [],
     code: '', cost_center: '', location: '', budget: '', status: 'active', parent_department_id: '',
   });
   const [saving, setSaving] = useState(false);
@@ -219,13 +219,14 @@ export default function OrgStructure() {
 
   // ── department dialog ──────────────────────────────────────────────────
   const openNewDept = () => {
-    setDeptForm({ id: null, name: '', description: '', head_employee_id: '', code: '', cost_center: '', location: '', budget: '', status: 'active', parent_department_id: '' });
+    setDeptForm({ id: null, name: '', description: '', head_employee_id: '', granted_roles: [], code: '', cost_center: '', location: '', budget: '', status: 'active', parent_department_id: '' });
     setError('');
     setDeptDialogOpen(true);
   };
   const openEditDept = (dept) => {
     setDeptForm({
       id: dept.id, name: dept.name, description: dept.description || '', head_employee_id: dept.head_employee_id || '',
+      granted_roles: dept.granted_roles || [],
       code: dept.code || '', cost_center: dept.cost_center || '', location: dept.location || '',
       budget: dept.budget || '', status: dept.status || 'active', parent_department_id: dept.parent_department_id || '',
     });
@@ -240,6 +241,7 @@ export default function OrgStructure() {
       const payload = {
         name: deptForm.name, description: deptForm.description,
         head_employee_id: deptForm.head_employee_id || null,
+        granted_roles: deptForm.granted_roles || [],
         code: deptForm.code || null, cost_center: deptForm.cost_center || null,
         location: deptForm.location || null, budget: deptForm.budget || null,
         status: deptForm.status, parent_department_id: deptForm.parent_department_id || null,
@@ -408,6 +410,19 @@ export default function OrgStructure() {
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField fullWidth type="number" label="Annual budget (₹)" value={deptForm.budget} onChange={(e) => setDeptForm({ ...deptForm, budget: e.target.value })} />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth select label="Grants access to" value={deptForm.granted_roles}
+                SelectProps={{ multiple: true }}
+                onChange={(e) => setDeptForm({ ...deptForm, granted_roles: typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value })}
+                helperText="Every employee in this department gets these modules automatically — same as if their login had that role, without changing their actual role."
+              >
+                <MenuItem value="finance">Finance (Revenue, Accounting, Invoices, Payroll expenses, Finance)</MenuItem>
+                <MenuItem value="hr">HR (People, Attendance, Org Structure, leave approvals for this dept)</MenuItem>
+                <MenuItem value="legal_hod">Legal — HOD tier (Registrations, Compliance)</MenuItem>
+                <MenuItem value="compliance_hod">Compliance — HOD tier (Registrations, Compliance)</MenuItem>
+              </TextField>
             </Grid>
           </Grid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}

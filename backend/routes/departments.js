@@ -16,6 +16,18 @@ async function deleteDepartment(targetId) {
 }
 registerApprovalAction('department.delete', deleteDepartment);
 
+// ── what does MY login currently have access to? — powers the sidebar for
+// non-privileged staff (their own department's granted-role modules) and
+// lets the frontend show an "HOD" badge. authenticate() already resolved
+// all of this onto req.staff, so this route is just exposing it. ──────────
+router.get('/my-access', (req, res) => {
+  res.json({
+    role: req.staff.role,
+    effectiveRoles: req.staff.effectiveRoles,
+    deptAccess: req.staff.deptAccess,
+  });
+});
+
 router.get('/', async (req, res) => {
   try {
     const { rows } = await safeQuery(
@@ -91,7 +103,7 @@ router.post('/', requireRole('admin'), async (req, res) => {
 
 router.put('/:id', requireRole('admin'), async (req, res) => {
   try {
-    const allowed = ['name', 'description', 'head_employee_id', 'code', 'cost_center', 'location', 'budget', 'status', 'parent_department_id'];
+    const allowed = ['name', 'description', 'head_employee_id', 'code', 'cost_center', 'location', 'budget', 'status', 'parent_department_id', 'granted_roles'];
     const sets = [];
     const params = [];
     for (const key of allowed) {
