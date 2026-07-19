@@ -7,6 +7,9 @@ const { safeQuery, withTransaction } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const ledger = require('../services/ledger');
 const axisPayoutAdapter = require('../services/bankFeeds/axisPayoutAdapter');
+const { generatePayslipPDF } = require('../services/payslipGenerator'); // npm install pdfkit
+const archiver = require('archiver'); // npm install archiver — used only for the bulk zip download
+const storage = require('../services/storage'); // your existing Supabase Storage wrapper
 
 router.use(authenticate);
 
@@ -28,6 +31,8 @@ router.get('/me/payslips', async (req, res) => {
 });
 
 const compliance = require('./../services/payrollCompliance');
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 // ── validation helpers ───────────────────────────────────────────────────────
 function isValidMonth(month) {
@@ -67,6 +72,66 @@ async function resolveRequiredAccounts() {
     if (!acct) missing.push(code);
   }
   return { resolved, missing };
+}
+
+function safeFileName(name) {
+  return name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+}
+
+// Generates a payslip PDF, uploads it via your existing storage.js, and
+// upserts a row in your existing `documents` table (entity_type='employee',
+// doc_type='payslip') — the same table your GET /documents and GET
+// /documents/:id/download routes already serve. This means:
+//   - Employees can already see their payslips today via
+//     GET /documents?entity_type=employee (auto-scoped to their own record
+//     by your existing access-control logic in routes/documents.js).
+//   - Downloading uses your existing GET /documents/:id/download signed-URL
+//     endpoint — no new download route needed here.
+// Regenerating the same month's payslip overwrites the existing row + storage
+// object in place (matched on entity_id + doc_type + title) rather than
+// creating a new `documents` version — payslip regen is a refresh, not a
+// meaningful revision worth version history for.
+async function generateAndPersistPayslip({ run, item, uploadedBy }) {
+  const pdfBuffer = await generatePayslipPDF({ run, item });
+
+  const periodLabel = `${MONTHS[run.period_month - 1]} ${run.period_year}`;
+  const title = `Payslip - ${periodLabel}`;
+  const fileName = safeFileName(`payslip-${run.period_year}-${String(run.period_month).padStart(2, '0')}.pdf`);
+  const storagePath = `employee/${item.employee_id}/${Date.now()}-${fileName}`;
+
+  try {
+    const { rows: [existingDoc] } = await safeQuery(
+      `SELECT id, storage_path FROM documents
+       WHERE entity_type = 'employee' AND entity_id = $1 AND doc_type = 'payslip' AND title = $2 AND is_current = true`,
+      [item.employee_id, title]
+    );
+
+    await storage.uploadFile(storagePath, pdfBuffer, 'application/pdf');
+
+    if (existingDoc) {
+      // Best-effort cleanup of the old storage object — don't fail the whole
+      // operation if this errors, same pattern as your existing DELETE route.
+      await storage.deleteFile(existingDoc.storage_path).catch((err) =>
+        console.warn('[payroll:payslip-doc] old storage object cleanup failed, continuing:', err.message)
+      );
+      await safeQuery(
+        `UPDATE documents SET storage_path = $1, file_name = $2, file_size_bytes = $3, mime_type = 'application/pdf', uploaded_by = $4, created_at = NOW() WHERE id = $5`,
+        [storagePath, fileName, pdfBuffer.length, uploadedBy || null, existingDoc.id]
+      );
+    } else {
+      await safeQuery(
+        `INSERT INTO documents (title, doc_type, entity_type, entity_id, storage_path, file_name, file_size_bytes, mime_type, uploaded_by)
+         VALUES ($1,'payslip','employee',$2,$3,$4,$5,'application/pdf',$6)`,
+        [title, item.employee_id, storagePath, fileName, pdfBuffer.length, uploadedBy || null]
+      );
+    }
+  } catch (docErr) {
+    // Same trade-off as before: don't block the person in front of you from
+    // getting their PDF right now just because the documents-table write failed.
+    console.error('[payroll:payslip-doc] Failed to persist payslip to documents table (PDF still served/downloaded normally):', docErr.message);
+  }
+
+  return pdfBuffer;
 }
 
 // ── create a draft payroll run for a month, computed from attendance + full statutory compliance ──
@@ -258,6 +323,106 @@ router.get('/runs/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch payroll run' });
   }
 });
+
+// ── employee document access ────────────────────────────────────────────────
+// No new routes needed here — payslips are now written into your existing
+// `documents` table (entity_type='employee', doc_type='payslip'), so your
+// existing routes/documents.js already serves them:
+//   GET /documents?entity_type=employee              (auto-scoped to self if not privileged)
+//   GET /documents?entity_type=employee&doc_type=payslip
+//   GET /documents/:id/download                        (signed URL, respects the same access control)
+// The employee portal you build later just calls those two, same as any other
+// document type — nothing payroll-specific to wire up on that side.
+
+// ── payslip PDF — single employee, one run (finance/admin) ─────────────────
+router.get('/runs/:runId/items/:itemId/payslip.pdf', requireRole('finance'), async (req, res) => {
+  try {
+    const { rows: [run] } = await safeQuery(`SELECT * FROM payroll_runs WHERE id = $1`, [req.params.runId]);
+    if (!run) return res.status(404).json({ error: 'Payroll run not found' });
+
+    const { rows: [item] } = await safeQuery(
+      `SELECT pi.*, e.full_name, e.employee_code, e.designation, e.pan_number
+       FROM payroll_items pi JOIN employees e ON e.id = pi.employee_id
+       WHERE pi.id = $1 AND pi.payroll_run_id = $2`,
+      [req.params.itemId, req.params.runId]
+    );
+    if (!item) return res.status(404).json({ error: 'Payslip not found for this run' });
+    // NOTE: if your employees table doesn't have `designation` or `pan_number` columns,
+    // drop them from the SELECT above and from services/payslipGenerator.js — they'll
+    // just render as "-" if null, but the query will fail outright if the columns
+    // don't exist at all.
+
+    const pdfBuffer = await generateAndPersistPayslip({ run, item, uploadedBy: req.staff.id });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="payslip-${item.employee_code || item.employee_id}-${run.period_month}-${run.period_year}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error('[payroll:payslip-pdf]', err);
+    res.status(500).json({ error: 'Failed to generate payslip PDF' });
+  }
+});
+
+// ── bulk payslips — all employees in a run, zipped (finance/admin) ─────────
+router.get('/runs/:runId/payslips.zip', requireRole('finance'), async (req, res) => {
+  try {
+    const { rows: [run] } = await safeQuery(`SELECT * FROM payroll_runs WHERE id = $1`, [req.params.runId]);
+    if (!run) return res.status(404).json({ error: 'Payroll run not found' });
+
+    const { rows: items } = await safeQuery(
+      `SELECT pi.*, e.full_name, e.employee_code, e.designation, e.pan_number
+       FROM payroll_items pi JOIN employees e ON e.id = pi.employee_id
+       WHERE pi.payroll_run_id = $1`,
+      [req.params.runId]
+    );
+    if (!items.length) return res.status(404).json({ error: 'No payslips found for this run' });
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="payslips-${run.period_month}-${run.period_year}.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    archive.on('error', (err) => { throw err; });
+    archive.pipe(res);
+
+    for (const item of items) {
+      const pdfBuffer = await generateAndPersistPayslip({ run, item, uploadedBy: req.staff.id });
+      archive.append(pdfBuffer, { name: `${item.employee_code || item.employee_id}-${item.full_name || 'employee'}.pdf` });
+    }
+
+    await archive.finalize();
+  } catch (err) {
+    console.error('[payroll:payslips-zip]', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to generate payslips zip' });
+  }
+});
+
+// ── payslip PDF — employee self-service, own payslip only ──────────────────
+router.get('/me/payslips/:itemId/pdf', async (req, res) => {
+  try {
+    if (!req.staff.employee_id) return res.status(404).json({ error: 'This login is not linked to an employee record' });
+
+    const { rows: [item] } = await safeQuery(
+      `SELECT pi.*, e.full_name, e.employee_code, e.designation, e.pan_number
+       FROM payroll_items pi JOIN employees e ON e.id = pi.employee_id
+       WHERE pi.id = $1`,
+      [req.params.itemId]
+    );
+    if (!item) return res.status(404).json({ error: 'Payslip not found' });
+    if (item.employee_id !== req.staff.employee_id) return res.status(403).json({ error: 'You can only download your own payslips' });
+
+    const { rows: [run] } = await safeQuery(`SELECT * FROM payroll_runs WHERE id = $1`, [item.payroll_run_id]);
+    if (!run) return res.status(404).json({ error: 'Payroll run not found' });
+
+    const pdfBuffer = await generateAndPersistPayslip({ run, item, uploadedBy: req.staff.id });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="payslip-${run.period_month}-${run.period_year}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error('[payroll:me:payslip-pdf]', err);
+    res.status(500).json({ error: 'Failed to generate payslip PDF' });
+  }
+});
+
+
 
 // ── disburse via direct Axis Bank payouts + post the accounting entry ──────
 // Requires each employee to have bank_account_number + bank_ifsc_code on file.

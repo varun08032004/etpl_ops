@@ -138,10 +138,15 @@ export default function Payroll() {
 
       {detail && (
         <Paper sx={{ p: 3, mt: 3 }}>
-          <Typography sx={{ fontWeight: 600, mb: 2 }}>{MONTHS[detail.run.period_month - 1]} {detail.run.period_year} — breakdown</Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography sx={{ fontWeight: 600 }}>{MONTHS[detail.run.period_month - 1]} {detail.run.period_year} — breakdown</Typography>
+            <Button size="small" variant="outlined" onClick={() => window.open(`/api/payroll/runs/${detail.run.id}/payslips.zip`, '_blank')}>
+              Download all payslips (.zip)
+            </Button>
+          </Box>
           <Table size="small">
             <TableHead>
-              <TableRow><TableCell>Employee</TableCell><TableCell align="right">Gross</TableCell><TableCell align="right">PF</TableCell><TableCell align="right">PT</TableCell><TableCell align="right">LOP days</TableCell><TableCell align="right">Net</TableCell><TableCell>Status</TableCell></TableRow>
+              <TableRow><TableCell>Employee</TableCell><TableCell align="right">Gross</TableCell><TableCell align="right">PF</TableCell><TableCell align="right">PT</TableCell><TableCell align="right">LOP days</TableCell><TableCell align="right">Net</TableCell><TableCell>Status</TableCell><TableCell align="right">Payslip</TableCell></TableRow>
             </TableHead>
             <TableBody>
               {detail.items.map((it) => (
@@ -157,6 +162,9 @@ export default function Payroll() {
                     {it.status === 'failed' && it.failure_reason && (
                       <Typography sx={{ fontSize: '0.7rem', color: 'error.main', mt: 0.25 }}>{it.failure_reason}</Typography>
                     )}
+                  </TableCell>
+                  <TableCell align="right">
+                    <Button size="small" onClick={() => window.open(`/api/payroll/runs/${detail.run.id}/items/${it.id}/payslip.pdf`, '_blank')}>PDF</Button>
                   </TableCell>
                 </TableRow>
               ))}
