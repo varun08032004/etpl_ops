@@ -30,6 +30,7 @@ const router = express.Router();
 const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole, requireDepartmentHead } = require('../middleware/auth');
 const { fireEvent } = require('../services/automationEngine');
+const { logAction } = require('../services/auditLog');
 
 router.use(authenticate);
 
@@ -119,6 +120,7 @@ router.post('/', requireFinanceOrComplianceHead, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
       [category, title, description || null, owner_employee_id || null, due_date, recurring_interval || null, req.staff.id]
     );
+    await logAction({ staffId: req.staff.id, action: 'compliance_item.created', entity: 'compliance_items', entityId: item.id, newValue: { category: item.category, title: item.title, due_date: item.due_date } });
     res.status(201).json({ item });
   } catch (err) {
     console.error('[compliance:create]', err);
@@ -141,12 +143,15 @@ router.put('/:id', requireFinanceOrComplianceHead, async (req, res) => {
     if (!sets.length) return res.status(400).json({ error: 'No valid fields to update' });
     sets.push(`updated_at = NOW()`);
 
+    const { rows: [before] } = await safeQuery(`SELECT * FROM compliance_items WHERE id = $1`, [req.params.id]);
+
     params.push(req.params.id);
     const { rows } = await safeQuery(
       `UPDATE compliance_items SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
       params
     );
     if (!rows.length) return res.status(404).json({ error: 'Compliance item not found' });
+    await logAction({ staffId: req.staff.id, action: 'compliance_item.updated', entity: 'compliance_items', entityId: rows[0].id, oldValue: before, newValue: rows[0] });
     res.json({ item: rows[0] });
   } catch (err) {
     console.error('[compliance:update]', err);
@@ -185,6 +190,8 @@ router.post('/:id/file', async (req, res) => {
       [filed_document_id, req.params.id]
     );
     if (!rows.length) return res.status(400).json({ error: 'Item not found or already filed' });
+
+    await logAction({ staffId: req.staff.id, action: 'compliance_item.filed', entity: 'compliance_items', entityId: rows[0].id, newValue: { filed_document_id, status: 'filed' } });
 
     // Recurring items spawn their next cycle automatically on filing.
     const item = rows[0];

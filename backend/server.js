@@ -49,7 +49,10 @@ app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/compliance', require('./routes/compliance'));
-app.use('/api/one-time-registrations', require('./routes/oneTimeRegistrations')); // NEW
+app.use('/api/one-time-registrations', require('./routes/oneTimeRegistrations'));
+app.use('/api/certifications', require('./routes/certifications')); // NEW — closes SRS §8.14 certifications gap
+app.use('/api/ip-assets', require('./routes/ipAssets')); // NEW — closes SRS §8.14 IP tracking gap
+app.use('/api/data-governance', require('./routes/dataGovernance')); // NEW — closes SRS §8.14 data governance gap
 app.use('/api/finance', require('./routes/finance'));
 app.use('/api/accounting', require('./routes/accounting'));
 app.use('/api/platform-sync', require('./routes/platform-sync'));

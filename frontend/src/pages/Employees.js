@@ -55,6 +55,9 @@ function EmployeeList() {
   const [offerLetterFile, setOfferLetterFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [quickTeamOpen, setQuickTeamOpen] = useState(false);
+  const [quickTeamName, setQuickTeamName] = useState('');
+  const [quickTeamSaving, setQuickTeamSaving] = useState(false);
 
   const load = async (q) => {
     const { data } = await client.get('/employees', { params: q ? { search: q } : {} });
@@ -89,6 +92,26 @@ function EmployeeList() {
   };
 
   const teamsInDepartment = teams.filter((t) => t.department_id === form.department_id);
+  const selectedDepartment = departments.find((d) => d.id === form.department_id);
+  const showNoTeamsPrompt = form.department_id && teamsInDepartment.length === 0;
+  const showNoModuleAccessHint = form.department_id && (!selectedDepartment?.granted_roles || selectedDepartment.granted_roles.length === 0);
+
+  const createQuickTeam = async () => {
+    if (!quickTeamName.trim()) return;
+    setQuickTeamSaving(true);
+    try {
+      const { data } = await client.post('/teams', { name: quickTeamName.trim(), department_id: form.department_id });
+      const { data: teamsData } = await client.get('/teams');
+      setTeams(teamsData.teams);
+      setForm((f) => ({ ...f, team_id: data.team.id }));
+      setQuickTeamOpen(false);
+      setQuickTeamName('');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to create team');
+    } finally {
+      setQuickTeamSaving(false);
+    }
+  };
 
   const handleCreate = async () => {
     setSaving(true);
@@ -243,6 +266,25 @@ function EmployeeList() {
                   {teamsInDepartment.map((t) => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
                 </TextField>
               </Grid>
+
+              {showNoTeamsPrompt && (
+                <Grid item xs={12}>
+                  <Alert severity="info" action={<Button size="small" onClick={() => setQuickTeamOpen(true)}>Create a team</Button>}>
+                    {selectedDepartment?.name} has no teams yet. You can add {form.full_name || 'this employee'} directly
+                    at the department level (leave Team blank), or create a team now.
+                  </Alert>
+                </Grid>
+              )}
+              {showNoModuleAccessHint && (
+                <Grid item xs={12}>
+                  <Alert severity="warning">
+                    {selectedDepartment?.name} doesn't grant self-service access to any extra modules yet (Finance/HR/Legal
+                    pages) — everyone in it currently only sees their own self-service portal. Set this once, for the
+                    whole department, in <strong>Org Structure → Edit department → "Grants access to"</strong> — it'll
+                    apply to every employee here automatically, including this one.
+                  </Alert>
+                </Grid>
+              )}
               <Grid item xs={6}>
                 <Autocomplete
                   freeSolo
@@ -320,6 +362,23 @@ function EmployeeList() {
               {saving ? 'Creating…' : 'Create employee'}
             </Button>
           )}
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={quickTeamOpen} onClose={() => setQuickTeamOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>New team in {selectedDepartment?.name}</DialogTitle>
+        <DialogContent>
+          <TextField
+            fullWidth autoFocus label="Team name" margin="normal" value={quickTeamName}
+            onChange={(e) => setQuickTeamName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') createQuickTeam(); }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setQuickTeamOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={createQuickTeam} disabled={quickTeamSaving || !quickTeamName.trim()}>
+            {quickTeamSaving ? 'Creating…' : 'Create & select'}
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

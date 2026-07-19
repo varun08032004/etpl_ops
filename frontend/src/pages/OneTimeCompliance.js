@@ -11,7 +11,13 @@ import { useAuth } from '../context/AuthContext';
 export default function OneTimeCompliance() {
   const { staff } = useAuth();
   // owner/admin can always edit too — matches requireRole's built-in bypass on the backend.
-  const canEdit = ['owner', 'admin', 'legal_hod', 'compliance_hod'].includes(staff?.role);
+  // canEdit used to check staff.role for legal_hod/compliance_hod, but those
+  // were never actually assignable roles. The real signal is whether this
+  // login heads the Legal & Compliance department — already exposed by the
+  // existing GET /departments/my-access endpoint (deptAccess.isHOD +
+  // deptAccess.departmentName), so use that instead of adding a new one.
+  const [isComplianceHead, setIsComplianceHead] = useState(false);
+  const canEdit = ['owner', 'admin'].includes(staff?.role) || isComplianceHead;
   const isAdminApprover = staff?.role === 'admin';
   const isFounderApprover = staff?.role === 'owner';
 
@@ -28,6 +34,16 @@ export default function OneTimeCompliance() {
     client.get('/one-time-registrations').then(({ data }) => setItems(data.items)).catch(() => setItems([]));
   };
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (['owner', 'admin'].includes(staff?.role)) return; // already covered, skip the extra call
+    client.get('/departments/my-access')
+      .then(({ data }) => {
+        const dept = data.deptAccess;
+        setIsComplianceHead(!!(dept?.isHOD && dept?.departmentName === 'Legal & Compliance'));
+      })
+      .catch(() => setIsComplianceHead(false));
+  }, [staff?.role]);
 
   const openEdit = (item) => {
     setEditTarget(item);

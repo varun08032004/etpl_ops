@@ -4,6 +4,7 @@ import theme from './theme';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import MyProfile from './pages/MyProfile';
 import { EmployeeList, EmployeeDetail } from './pages/Employees';
@@ -58,6 +59,7 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route element={<ProtectedRoutes />}>
               <Route path="/" element={<Home />} />
               <Route path="/employees" element={<EmployeeList />} />

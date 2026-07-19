@@ -31,6 +31,7 @@ const router = express.Router();
 const { safeQuery } = require('../db/pool');
 const { authenticate, requireDepartmentHead } = require('../middleware/auth');
 const { getRulesForSlug, computeFirstDueDate, toISODate } = require('../services/complianceRules');
+const { logAction } = require('../services/auditLog');
 
 router.use(authenticate);
 
@@ -122,6 +123,15 @@ router.put('/:slug', EDITOR_ROLE_CHECK, async (req, res) => {
       }
     }
 
+    await logAction({
+      staffId: req.staff.id,
+      action: becomingDone ? 'one_time_registration.marked_done' : 'one_time_registration.edited',
+      entity: 'one_time_registrations',
+      entityId: item.id,
+      oldValue: { registration_number: existing.registration_number, registered_on: existing.registered_on, is_done: existing.is_done },
+      newValue: { registration_number: item.registration_number, registered_on: item.registered_on, is_done: item.is_done },
+    });
+
     res.json({ item, spawnedRecurringItems: spawned });
   } catch (err) {
     console.error('[one-time-registrations:update]', err);
@@ -141,6 +151,7 @@ router.post('/:slug/request-deletion', EDITOR_ROLE_CHECK, async (req, res) => {
       [req.staff.id, req.params.slug]
     );
     if (!rows.length) return res.status(404).json({ error: 'Registration not found' });
+    await logAction({ staffId: req.staff.id, action: 'one_time_registration.deletion_requested', entity: 'one_time_registrations', entityId: rows[0].id, newValue: { reason: req.body.reason || null } });
     res.json({ item: rows[0] });
   } catch (err) {
     console.error('[one-time-registrations:request-deletion]', err);
@@ -163,6 +174,7 @@ router.post('/:slug/approve-deletion', async (req, res) => {
         `UPDATE one_time_registrations SET deletion_admin_approved_by = $1, deletion_admin_approved_at = NOW() WHERE slug = $2 RETURNING *`,
         [req.staff.id, req.params.slug]
       );
+      await logAction({ staffId: req.staff.id, action: 'one_time_registration.deletion_admin_approved', entity: 'one_time_registrations', entityId: rows[0].id });
       return res.json({ item: rows[0], stage: 'admin_approved' });
     }
 
@@ -179,6 +191,7 @@ router.post('/:slug/approve-deletion', async (req, res) => {
          WHERE slug = $2 RETURNING *`,
         [req.staff.id, req.params.slug]
       );
+      await logAction({ staffId: req.staff.id, action: 'one_time_registration.deletion_founder_approved_and_reset', entity: 'one_time_registrations', entityId: rows[0].id, oldValue: { registration_number: item.registration_number, registered_on: item.registered_on } });
       return res.json({ item: rows[0], stage: 'fully_approved_and_reset' });
     }
 

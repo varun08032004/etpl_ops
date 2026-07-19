@@ -32,7 +32,7 @@ router.get('/', async (req, res) => {
   try {
     const { rows } = await safeQuery(
       `SELECT d.id, d.name, d.code, d.cost_center, d.location, d.budget, d.status,
-              d.description, d.head_employee_id, d.parent_department_id,
+              d.description, d.head_employee_id, d.parent_department_id, d.granted_roles,
               h.full_name AS head_name, h.work_email AS head_email,
               p.name AS parent_name,
               COUNT(e.id) AS employee_count
