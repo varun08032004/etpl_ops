@@ -239,6 +239,7 @@ export default function DocumentEngine() {
                             select
                             fullWidth
                             label={f.label}
+                            helperText={f.help_text}
                             required={f.required}
                             value={formData[f.key] || ''}
                             onChange={(e) => handleFieldChange(f.key, e.target.value)}
@@ -250,6 +251,7 @@ export default function DocumentEngine() {
                             select
                             fullWidth
                             label={f.label}
+                            helperText={f.help_text}
                             required={f.required}
                             SelectProps={{ multiple: true }}
                             value={formData[f.key] || []}
@@ -262,6 +264,7 @@ export default function DocumentEngine() {
                             select
                             fullWidth
                             label={f.label}
+                            helperText={f.help_text}
                             required={f.required}
                             value={formData[f.key] || ''}
                             onChange={(e) => handleFieldChange(f.key, e.target.value)}
@@ -272,6 +275,7 @@ export default function DocumentEngine() {
                           <TextField
                             fullWidth
                             label={f.label}
+                            helperText={f.help_text}
                             required={f.required}
                             type={f.type === 'date' ? 'date' : f.type === 'number' ? 'number' : 'text'}
                             multiline={f.type === 'textarea'}

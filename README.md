@@ -1,9 +1,9 @@
 # EtherTrack Internal Ops
 
 An internal-only ERP for running EtherTrack itself: HR, GST-compliant bookkeeping/accounting,
-and payroll disbursal via RazorpayX. **Deliberately separate** from the customer-facing
-platform's database and auth — internal HR/payroll data should never share a DB with
-customer carbon-credit data.
+payroll disbursal via RazorpayX, recruitment, performance management, and department-scoped
+self-service. **Deliberately separate** from the customer-facing platform's database and auth —
+internal HR/payroll data should never share a DB with customer carbon-credit data.
 
 ## Why it's structured this way
 
@@ -12,141 +12,162 @@ customer carbon-credit data.
   Nothing writes to a balance directly; balances are always derived by summing `journal_lines`.
   This is what makes it auditable and what lets Trial Balance / P&L / Balance Sheet just be
   queries over the same source of truth, instead of three separate things that can drift out
-  of sync (which is how "advanced" homegrown accounting tools usually rot).
+  of sync.
 - A DB-level constraint trigger (`trg_journal_balanced`) additionally enforces that no journal
   entry can ever be unbalanced, even if application code has a bug. Belt and suspenders.
-- Employees are never hard-deleted (`status = 'exited'` instead) so payroll/leave history stays intact.
+- Employees are never hard-deleted (`status = 'exited'`, with a `POST /:id/reinstate` to undo an
+  accidental one) so payroll/leave history stays intact.
+- **Approvals are a resolved chain, not a fixed role.** Destructive actions (employee exit,
+  department/team delete, login deactivation) route through `services/approvalChain.js`: Team
+  Head → Department Head → CEO (any admin) → Founder, skipping any stage that isn't actually
+  filled by someone other than the requester. Founder is always the guaranteed final stage.
+- **Department access is granted, not assigned per person.** A department can "grant" one or
+  more functional roles (`finance`, `hr`, `legal_hod`, `compliance_hod`) to everyone who belongs
+  to it — set once per department in Org Structure, and every current and future employee there
+  inherits it automatically on their next request (`services/departmentAccess.js`, resolved
+  inside `authenticate()`). No per-employee permission setup, ever.
 
 ## What's built and working
 
-| Module | Status |
+| Area | Status |
 |---|---|
-| Employee/HR CRUD, leave requests + approval | Done |
+| Auth (login, forgot/reset password via email, rate-limited) | Done |
+| Employee/HR CRUD, org structure (Departments → Teams → Employees) | Done |
+| Leave requests + approval (HR, or the requester's manager/department head) | Done |
+| Multi-stage approval chain (exit, department/team delete, login deactivation) | Done |
+| Department-granted module access (finance/hr/legal_hod/compliance_hod) | Done |
+| Employee self-service portal (profile, payslips, leave, documents, assets, goals/reviews) | Done |
+| Assets inventory, linked to employees, assign/return | Done |
+| Notifications — in-app bell + email (Resend) | Done |
+| Recruitment (job postings, candidate pipeline, interviews, hire → employee conversion) | Done — no LinkedIn/Naukri API integration (needs a paid platform partnership, not code) |
+| Performance management (review cycles, goals, self/manager review flow) | Done |
 | Chart of accounts + manual journal entries | Done |
 | Trial Balance / P&L / Balance Sheet reports | Done |
 | GST invoicing (CGST+SGST vs IGST, auto-posts to ledger) | Done |
 | Payment recording against invoices | Done |
-| Payroll run generation (from attendance → LOP days → CTC breakup) | Done |
-| Razorpay(X) payout disbursal + webhook status sync | Done — **needs your RazorpayX account + real key testing** |
-| TrackPilot attendance sync (webhook + pull) | **Stubbed** — field mapping needs their real API docs |
-| Vendor bills / expenses (AP) | Not built yet — same pattern as `backend/routes/invoices.js`, mirrored for the payable side |
-| Financial year close / retained earnings roll-forward | Not built — flagged as a TODO in `getBalanceSheet()` |
-| Frontend (React) | Not built |
-| **Platform revenue sync** (subscriptions + trade fees, one-click by month) | **Done** — see below |
-
-## Platform revenue sync
-
-Pulls subscription payments and trade-fee revenue from the EtherTrack customer platform
-(read-only, via the platform's `/api/ops-integration/income` endpoint — see SRS §18.8) and
-posts it into this ledger, one click at a time, scoped to a month/year.
-
-- **Platform side:** `ethertrack-backend/routes/opsIntegration.js` — a dedicated, minimal,
-  read-only route gated by `middleware/serviceAuth.js` (a shared-secret `x-service-token`
-  header, not a user session). Deliberately kept separate from `routes/admin.js` so this
-  integration surface can't accidentally grow write endpoints.
-- **Ops side:** `backend/services/platformClient.js` (fetches the feed) +
-  `backend/routes/platform-sync.js` (posts journal entries). Idempotent — each platform
-  record's `(source, ref_id)` is checked against `platform_sync_log` before posting, backed
-  by a DB `UNIQUE` constraint, so clicking "Sync" twice for the same month never double-posts.
-- **New ledger accounts:** `1120 Platform Settlement Account`, `4110 Platform Trade Fee
-  Revenue` (subscriptions post to the existing `4100`). GST from the platform posts as output
-  tax payable (`2210`/`2220`/`2230`) since it was already collected on the company's behalf.
-- **Frontend:** new "Platform Sync" tab on the Accounting page — pick a month/year, see a
-  preview (new vs. already-synced, total amount), click Sync.
-- **Setup:** run `npm run db:migrate:platform-sync` (or paste `db/002_platform_sync.sql` into
-  Supabase's SQL editor), then set `PLATFORM_API_URL` + `PLATFORM_SYNC_SERVICE_TOKEN` in
-  `.env` — the token must match `OPS_SYNC_SERVICE_TOKEN` set on the platform's server.
+| Payroll run generation (attendance → LOP days → CTC breakup → EPF/ESIC/PT/TDS) | Done |
+| Razorpay(X) payout disbursal + webhook status sync | Done — webhook signature verification still missing, see gaps |
+| Platform revenue sync (subscriptions + trade fees, one-click by month) | Done |
+| Documents, Sales/CRM, Automation, AI Assistant, Compliance, Admin | Built — frontend + backend routes exist |
+| TrackPilot attendance sync | **Stubbed** — field mapping needs their real API docs |
+| Vendor bills / expenses (AP) | Status unconfirmed — check `backend/routes/expenses.js` |
+| Financial year close / retained earnings roll-forward | Not built |
+| Test suite | Not built |
 
 ## Setup (Supabase)
 
-1. Create a **new, separate Supabase project** for this — not a new schema inside your
-   existing platform project. Same reasoning as before: if that DB is ever compromised,
-   you don't want employee PII and payroll sitting next to it.
-2. Supabase Dashboard → your new project → Settings → Database → copy the **Direct
-   connection** string (port 5432). Paste it into `.env` as `INTERNAL_OPS_DATABASE_URL`.
-3. Run the schema. Either:
-   - `npm run db:migrate && npm run db:seed` (needs `psql` installed locally), or
-   - paste the contents of `backend/db/schema.sql` then `backend/db/seed_chart_of_accounts.sql` into
-     Supabase's SQL Editor and run them — works exactly the same, no CLI needed.
-4. Tables created via SQL Editor/psql do **not** have Row Level Security enabled by
-   default, and this server connects as the `postgres` role (bypasses RLS anyway), so
-   nothing extra to configure there. If you later add a Supabase-Auth-based admin panel
-   that queries the DB directly via `@supabase/supabase-js` with the anon key, you'd need
-   RLS policies then — not needed for this Express API.
+1. Create a **new, separate Supabase project** for this — not a schema inside the customer
+   platform project. If that DB is ever compromised, you don't want employee PII and payroll
+   sitting next to it.
+2. Supabase Dashboard → your project → Settings → Database → copy the **Direct connection**
+   string (port 5432) into `.env` as `INTERNAL_OPS_DATABASE_URL`.
+3. Run the base schema, then every numbered migration **in order**:
+   ```bash
+   psql "$INTERNAL_OPS_DATABASE_URL" -f backend/db/schema.sql
+   psql "$INTERNAL_OPS_DATABASE_URL" -f backend/db/seed_chart_of_accounts.sql
+   psql "$INTERNAL_OPS_DATABASE_URL" -f backend/db/002_platform_sync.sql
+   psql "$INTERNAL_OPS_DATABASE_URL" -f backend/db/002_add_teams.sql
+   psql "$INTERNAL_OPS_DATABASE_URL" -f backend/db/003_assets_approvals_notifications.sql
+   psql "$INTERNAL_OPS_DATABASE_URL" -f backend/db/004_recruitment_performance.sql
+   psql "$INTERNAL_OPS_DATABASE_URL" -f backend/db/005_department_granted_roles.sql
+   psql "$INTERNAL_OPS_DATABASE_URL" -f backend/db/006_password_reset_tokens.sql
+   ```
+   ⚠️ **Two migrations are both numbered `002`** (`002_platform_sync.sql` and
+   `002_add_teams.sql`) — they were written independently and don't conflict with each other
+   (different tables), but the shared number is confusing. Worth renumbering one before this
+   gets any harder to reason about — e.g. rename `002_add_teams.sql` → `007_add_teams.sql` and
+   keep every subsequent file's *content* the same, just the filename.
+   Verify anytime with:
+   ```sql
+   SELECT column_name FROM information_schema.columns WHERE table_name='departments' AND column_name='granted_roles';
+   SELECT table_name FROM information_schema.tables WHERE table_name IN ('teams','assets','staff_notifications','job_postings','password_reset_tokens');
+   ```
+4. Tables created via SQL Editor/psql do **not** have Row Level Security enabled by default,
+   and this server connects as the `postgres` role (bypasses RLS anyway) — nothing extra to
+   configure there.
 
 ```bash
 cd backend
-cp .env.example .env   # fill in Supabase connection string, JWT secret, Razorpay/TrackPilot keys
+cp .env.example .env   # fill in every value below
 npm install
-npm run db:migrate     # creates all tables
-npm run db:seed        # seeds chart of accounts, default bank account, leave types
 ALLOW_BOOTSTRAP=true npm run dev
 curl -X POST localhost:5050/api/auth/bootstrap-owner -H 'Content-Type: application/json' \
   -d '{"email":"you@ethertrack.in","password":"a-strong-password"}'
 # then set ALLOW_BOOTSTRAP=false and restart
 ```
 
-Before you go live, set `COMPANY_STATE` to your actual GST-registered state — it drives
-whether invoices split into CGST+SGST or charge IGST.
+### Environment variables
 
-## Honest gaps to close next (in priority order)
+```
+INTERNAL_OPS_DATABASE_URL=          # Supabase direct connection string
+INTERNAL_OPS_JWT_SECRET=            # required in production — auth throws on boot without it
+INTERNAL_OPS_ALLOWED_ORIGIN=        # your frontend origin, for CORS
+INTERNAL_OPS_PORT=5050
+COMPANY_STATE=                      # your GST-registered state — drives CGST+SGST vs IGST
 
-1. **TrackPilot's real API contract.** I don't have their docs, so `backend/routes/attendance.js` has
-   the DB side fully wired but the field mapping in `mapTrackPilotPayload()` is a guess.
-   Grab their webhook payload sample or REST docs and it's a 20-line fix.
-2. **RazorpayX webhook signature verification** — currently just parses the payload. Your
-   existing `/api/subscription/webhook/razorpay` handler in the main repo already has the HMAC
-   verification pattern; copy it into `backend/routes/payroll.js`.
-3. **Vendor bills (AP)** — mirror `backend/routes/invoices.js` but crediting Accounts Payable instead
-   of debiting Accounts Receivable. I'd build this next since bookkeeping is the module you
-   said you're currently paying for.
-4. **TDS on salaries** — the payroll calc does PF + professional tax but not income-tax TDS,
-   which needs slab logic + investment declarations to do properly. At <10 employees most
-   founders still run this past a CA once a quarter; automating it fully is real scope, not a
-   quick add.
-5. **A frontend.** Everything above is API-only right now.
+RESEND_API_KEY=                     # notifications + password reset email
+RESEND_FROM_EMAIL=
+APP_BASE_URL=                       # used to build links inside emails (e.g. reset-password link)
 
-## Frontend
+RAZORPAYX_KEY_ID=
+RAZORPAYX_KEY_SECRET=
+RAZORPAYX_ACCOUNT_NUMBER=
 
-`frontend/` — React (CRA) + MUI, matching the platform's stack. Dark theme with
-monospace tabular figures for every currency amount (deliberate — decimals need
-to line up when you're scanning a P&L).
+# document-engine's own outbound email (separate from Resend, see below)
+INTERNAL_OPS_SMTP_HOST=
+INTERNAL_OPS_SMTP_PORT=
+INTERNAL_OPS_SMTP_USER=
+INTERNAL_OPS_SMTP_PASS=
+INTERNAL_OPS_SMTP_FROM=
+```
+
+Note there are **two independent email systems** — `services/email.js` (Resend, for
+notifications + password reset) and `services/emailService.js` (SMTP, for the document
+engine's auto-email step). They don't conflict; they're just separately configured.
 
 ```bash
 cd frontend
 npm install
-npm start   # runs on :3000, proxies /api to :5050 (see package.json "proxy")
+npm start   # :3000, proxies /api to :5050
 ```
 
-Pages built: Login, Dashboard (revenue/expense overview + 6-month chart), People
-(employee list/detail with role-gated compensation visibility), Invoices (GST-aware
-creation form), Accounting (Trial Balance / P&L / Balance Sheet tabs), Payroll (runs +
-disbursal + per-employee breakdown).
+## Honest gaps to close next (in priority order)
 
-Not built: a UI for adding parties/customers (backend route exists at
-`POST /api/parties` — needs a form), vendor bills/AP screens, Documents, Sales.
+1. **RazorpayX webhook signature verification** — `backend/routes/payroll.js`'s
+   `/webhooks/razorpay-payout` currently just parses the payload without verifying
+   `X-Razorpay-Signature`. Anyone who finds that URL can forge a payout status update.
+2. **No DB transactions** on multi-step writes (employee create + document upload, exit +
+   login deactivation, payroll run creation). A failure partway through leaves a half-done
+   state with no rollback.
+3. **No structured logging or error tracking** — just `console.error` scattered through routes.
+   Add pino/winston + Sentry (or similar) before this is the only way you find out something's
+   broken.
+4. **No test suite**, especially the money paths (payroll's EPF/ESIC/PT/TDS math in
+   `services/payrollCompliance.js`) and the approval chain (a bug there is either a wrongful
+   auto-approval or a request stuck with nobody able to act on it).
+5. **TrackPilot's real API contract** — `mapTrackPilotPayload()` in `routes/attendance.js` is a
+   guess without their actual webhook/REST docs.
+6. **No idempotency on webhooks** — a duplicate Razorpay/TrackPilot delivery can double-process
+   a payout or attendance record.
+7. **Migrations aren't versioned/tracked** — you're running numbered `.sql` files by hand with
+   no tool (Knex/Prisma Migrate/Flyway) recording what's already been applied where. Fine solo;
+   won't scale past you.
+8. **No DB backup/restore strategy** documented anywhere.
 
-## Roadmap (re-scoped from the original blueprint)
+## Roadmap — what's left from the original blueprint
 
-The original blueprint included CRM, Sales pipeline, and Carbon Operations
-(Scope 1/2/3, registry verification, tokenization, marketplace, blockchain explorer).
-**Carbon Operations is deliberately excluded here** — that's the EtherTrack *product*
-(already in the `EtherTrack` platform repo), not an internal ops tool. Duplicating it
-here would mean maintaining carbon-credit logic in two places that drift apart.
+Carbon Operations (Scope 1/2/3, registry verification, tokenization, marketplace, blockchain
+explorer) is **deliberately excluded** — that's the EtherTrack *product* (the platform repo),
+not this internal ops tool.
 
-| Phase | Scope | Status |
-|---|---|---|
-| 1a | HR, Accounting/Bookkeeping ledger, GST invoicing, Payroll, Dashboard | Backend done · Frontend done |
-| 1a+ | Platform revenue sync (subscriptions + trade fees, one-click by month) | Done |
-| 1b | Documents (contracts, offer letters, NDAs, policies — versioned) | Not started |
-| 1c | Sales (lightweight prospect/lead pipeline — stops once a lead becomes a paying customer, since the platform's subscription/billing takes over from there) | Not started |
-| 1d | Automation (trigger→action rules on existing data: overdue invoice → reminder, new hire → checklist) | Not started |
-| 1e | AI Assistant (natural-language queries over this system's own data via the Anthropic API) | Not started |
-| 2+ | Compliance filings, Procurement, Assets, Inventory, Analytics, Admin/RBAC, multi-channel Notifications | Not started (matches original blueprint's own Phase 2/3 split) |
+| Item | Status |
+|---|---|
+| Vendor bills / AP | Needs confirmation — mirror `routes/invoices.js` crediting Accounts Payable if not already done |
+| Financial year close / retained earnings roll-forward | Not started |
+| Dedicated modules for departments outside Finance/HR/Legal (Engineering, Marketing, Ops, etc.) | Not started — those departments currently only get self-service, since there's no dedicated page for them to grant access *to* |
 
 ## Continuing the build
 
-This is the kind of thing that's much smoother to keep building inside your actual repo,
-with me able to see how things evolve as you test each piece. Claude Code (desktop or
-terminal) plugged into your `EtherTrack` repo would be the natural next step for wiring
-this in and building out the vendor-bills module + frontend.
+Claude Code (desktop or terminal) plugged directly into this repo is the natural next step from
+here — lets me see how things evolve as you test each piece instead of working from pasted
+snippets and re-cloning to check drift.

@@ -175,6 +175,28 @@ router.post('/:id/start', async (req, res) => {
   }
 });
 
+// Corrects an accidental "Start" click. Deliberately only allows in_progress
+// -> not_started, NOT filed -> anything — reverting a filed item would need
+// to also unwind its spawned recurring next-cycle item and detach the
+// evidentiary document, which is a much bigger, riskier operation than
+// undoing a one-click mistake. If you ever need to un-file something, that
+// needs its own dedicated, audited flow — not bolted onto this one.
+router.post('/:id/revert-to-not-started', requireFinanceOrComplianceHead, async (req, res) => {
+  try {
+    const { rows } = await safeQuery(
+      `UPDATE compliance_items SET status = 'not_started', updated_at = NOW()
+       WHERE id = $1 AND status = 'in_progress' RETURNING *`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(400).json({ error: 'Item not found or not in in_progress status' });
+    await logAction({ staffId: req.staff.id, action: 'compliance_item.reverted_to_not_started', entity: 'compliance_items', entityId: rows[0].id });
+    res.json({ item: rows[0] });
+  } catch (err) {
+    console.error('[compliance:revert]', err);
+    res.status(500).json({ error: 'Failed to revert item' });
+  }
+});
+
 // Filing requires the evidentiary document per COMP-01 — pass
 // filed_document_id (upload via /api/documents first, entity_type=
 // 'compliance_item', entity_id=this item's id, then pass the returned id here).

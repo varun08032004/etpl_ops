@@ -24,8 +24,13 @@ import AIAssistant from './pages/AIAssistant';
 import Analytics from './pages/Analytics';
 import Expenses from './pages/Expenses';
 import Admin from './pages/Admin';
+import Settings from './pages/Settings';
 import Compliance from './pages/Compliance';
+import ComplianceCalendar from './pages/ComplianceCalendar';
 import OneTimeCompliance from './pages/OneTimeCompliance';
+import Certifications from './pages/Certifications';
+import IPAssets from './pages/IPAssets';
+import DataGovernance from './pages/DataGovernance';
 import Finance from './pages/Finance';
 import { CompanyList, CompanyDetail } from './pages/CRM';
 
@@ -82,8 +87,13 @@ export default function App() {
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/expenses" element={<Expenses />} />
               <Route path="/admin" element={<Admin />} />
+              <Route path="/settings" element={<Settings />} />
               <Route path="/compliance" element={<Compliance />} />
+              <Route path="/compliance-calendar" element={<ComplianceCalendar />} />
               <Route path="/one-time-compliance" element={<OneTimeCompliance />} />
+              <Route path="/certifications" element={<Certifications />} />
+              <Route path="/ip-assets" element={<IPAssets />} />
+              <Route path="/data-governance" element={<DataGovernance />} />
               <Route path="/finance" element={<Finance />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

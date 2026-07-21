@@ -76,18 +76,30 @@ export default function OneTimeCompliance() {
     try {
       let proof_document_id = editTarget.proof_document_id || null;
       if (fileToUpload) {
-        const fd = new FormData();
-        fd.append('file', fileToUpload);
-        fd.append('title', `${editTarget.title} — Proof of registration`);
-        // doc_type and entity_type on the documents table are Postgres enums —
-        // 'certificate' and 'company' are existing values, not custom ones,
-        // since ALTER TYPE would be needed (and a separate deploy step) for
-        // anything not already in those enums.
-        fd.append('doc_type', 'certificate');
-        fd.append('entity_type', 'company');
-        fd.append('entity_id', editTarget.id); // UUID, not slug — matches documents.entity_id type
-        const { data: docRes } = await client.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-        proof_document_id = docRes.document.id;
+        if (proof_document_id) {
+          // A proof document already exists for this registration — use the
+          // existing version-history endpoint instead of creating a brand
+          // new document row every time someone re-uploads (that was the
+          // bug: 3 separate "v1" rows for the same registration instead of
+          // one document at v1, v2, v3...).
+          const fd = new FormData();
+          fd.append('file', fileToUpload);
+          const { data: docRes } = await client.post(`/documents/${proof_document_id}/new-version`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+          proof_document_id = docRes.document.id; // new-version returns a new row but linked via supersedes_id — this becomes the new "current" id
+        } else {
+          const fd = new FormData();
+          fd.append('file', fileToUpload);
+          fd.append('title', `${editTarget.title} — Proof of registration`);
+          // doc_type and entity_type on the documents table are Postgres enums —
+          // 'certificate' and 'company' are existing values, not custom ones,
+          // since ALTER TYPE would be needed (and a separate deploy step) for
+          // anything not already in those enums.
+          fd.append('doc_type', 'certificate');
+          fd.append('entity_type', 'company');
+          fd.append('entity_id', editTarget.id); // UUID, not slug — matches documents.entity_id type
+          const { data: docRes } = await client.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+          proof_document_id = docRes.document.id;
+        }
       }
       const { data } = await client.put(`/one-time-registrations/${editTarget.slug}`, {
         is_done: true,
@@ -109,7 +121,10 @@ export default function OneTimeCompliance() {
   };
 
   const requestDeletion = async (item) => {
-    if (!window.confirm(`Request removal of "${item.title}"? This requires Admin approval, then Founder approval.`)) return;
+    const confirmMsg = staff?.role === 'owner'
+      ? `Remove "${item.title}"? As founder this happens immediately — no approval needed.`
+      : `Request removal of "${item.title}"? This requires Admin approval, then Founder approval.`;
+    if (!window.confirm(confirmMsg)) return;
     await client.post(`/one-time-registrations/${item.slug}/request-deletion`);
     load();
   };

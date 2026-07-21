@@ -211,16 +211,32 @@ async function buildDocumentPdf({ companyProfile, template, generatedDoc, render
   if (summaryRows.length) {
     const boxX = PAGE_MARGIN;
     const boxW = (595 - PAGE_MARGIN) - PAGE_MARGIN;
-    const rowH = 18;
-    const boxH = summaryRows.length * rowH + 16;
+    const padding = 8;
+    const rowGap = 4;
+    const labelWidth = boxW / 2 - 20;
+    const valueWidth = boxW / 2 - 14;
+
+    // Measure each row's real height first — a fixed row height (the
+    // original bug here) overlaps whenever a label or value is long enough
+    // to wrap to more than one line.
+    doc.fontSize(9).font(FONT_REG);
+    const rowHeights = summaryRows.map((row) => {
+      const labelH = doc.heightOfString(breakLigatures(row.label), { width: labelWidth });
+      doc.fontSize(9.5).font(FONT_BOLD);
+      const valueH = doc.heightOfString(breakLigatures(row.value), { width: valueWidth });
+      doc.fontSize(9).font(FONT_REG);
+      return Math.max(labelH, valueH, 12) + rowGap;
+    });
+    const boxH = rowHeights.reduce((a, b) => a + b, 0) + padding * 2;
     const boxY = doc.y;
+
     doc.roundedRect(boxX, boxY, boxW, boxH, 4).fillColor('#EAF3EE').fill();
     doc.roundedRect(boxX, boxY, boxW, boxH, 4).lineWidth(0.75).strokeColor(BRAND.primary).stroke();
-    let rowY = boxY + 8;
-    summaryRows.forEach((row) => {
-      doc.fontSize(9).font(FONT_REG).fillColor(BRAND.muted).text(breakLigatures(row.label), boxX + 14, rowY, { width: boxW / 2 - 20, lineBreak: false });
-      doc.fontSize(9.5).font(FONT_BOLD).fillColor(BRAND.text).text(breakLigatures(row.value), boxX + boxW / 2, rowY, { width: boxW / 2 - 14, align: 'right', lineBreak: false });
-      rowY += rowH;
+    let rowY = boxY + padding;
+    summaryRows.forEach((row, idx) => {
+      doc.fontSize(9).font(FONT_REG).fillColor(BRAND.muted).text(breakLigatures(row.label), boxX + 14, rowY, { width: labelWidth });
+      doc.fontSize(9.5).font(FONT_BOLD).fillColor(BRAND.text).text(breakLigatures(row.value), boxX + boxW / 2, rowY, { width: valueWidth, align: 'right' });
+      rowY += rowHeights[idx];
     });
     // IMPORTANT: reset the cursor back to the left margin. The box's own
     // text() calls above use explicit x coordinates (boxX+14, boxX+boxW/2)
@@ -363,29 +379,72 @@ function drawBodyWithBoxes(doc, renderedBody, data, { FONT_REG, FONT_BOLD, BRAND
       doc.x = PAGE_MARGIN_LOCAL;
     } else {
       const raw = breakLigatures(normalizeText(String(data[seg.key] || '')));
-      const padding = 12;
-      const innerWidth = boxWidth - padding * 2 - 4; // 4 = left border strip width
-      doc.fontSize(10.5).font(FONT_REG);
-      const textHeight = doc.heightOfString(raw, { width: innerWidth, lineGap: 3 });
-      const boxH = textHeight + padding * 2;
-
-      // If the box doesn't fit in the remaining space on this page, start
-      // a fresh page for it rather than letting it render cut off — note
-      // this doesn't split a box that's taller than a full page across
-      // pages; a resolution clause that long is an edge case worth
-      // revisiting if it comes up.
-      if (doc.y + boxH > 745) { doc.addPage(); doc.y = PAGE_MARGIN_LOCAL; }
-      const boxY = doc.y;
-
-      doc.rect(PAGE_MARGIN_LOCAL, boxY, boxWidth, boxH).fillColor('#F2F2F2').fill();
-      doc.rect(PAGE_MARGIN_LOCAL, boxY, 4, boxH).fillColor(BRAND.accent).fill();
-      doc.fillColor(BRAND.text).fontSize(10.5).font(FONT_REG)
-        .text(raw, PAGE_MARGIN_LOCAL + padding + 4, boxY + padding, { width: innerWidth, align: 'left', lineGap: 3 });
-
-      doc.y = boxY + boxH + 10;
-      doc.x = PAGE_MARGIN_LOCAL;
+      drawPaginatedBox(doc, raw, { FONT_REG, BRAND }, PAGE_MARGIN_LOCAL, boxWidth);
     }
   }
+}
+
+// Draws `text` inside a highlighted callout box (light gray background,
+// blue left border), splitting it across as many pages as needed. Unlike a
+// single rect()+text() call — which only draws the background once and
+// lets PDFKit's automatic text pagination silently spill the remainder
+// onto plain, box-less pages — this measures how many whole paragraphs fit
+// in the space actually remaining on the current page, draws a box sized
+// to exactly that content, then starts a fresh page and repeats for
+// whatever's left. Each page the content spans gets its own correctly
+// sized box, so it reads as one continuous callout rather than breaking
+// awkwardly partway through.
+function drawPaginatedBox(doc, text, { FONT_REG, BRAND }, marginX, boxWidth) {
+  const padding = 12;
+  const innerWidth = boxWidth - padding * 2 - 4; // 4 = left border strip width
+  const PAGE_BOTTOM_LIMIT = 745;
+  doc.fontSize(10.5).font(FONT_REG);
+
+  const paragraphs = (text || '').split('\n');
+  let i = 0;
+  while (i < paragraphs.length) {
+    let availableHeight = PAGE_BOTTOM_LIMIT - doc.y - padding * 2;
+    if (availableHeight < 30) {
+      // Not enough room left on this page to usefully start a new box
+      // segment — move to a fresh page before measuring anything.
+      doc.addPage();
+      doc.y = PAGE_MARGIN;
+      availableHeight = PAGE_BOTTOM_LIMIT - doc.y - padding * 2;
+    }
+
+    let chunkParagraphs = [];
+    let consumed = 0;
+    let chunkHeight = 0;
+    for (let j = i; j < paragraphs.length; j++) {
+      const candidate = [...chunkParagraphs, paragraphs[j]].join('\n');
+      const candidateHeight = doc.heightOfString(candidate, { width: innerWidth, lineGap: 3 });
+      if (candidateHeight > availableHeight && chunkParagraphs.length > 0) break; // this paragraph would overflow — stop before it, draw what fits
+      chunkParagraphs.push(paragraphs[j]);
+      chunkHeight = candidateHeight;
+      consumed = j - i + 1;
+      if (candidateHeight > availableHeight) break; // a single paragraph alone is taller than the whole page — best effort, draw it anyway rather than loop forever
+    }
+
+    const chunkText = chunkParagraphs.join('\n');
+    const boxY = doc.y;
+    const boxH = chunkHeight + padding * 2;
+
+    doc.rect(marginX, boxY, boxWidth, boxH).fillColor('#F2F2F2').fill();
+    doc.rect(marginX, boxY, 4, boxH).fillColor(BRAND.accent).fill();
+    doc.fillColor(BRAND.text).font(FONT_REG).fontSize(10.5)
+      .text(chunkText, marginX + padding + 4, boxY + padding, { width: innerWidth, align: 'left', lineGap: 3 });
+
+    doc.y = boxY + boxH;
+    doc.x = marginX;
+    i += consumed;
+
+    if (i < paragraphs.length) {
+      doc.addPage();
+      doc.y = PAGE_MARGIN;
+    }
+  }
+  doc.y += 10;
+  doc.x = marginX;
 }
 
 function drawVectorSeal(doc, x, y, companyName, fontBold, fontReg) {

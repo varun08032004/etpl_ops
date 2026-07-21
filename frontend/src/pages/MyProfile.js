@@ -18,6 +18,14 @@ export default function MyProfile() {
   const [docs, setDocs] = useState([]);
   const [assets, setAssets] = useState([]);
   const [pendingLeave, setPendingLeave] = useState([]);
+  const [myExpenseClaims, setMyExpenseClaims] = useState([]);
+  const [expenseCategories, setExpenseCategories] = useState([]);
+  const [pendingExpenseClaims, setPendingExpenseClaims] = useState({ pendingManagerDecision: [], pendingReimbursement: [] });
+  const [claimOpen, setClaimOpen] = useState(false);
+  const [claimForm, setClaimForm] = useState({ category_id: '', description: '', amount: '', expense_date: '' });
+  const [claimSaving, setClaimSaving] = useState(false);
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [reimburseBankSelections, setReimburseBankSelections] = useState({});
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [leaveForm, setLeaveForm] = useState({ leave_type_id: '', start_date: '', end_date: '', reason: '' });
   const [error, setError] = useState('');
@@ -42,6 +50,10 @@ export default function MyProfile() {
       setAssets(assetsRes.data.assets);
       // Best-effort — empty array if this login doesn't manage anyone or isn't HR.
       client.get('/employees/leave/pending').then(({ data }) => setPendingLeave(data.leaveRequests)).catch(() => setPendingLeave([]));
+      client.get('/expense-claims/me').then(({ data }) => setMyExpenseClaims(data.claims)).catch(() => setMyExpenseClaims([]));
+      client.get('/expense-claims/pending').then(({ data }) => setPendingExpenseClaims(data)).catch(() => {});
+      client.get('/expense-claims/categories').then(({ data }) => setExpenseCategories(data.categories || [])).catch(() => setExpenseCategories([]));
+      client.get('/expense-claims/bank-accounts').then(({ data }) => setBankAccounts(data.bankAccounts || [])).catch(() => setBankAccounts([]));
     } catch (err) {
       if (err.response?.status === 404) setNotLinked(true);
     }
@@ -52,6 +64,33 @@ export default function MyProfile() {
   const decideLeave = async (leaveId, decision) => {
     await client.post(`/employees/leave/${leaveId}/decision`, { decision });
     client.get('/employees/leave/pending').then(({ data }) => setPendingLeave(data.leaveRequests)).catch(() => {});
+  };
+
+  const refreshPendingClaims = () => client.get('/expense-claims/pending').then(({ data }) => setPendingExpenseClaims(data)).catch(() => {});
+
+  const decideExpenseClaim = async (claimId, decision) => {
+    await client.post(`/expense-claims/${claimId}/manager-decision`, { decision });
+    refreshPendingClaims();
+  };
+
+  const reimburseClaim = async (claimId, bankAccountId) => {
+    if (!bankAccountId) { alert('Pick a bank account first'); return; }
+    await client.post(`/expense-claims/${claimId}/reimburse`, { bank_account_id: bankAccountId });
+    refreshPendingClaims();
+  };
+
+  const submitExpenseClaim = async () => {
+    setClaimSaving(true);
+    try {
+      await client.post('/expense-claims', claimForm);
+      setClaimOpen(false);
+      setClaimForm({ category_id: '', description: '', amount: '', expense_date: '' });
+      client.get('/expense-claims/me').then(({ data }) => setMyExpenseClaims(data.claims)).catch(() => {});
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to submit claim');
+    } finally {
+      setClaimSaving(false);
+    }
   };
 
   const handleLeaveSubmit = async () => {
@@ -123,6 +162,54 @@ export default function MyProfile() {
         </Paper>
       )}
 
+      {pendingExpenseClaims.pendingManagerDecision?.length > 0 && (
+        <Paper sx={{ p: 2.5, mb: 3 }}>
+          <Typography sx={{ fontWeight: 600, mb: 1.5 }}>Expense claims waiting on you ({pendingExpenseClaims.pendingManagerDecision.length})</Typography>
+          {pendingExpenseClaims.pendingManagerDecision.map((c) => (
+            <Box key={c.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+              <Box>
+                <Typography sx={{ fontSize: '0.875rem' }}>{c.employee_name} — {c.description}</Typography>
+                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }} className="figure">
+                  ₹{Number(c.amount).toLocaleString('en-IN')} · {c.expense_date?.slice(0, 10)}{c.category_name ? ` · ${c.category_name}` : ''}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button size="small" color="error" onClick={() => decideExpenseClaim(c.id, 'rejected')}>Reject</Button>
+                <Button size="small" variant="contained" onClick={() => decideExpenseClaim(c.id, 'approved')}>Approve</Button>
+              </Box>
+            </Box>
+          ))}
+        </Paper>
+      )}
+
+      {pendingExpenseClaims.pendingReimbursement?.length > 0 && (
+        <Paper sx={{ p: 2.5, mb: 3 }}>
+          <Typography sx={{ fontWeight: 600, mb: 1.5 }}>Approved claims awaiting reimbursement ({pendingExpenseClaims.pendingReimbursement.length})</Typography>
+          {pendingExpenseClaims.pendingReimbursement.map((c) => (
+            <Box key={c.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+              <Box>
+                <Typography sx={{ fontSize: '0.875rem' }}>{c.employee_name} — {c.description}</Typography>
+                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }} className="figure">
+                  ₹{Number(c.amount).toLocaleString('en-IN')} · {c.expense_date?.slice(0, 10)}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <TextField
+                  select size="small" sx={{ minWidth: 180 }} label="Pay from"
+                  value={reimburseBankSelections[c.id] || ''}
+                  onChange={(e) => setReimburseBankSelections({ ...reimburseBankSelections, [c.id]: e.target.value })}
+                >
+                  {bankAccounts.map((b) => <MenuItem key={b.id} value={b.id}>{b.account_name}</MenuItem>)}
+                </TextField>
+                <Button size="small" variant="contained" onClick={() => reimburseClaim(c.id, reimburseBankSelections[c.id])}>
+                  Mark reimbursed
+                </Button>
+              </Box>
+            </Box>
+          ))}
+        </Paper>
+      )}
+
       <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: 3, borderBottom: '1px solid', borderColor: 'divider' }}>
         <Tab label="Overview" />
         <Tab label="Compensation" />
@@ -130,6 +217,7 @@ export default function MyProfile() {
         <Tab label="Leave" />
         <Tab label="Documents" />
         <Tab label="Assets" />
+        <Tab label="Expense Claims" />
       </Tabs>
 
       {tab === 0 && (
@@ -266,6 +354,54 @@ export default function MyProfile() {
           </Table>
         </Paper>
       )}
+
+      {tab === 6 && (
+        <Box>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+            <Button variant="contained" onClick={() => setClaimOpen(true)}>Submit expense claim</Button>
+          </Box>
+          <Paper>
+            <Table size="small">
+              <TableHead>
+                <TableRow><TableCell>Description</TableCell><TableCell>Category</TableCell><TableCell align="right">Amount</TableCell><TableCell>Date</TableCell><TableCell>Status</TableCell></TableRow>
+              </TableHead>
+              <TableBody>
+                {myExpenseClaims.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell>{c.description}</TableCell>
+                    <TableCell>{c.category_name || '—'}</TableCell>
+                    <TableCell align="right" className="figure">₹{Number(c.amount).toLocaleString('en-IN')}</TableCell>
+                    <TableCell className="figure">{c.expense_date?.slice(0, 10)}</TableCell>
+                    <TableCell>
+                      <Chip size="small" label={c.status.replace('_', ' ')} color={c.status === 'reimbursed' ? 'success' : c.status === 'rejected' ? 'error' : 'default'} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!myExpenseClaims.length && <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No expense claims yet.</TableCell></TableRow>}
+              </TableBody>
+            </Table>
+          </Paper>
+        </Box>
+      )}
+
+      <Dialog open={claimOpen} onClose={() => setClaimOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Submit expense claim</DialogTitle>
+        <DialogContent>
+          <TextField fullWidth label="What was it for" margin="normal" value={claimForm.description} onChange={(e) => setClaimForm({ ...claimForm, description: e.target.value })} />
+          <TextField fullWidth select label="Category" margin="normal" value={claimForm.category_id} onChange={(e) => setClaimForm({ ...claimForm, category_id: e.target.value })}>
+            <MenuItem value="">Uncategorized</MenuItem>
+            {expenseCategories.map((c) => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
+          </TextField>
+          <TextField fullWidth type="number" label="Amount (₹)" margin="normal" value={claimForm.amount} onChange={(e) => setClaimForm({ ...claimForm, amount: e.target.value })} />
+          <TextField fullWidth type="date" label="Expense date" InputLabelProps={{ shrink: true }} margin="normal" value={claimForm.expense_date} onChange={(e) => setClaimForm({ ...claimForm, expense_date: e.target.value })} />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setClaimOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={submitExpenseClaim} disabled={claimSaving || !claimForm.description || !claimForm.amount || !claimForm.expense_date}>
+            {claimSaving ? 'Submitting…' : 'Submit'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={leaveOpen} onClose={() => setLeaveOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Request leave</DialogTitle>

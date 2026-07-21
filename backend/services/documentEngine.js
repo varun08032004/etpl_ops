@@ -288,6 +288,9 @@ function buildRenderData(companyProfile, formData, templateFields) {
     company_phone: companyProfile?.phone || '',
     compensation_clause: buildCompensationClause(formData),
     directors_present: buildDirectorsPresentList(formData),
+    // Defaults to "None" instead of leaving an abrupt blank line under
+    // "IN ATTENDANCE:" when nobody outside the board attended.
+    in_attendance: (formData.in_attendance || '').trim() || 'None',
     share_capital_clause: buildShareCapitalClause(formData),
     ...formatDateFields(templateFields, formatAmountFields(formData)),
   };

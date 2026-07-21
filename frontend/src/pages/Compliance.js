@@ -51,6 +51,12 @@ export default function Compliance() {
     load();
   };
 
+  const revertItem = async (id) => {
+    if (!window.confirm('Revert this back to "Not started"? Use this if Start was clicked by mistake.')) return;
+    await client.post(`/compliance/${id}/revert-to-not-started`);
+    load();
+  };
+
   const openFile = (item) => setFileTarget(item);
 
   const handleFile = async (e) => {
@@ -116,6 +122,9 @@ export default function Compliance() {
                 <TableCell><Chip size="small" label={item.status.replace('_', ' ')} color={STATUS_COLOR[item.status]} variant={item.status === 'not_started' ? 'outlined' : 'filled'} /></TableCell>
                 <TableCell align="right">
                   {item.status === 'not_started' && <Button size="small" onClick={() => startItem(item.id)}>Start</Button>}
+                  {item.status === 'in_progress' && (
+                    <Button size="small" color="warning" onClick={() => revertItem(item.id)}>Revert</Button>
+                  )}
                   {item.status !== 'filed' && <Button size="small" onClick={() => openFile(item)}>File</Button>}
                 </TableCell>
               </TableRow>

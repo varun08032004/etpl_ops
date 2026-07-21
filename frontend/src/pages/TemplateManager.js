@@ -14,7 +14,7 @@ const CATEGORIES = ['hr', 'legal', 'finance', 'compliance', 'operations'];
 const FIELD_TYPES = ['text', 'textarea', 'date', 'number', 'select'];
 
 const emptyField = () => ({
-  key: '', label: '', type: 'text', required: true, highlight: false,
+  key: '', label: '', help_text: '', type: 'text', required: true, highlight: false,
   options: [], // used when type === 'select'
   multiple: false, // used when type === 'select' — allow picking more than one option
   rows: undefined, // used when type === 'textarea' — how many rows visible on the Generate form (default 3)
@@ -275,6 +275,15 @@ export default function TemplateManager() {
                         fullWidth size="small" label="Key ({{placeholder}})"
                         value={f.key}
                         onChange={(e) => updateField(idx, { key: deriveKey(e.target.value) })}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={2.75}>
+                      <TextField
+                        fullWidth size="small" label="Help text (form guidance only)"
+                        placeholder="e.g. short heading, e.g. Opening of Bank Account"
+                        value={f.help_text}
+                        onChange={(e) => updateField(idx, { help_text: e.target.value })}
+                        helperText="Shown under the input on the Generate form — never appears in the PDF. Keep instructions here, not in Label."
                       />
                     </Grid>
                     <Grid item xs={6} sm={2}>

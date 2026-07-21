@@ -47,6 +47,8 @@ app.use('/api/automation', require('./routes/automation'));
 app.use('/api/ai', require('./routes/ai'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/expenses', require('./routes/expenses'));
+app.use('/api/expense-claims', require('./routes/expenseClaims')); // NEW — employee reimbursement claims, distinct from routes/expenses.js's recurring company bills
+app.use('/api/settings', require('./routes/settings')); // NEW — real Settings module (SRS §8.23): compliance rates, PT/tax slabs, app settings
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/compliance', require('./routes/compliance'));
 app.use('/api/one-time-registrations', require('./routes/oneTimeRegistrations'));

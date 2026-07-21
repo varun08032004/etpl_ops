@@ -142,6 +142,25 @@ router.put('/:slug', EDITOR_ROLE_CHECK, async (req, res) => {
 // ── two-stage deletion approval: admin approves first, then founder ────────
 router.post('/:slug/request-deletion', EDITOR_ROLE_CHECK, async (req, res) => {
   try {
+    // Owner bypass — same pattern as departments.js/teams.js: the founder
+    // requesting their own action doesn't need to wait on an admin approval
+    // that exists specifically to check people BELOW the founder. Reset
+    // immediately instead of creating a pending two-stage request.
+    if (req.staff.role === 'owner') {
+      const { rows } = await safeQuery(
+        `UPDATE one_time_registrations
+         SET is_done = FALSE, registration_number = NULL, registered_on = NULL, proof_document_id = NULL, notes = NULL,
+             completed_by = NULL, deletion_requested_by = NULL, deletion_requested_at = NULL,
+             deletion_admin_approved_by = NULL, deletion_admin_approved_at = NULL,
+             deletion_founder_approved_by = $1, deletion_founder_approved_at = NOW()
+         WHERE slug = $2 RETURNING *`,
+        [req.staff.id, req.params.slug]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Registration not found' });
+      await logAction({ staffId: req.staff.id, action: 'one_time_registration.deleted_by_founder', entity: 'one_time_registrations', entityId: rows[0].id });
+      return res.json({ item: rows[0], stage: 'founder_immediate_reset' });
+    }
+
     const { rows } = await safeQuery(
       `UPDATE one_time_registrations
        SET deletion_requested_by = $1, deletion_requested_at = NOW(),
@@ -152,7 +171,7 @@ router.post('/:slug/request-deletion', EDITOR_ROLE_CHECK, async (req, res) => {
     );
     if (!rows.length) return res.status(404).json({ error: 'Registration not found' });
     await logAction({ staffId: req.staff.id, action: 'one_time_registration.deletion_requested', entity: 'one_time_registrations', entityId: rows[0].id, newValue: { reason: req.body.reason || null } });
-    res.json({ item: rows[0] });
+    res.json({ item: rows[0], stage: 'pending_admin_approval' });
   } catch (err) {
     console.error('[one-time-registrations:request-deletion]', err);
     res.status(500).json({ error: 'Failed to request deletion' });

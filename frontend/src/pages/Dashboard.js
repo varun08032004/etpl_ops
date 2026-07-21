@@ -28,16 +28,25 @@ export default function Dashboard() {
         const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
         const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
 
-        const [employeesRes, invoicesRes, pnlRes, runwayRes, complianceRes] = await Promise.all([
+        const [employeesRes, invoicesRes, pnlRes, runwayRes, revenueGrowthRes, complianceRes] = await Promise.all([
           client.get('/employees', { params: { status: 'active' } }),
           client.get('/invoices'),
           client.get('/accounting/reports/profit-and-loss', { params: { from: monthStart, to: monthEnd } }),
           client.get('/accounting/reports/cashflow-runway', { params: { months: 6 } }),
+          client.get('/accounting/reports/revenue-growth', { params: { months: 1 } }).catch(() => ({ data: { months: [] } })),
           client.get('/compliance/due-soon').catch(() => ({ data: { items: [] } })),
         ]);
 
         const unpaidInvoices = invoicesRes.data.invoices.filter((i) => ['sent', 'partially_paid', 'overdue'].includes(i.status));
         const outstandingAR = unpaidInvoices.reduce((s, i) => s + Number(i.total_amount) - Number(i.amount_paid), 0);
+
+        // MRR is a proxy here — current month's recognized subscription
+        // revenue (account 4100) from the ledger, not a true subscriber-count
+        // MRR (no subscription-tier/seat tracking exists yet to compute that
+        // properly). Good enough for "is revenue growing," not a SaaS metrics
+        // dashboard replacement.
+        const thisMonth = revenueGrowthRes.data.months?.[revenueGrowthRes.data.months.length - 1];
+        const mrr = thisMonth?.subscriptionRevenue ?? null;
 
         setData({
           activeEmployees: employeesRes.data.employees.length,
@@ -45,6 +54,12 @@ export default function Dashboard() {
           outstandingAR,
           unpaidCount: unpaidInvoices.length,
           runway: runwayRes.data.months,
+          avgMonthlyBurn: runwayRes.data.avgMonthlyBurnLast3Mo,
+          cashOnHand: runwayRes.data.cashOnHand,
+          runwayMonths: runwayRes.data.runwayMonths,
+          runwayNote: runwayRes.data.note,
+          mrr,
+          arr: mrr != null ? mrr * 12 : null,
           compliance: complianceRes.data.items,
         });
       } catch (err) {
@@ -80,6 +95,25 @@ export default function Dashboard() {
           <StatCard
             label="Net profit (MTD)"
             value={<Money amount={data.pnl.netProfit} color={data.pnl.netProfit >= 0 ? 'primary.main' : 'error.main'} />}
+          />
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={2.5} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard label="MRR" value={data.mrr != null ? <Money amount={data.mrr} /> : '—'} hint="This month's subscription revenue" />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard label="ARR" value={data.arr != null ? <Money amount={data.arr} /> : '—'} hint="MRR × 12" />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard label="Avg. monthly burn" value={<Money amount={data.avgMonthlyBurn} color={data.avgMonthlyBurn > 0 ? 'error.main' : 'primary.main'} />} hint="Last 3 months" />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            label="Runway"
+            value={data.runwayMonths != null ? `${data.runwayMonths} mo` : '—'}
+            hint={data.runwayNote || <Money amount={data.cashOnHand} size="0.75rem" />}
           />
         </Grid>
       </Grid>

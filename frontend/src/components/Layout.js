@@ -20,7 +20,11 @@ import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import EventRepeatOutlinedIcon from '@mui/icons-material/EventRepeatOutlined';
 import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined';
+import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
+import WorkspacePremiumOutlinedIcon from '@mui/icons-material/WorkspacePremiumOutlined';
+import CopyrightOutlinedIcon from '@mui/icons-material/CopyrightOutlined';
+import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import PersonOutlinedIcon from '@mui/icons-material/PersonOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -80,6 +84,9 @@ const NAV_GROUPS = [
     items: [
       { to: '/one-time-compliance', label: 'Registrations', icon: FactCheckOutlinedIcon },
       { to: '/compliance', label: 'Compliance', icon: FactCheckOutlinedIcon },
+      { to: '/compliance-calendar', label: 'Recurring Calendar', icon: EventRepeatOutlinedIcon },
+      { to: '/certifications', label: 'Certifications', icon: WorkspacePremiumOutlinedIcon },
+      { to: '/ip-assets', label: 'Intellectual Property', icon: CopyrightOutlinedIcon },
     ],
   },
   {
@@ -112,6 +119,8 @@ const ADMIN_NAV_GROUP = {
   label: 'Admin',
   items: [
     { to: '/admin', label: 'Permissions & Audit', icon: AdminPanelSettingsOutlinedIcon },
+    { to: '/data-governance', label: 'Data Governance', icon: StorageOutlinedIcon },
+    { to: '/settings', label: 'Settings', icon: SettingsOutlinedIcon },
   ],
 };
 
