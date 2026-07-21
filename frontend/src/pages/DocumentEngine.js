@@ -38,6 +38,9 @@ export default function DocumentEngine() {
   const [departmentFilter, setDepartmentFilter] = useState('all');
   const [generated, setGenerated] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
+  const [voidTarget, setVoidTarget] = useState(null); // document being voided (holds id + document_number for the dialog)
+  const [voidReason, setVoidReason] = useState('');
+  const [voiding, setVoiding] = useState(false);
 
   const [activeTemplate, setActiveTemplate] = useState(null); // template being filled in
   const [formData, setFormData] = useState({});
@@ -114,7 +117,20 @@ export default function DocumentEngine() {
   };
 
   const approve = async (id) => { await client.post(`/document-engine/generated/${id}/approve`); loadGenerated(); };
-  const voidDoc = async (id) => { await client.post(`/document-engine/generated/${id}/void`); loadGenerated(); };
+  const openVoidDialog = (doc) => { setVoidTarget(doc); setVoidReason(''); };
+  const submitVoid = async () => {
+    if (!voidReason.trim()) return;
+    setVoiding(true);
+    try {
+      await client.post(`/document-engine/generated/${voidTarget.id}/void`, { reason: voidReason.trim() });
+      setVoidTarget(null);
+      loadGenerated();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to void document');
+    } finally {
+      setVoiding(false);
+    }
+  };
 
   return (
     <Box>
@@ -197,7 +213,7 @@ export default function DocumentEngine() {
                   )}
                   {canApprove && d.status !== 'void' && (
                     <Tooltip title="Void">
-                      <IconButton size="small" onClick={() => voidDoc(d.id)}><BlockOutlinedIcon fontSize="small" /></IconButton>
+                      <IconButton size="small" onClick={() => openVoidDialog(d)}><BlockOutlinedIcon fontSize="small" /></IconButton>
                     </Tooltip>
                   )}
                 </TableCell>
@@ -342,6 +358,36 @@ export default function DocumentEngine() {
             </DialogActions>
           </>
         )}
+      </Dialog>
+
+      {/* ── Void reason dialog — a reason is required so any gap this creates ── */}
+      {/* ── in a sequenced number (e.g. a Share Certificate) is explainable ──── */}
+      {/* ── later, instead of just a silent hole in the numbering. ──────────── */}
+      <Dialog open={!!voidTarget} onClose={() => setVoidTarget(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Void {voidTarget?.document_number}</DialogTitle>
+        <DialogContent dividers>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            This document's number won't be reused — voiding preserves the audit trail (e.g. if this was a
+            typo that needs reissuing, the correction will get the next number, and this reason explains why
+            {voidTarget?.document_number} was skipped).
+          </Alert>
+          <TextField
+            fullWidth
+            autoFocus
+            label="Reason for voiding"
+            placeholder="e.g. Shareholder name misspelled — reissuing as a new certificate"
+            multiline
+            minRows={2}
+            value={voidReason}
+            onChange={(e) => setVoidReason(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setVoidTarget(null)}>Cancel</Button>
+          <Button variant="contained" color="error" disabled={voiding || !voidReason.trim()} onClick={submitVoid}>
+            {voiding ? 'Voiding…' : 'Void Document'}
+          </Button>
+        </DialogActions>
       </Dialog>
     </Box>
   );

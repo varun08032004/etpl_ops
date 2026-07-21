@@ -141,7 +141,19 @@ function pickSummaryFields(template, data) {
 async function buildDocumentPdf({ companyProfile, template, generatedDoc, renderedBody, data = {}, images = {} }) {
   const { logoBuffer, sealBuffer, signatureBuffer } = images;
 
-  const doc = new PDFDocument({ size: 'A4', margin: PAGE_MARGIN, bufferPages: true });
+  // A dedicated (larger) bottom margin reserves real space for the footer.
+  // Previously this used a single `margin` value equal to the top/side
+  // margin, which meant PDFKit's own automatic pagination considered
+  // anything up to ~785pt "still in bounds" and kept flowing text there —
+  // but the footer is manually stamped at y=775, so long content (like an
+  // Agenda list) could legitimately auto-flow right on top of it. This
+  // margin is set past where the footer sits, so PDFKit itself will start
+  // a new page before content can ever reach that zone.
+  const doc = new PDFDocument({
+    size: 'A4',
+    margins: { top: PAGE_MARGIN, bottom: 100, left: PAGE_MARGIN, right: PAGE_MARGIN },
+    bufferPages: true,
+  });
   const { reg: FONT_REG, bold: FONT_BOLD, italic: FONT_ITALIC } = registerFonts(doc);
   const chunks = [];
   doc.on('data', (c) => chunks.push(c));
@@ -264,17 +276,12 @@ async function buildDocumentPdf({ companyProfile, template, generatedDoc, render
   // If there isn't enough room left on the current page, start a fresh
   // page for it instead of letting pdfkit auto-break mid-block.
   const BLOCK_HEIGHT = 110;
-  const PAGE_BOTTOM = 755; // leaves room below for the footer strip at y=775
+  const PAGE_BOTTOM = 738; // aligned with the new bottom margin (page reserves space below ~742)
   doc.moveDown(1.5);
   if (doc.y + BLOCK_HEIGHT > PAGE_BOTTOM) doc.addPage();
   const blockTop = doc.y;
 
   if (template.requires_signature) {
-    if (signatureBuffer) {
-      try { doc.image(signatureBuffer, PAGE_MARGIN, blockTop, { width: 120, height: 45 }); } catch (_) { /* skip */ }
-    } else {
-      doc.moveTo(PAGE_MARGIN, blockTop + 40).lineTo(PAGE_MARGIN + 160, blockTop + 40).lineWidth(0.5).stroke();
-    }
     // Per-document signatory override: most letters use the company's
     // default signatory (e.g. the MD), but some documents — like a Board
     // Resolution's certification — are properly signed by someone else
@@ -285,20 +292,50 @@ async function buildDocumentPdf({ companyProfile, template, generatedDoc, render
     const signatoryTitle = data.override_signatory_title || companyProfile?.default_signatory_title || '';
     const signatoryDin = data.override_signatory_din || companyProfile?.default_signatory_din || '';
 
-    doc.fontSize(7).font(FONT_BOLD).fillColor(BRAND.accent)
-      .text('DIGITALLY SIGNED', PAGE_MARGIN, blockTop + 48, { characterSpacing: 0.6, lineBreak: false });
-    doc.fillColor(BRAND.text);
-    doc.fontSize(9).font(FONT_BOLD).text(breakLigatures(signatoryName), PAGE_MARGIN, blockTop + 59, { width: 190, lineBreak: false });
-    doc.fontSize(8).font(FONT_REG).text(breakLigatures(signatoryTitle), PAGE_MARGIN, blockTop + 72, { width: 190, lineBreak: false });
-    let signatureLineY = blockTop + 84;
-    if (signatoryDin) {
-      doc.fontSize(7.5).font(FONT_REG).fillColor(BRAND.muted).text(`DIN: ${signatoryDin}`, PAGE_MARGIN, signatureLineY, { width: 190, lineBreak: false });
-      signatureLineY += 11;
+    if (template.signature_style === 'formal') {
+      // "Certified to be a True Copy / For {Company} / [signature line] /
+      // Name / Title / DIN" — the traditional layout for board minutes and
+      // resolutions, distinct from the "Digitally Signed" flourish that
+      // suits an offer letter or agreement better.
+      doc.fontSize(9).font(FONT_BOLD).fillColor(BRAND.text)
+        .text('Certified to be a True Copy', PAGE_MARGIN, blockTop, { width: 260, lineBreak: false });
+      doc.fontSize(8).font(FONT_REG).fillColor(BRAND.muted)
+        .text(`For ${breakLigatures(companyProfile?.name || '')}`, PAGE_MARGIN, blockTop + 13, { width: 260, lineBreak: false });
+
+      if (signatureBuffer) {
+        try { doc.image(signatureBuffer, PAGE_MARGIN, blockTop + 26, { width: 110, height: 38 }); } catch (_) { /* skip */ }
+      }
+      doc.moveTo(PAGE_MARGIN, blockTop + 68).lineTo(PAGE_MARGIN + 160, blockTop + 68).lineWidth(0.5).strokeColor(BRAND.muted).stroke();
+
+      doc.fontSize(9).font(FONT_BOLD).fillColor(BRAND.text).text(breakLigatures(signatoryName), PAGE_MARGIN, blockTop + 74, { width: 190, lineBreak: false });
+      doc.fontSize(8).font(FONT_REG).fillColor(BRAND.muted).text(breakLigatures(signatoryTitle), PAGE_MARGIN, blockTop + 87, { width: 190, lineBreak: false });
+      if (signatoryDin) {
+        doc.fontSize(7.5).font(FONT_REG).fillColor(BRAND.muted).text(`DIN: ${signatoryDin}`, PAGE_MARGIN, blockTop + 99, { width: 190, lineBreak: false });
+      }
+      doc.fillColor(BRAND.text);
+    } else {
+      // Default "Digitally Signed" style — used by offer letters,
+      // agreements, and anything else that doesn't opt into 'formal'.
+      if (signatureBuffer) {
+        try { doc.image(signatureBuffer, PAGE_MARGIN, blockTop, { width: 120, height: 45 }); } catch (_) { /* skip */ }
+      } else {
+        doc.moveTo(PAGE_MARGIN, blockTop + 40).lineTo(PAGE_MARGIN + 160, blockTop + 40).lineWidth(0.5).stroke();
+      }
+      doc.fontSize(7).font(FONT_BOLD).fillColor(BRAND.accent)
+        .text('DIGITALLY SIGNED', PAGE_MARGIN, blockTop + 48, { characterSpacing: 0.6, lineBreak: false });
+      doc.fillColor(BRAND.text);
+      doc.fontSize(9).font(FONT_BOLD).text(breakLigatures(signatoryName), PAGE_MARGIN, blockTop + 59, { width: 190, lineBreak: false });
+      doc.fontSize(8).font(FONT_REG).text(breakLigatures(signatoryTitle), PAGE_MARGIN, blockTop + 72, { width: 190, lineBreak: false });
+      let signatureLineY = blockTop + 84;
+      if (signatoryDin) {
+        doc.fontSize(7.5).font(FONT_REG).fillColor(BRAND.muted).text(`DIN: ${signatoryDin}`, PAGE_MARGIN, signatureLineY, { width: 190, lineBreak: false });
+        signatureLineY += 11;
+        doc.fillColor(BRAND.text);
+      }
+      doc.fontSize(7.5).font(FONT_REG).fillColor(BRAND.muted)
+        .text(breakLigatures(companyProfile?.name || ''), PAGE_MARGIN, signatureLineY, { width: 190, lineBreak: false });
       doc.fillColor(BRAND.text);
     }
-    doc.fontSize(7.5).font(FONT_REG).fillColor(BRAND.muted)
-      .text(breakLigatures(companyProfile?.name || ''), PAGE_MARGIN, signatureLineY, { width: 190, lineBreak: false });
-    doc.fillColor(BRAND.text);
   }
 
   if (template.requires_qr) {
@@ -397,7 +434,7 @@ function drawBodyWithBoxes(doc, renderedBody, data, { FONT_REG, FONT_BOLD, BRAND
 function drawPaginatedBox(doc, text, { FONT_REG, BRAND }, marginX, boxWidth) {
   const padding = 12;
   const innerWidth = boxWidth - padding * 2 - 4; // 4 = left border strip width
-  const PAGE_BOTTOM_LIMIT = 745;
+  const PAGE_BOTTOM_LIMIT = 738; // aligned with the new bottom margin
   doc.fontSize(10.5).font(FONT_REG);
 
   const paragraphs = (text || '').split('\n');

@@ -169,6 +169,50 @@ function buildShareCapitalClause(data) {
   return `aggregating to ${formatIndianAmountWithSymbol(total)} (Rupees ${numberToIndianWords(total)} Only), fully paid-up.`;
 }
 
+/**
+ * Auto-numbers a textarea's lines — "1. First item\n2. Second item\n...".
+ * Used for Agenda so an admin just types one item per line without having
+ * to number them by hand. Blank lines are dropped (so paragraph spacing in
+ * the textarea doesn't throw the numbering off), and lines that already
+ * start with a number (e.g. someone pastes an already-numbered list) are
+ * left alone rather than double-numbered.
+ */
+function numberLines(text) {
+  const lines = (text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  let n = 0;
+  return lines.map((line) => {
+    if (/^\d+[.)]\s/.test(line)) return line; // already numbered — leave as-is
+    n += 1;
+    return `${n}. ${line}`;
+  }).join('\n');
+}
+
+/**
+ * Merges the pasted resolution clause with the standard closing
+ * authorization boilerplate into ONE piece of text, so the whole thing —
+ * including the "any Director or Company Secretary may sign..." closing —
+ * gets drawn inside the same highlighted box. Previously the boilerplate
+ * lived in the template body AFTER the %%BOX:...%% marker, as plain text —
+ * which looked like the resolution's own ending had "fallen out" of the
+ * box with no visual boundary explaining why.
+ */
+function buildResolutionTextFull(data) {
+  const pasted = (data.resolution_text || '').trim();
+  const closing = 'RESOLVED FURTHER THAT any Director or the Company Secretary of the Company be and is hereby severally authorised to sign, execute, and do all acts, deeds and things necessary to give effect to this Resolution.';
+  return pasted ? `${pasted}\n\n${closing}` : closing;
+}
+
+/**
+ * Omits the "IN ATTENDANCE:" section entirely when nobody outside the
+ * board attended, rather than showing an empty or "None" line under a
+ * heading — cleaner for the common case where there's simply nobody to
+ * list.
+ */
+function buildInAttendanceSection(data) {
+  const trimmed = (data.in_attendance || '').trim();
+  return trimmed ? `IN ATTENDANCE:\n${trimmed}` : '';
+}
+
 function substitutePlaceholders(template, data) {
   if (!template) return '';
   return normalizeLineEndings(template).replace(/\{\{(\w+)\}\}/g, (_, key) => {
@@ -288,9 +332,9 @@ function buildRenderData(companyProfile, formData, templateFields) {
     company_phone: companyProfile?.phone || '',
     compensation_clause: buildCompensationClause(formData),
     directors_present: buildDirectorsPresentList(formData),
-    // Defaults to "None" instead of leaving an abrupt blank line under
-    // "IN ATTENDANCE:" when nobody outside the board attended.
-    in_attendance: (formData.in_attendance || '').trim() || 'None',
+    agenda: formData.agenda ? numberLines(formData.agenda) : formData.agenda,
+    resolution_text_full: buildResolutionTextFull(formData),
+    in_attendance_section: buildInAttendanceSection(formData),
     share_capital_clause: buildShareCapitalClause(formData),
     ...formatDateFields(templateFields, formatAmountFields(formData)),
   };
