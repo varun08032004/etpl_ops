@@ -5,6 +5,7 @@ import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined';
 import PeopleOutlinedIcon from '@mui/icons-material/PeopleOutlined';
 import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
 import AccountBalanceOutlinedIcon from '@mui/icons-material/AccountBalanceOutlined';
+import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import PaidOutlinedIcon from '@mui/icons-material/PaidOutlined';
 import AccessTimeOutlinedIcon from '@mui/icons-material/AccessTimeOutlined';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
@@ -17,6 +18,7 @@ import TrendingUpOutlinedIcon from '@mui/icons-material/TrendingUpOutlined';
 import BusinessOutlinedIcon from '@mui/icons-material/BusinessOutlined';
 import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
+import BorderColorOutlinedIcon from '@mui/icons-material/BorderColorOutlined';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import EventRepeatOutlinedIcon from '@mui/icons-material/EventRepeatOutlined';
 import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined';
@@ -24,6 +26,18 @@ import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import WorkspacePremiumOutlinedIcon from '@mui/icons-material/WorkspacePremiumOutlined';
 import CopyrightOutlinedIcon from '@mui/icons-material/CopyrightOutlined';
+import ShareOutlinedIcon from '@mui/icons-material/ShareOutlined';
+import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined';
+import CalendarMonthOutlinedIcon from '@mui/icons-material/CalendarMonthOutlined';
+import PaletteOutlinedIcon from '@mui/icons-material/PaletteOutlined';
+import PersonAddAltOutlinedIcon from '@mui/icons-material/PersonAddAltOutlined';
+import TrackChangesOutlinedIcon from '@mui/icons-material/TrackChangesOutlined';
+import EventOutlinedIcon from '@mui/icons-material/EventOutlined';
+import NewspaperOutlinedIcon from '@mui/icons-material/NewspaperOutlined';
+import MailOutlineIcon from '@mui/icons-material/MailOutline';
+import TravelExploreOutlinedIcon from '@mui/icons-material/TravelExploreOutlined';
+import HandshakeOutlinedIcon from '@mui/icons-material/HandshakeOutlined';
+import PhoneCallbackOutlinedIcon from '@mui/icons-material/PhoneCallbackOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import PersonOutlinedIcon from '@mui/icons-material/PersonOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
@@ -32,11 +46,11 @@ import { useAuth } from '../context/AuthContext';
 import NotificationBell from './NotificationBell';
 import client from '../api/client';
 
-// Owner/admin/hr/finance/legal_hod/compliance_hod get the full operational console.
-// Everyone else (manager/employee) gets a scoped self-service view —
-// they should not see company-wide financials, other people's records,
-// or admin tools like Team logins / CSV import.
-const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod'];
+// Owner/admin/hr/finance/legal_hod/compliance_hod/marketing_hod/partnerships_hod
+// get the full operational console. Everyone else (manager/employee) gets a
+// scoped self-service view — they should not see company-wide financials,
+// other people's records, or admin tools like Team logins / CSV import.
+const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'partnerships_hod'];
 const ADMIN_ROLES = ['owner', 'admin'];
 
 // Grouped instead of one flat list — 13+ items in a row was too much to scan.
@@ -77,6 +91,34 @@ const NAV_GROUPS = [
       { to: '/finance', label: 'Finance', icon: PaidOutlinedIcon },
       { to: '/payroll', label: 'Payroll', icon: PaidOutlinedIcon },
       { to: '/expenses', label: 'Recurring Expenses', icon: EventRepeatOutlinedIcon },
+      // Owner/admin/finance only at the route level (BankAccounts.jsx blocks
+      // render for anyone else, and routes/bankAccounts.js gates every
+      // endpoint server-side) — shown here in the same Finance nav group
+      // since that's already scoped to privileged/finance-granted users.
+      { to: '/bank-accounts', label: 'Bank Accounts', icon: AccountBalanceWalletOutlinedIcon },
+    ],
+  },
+  {
+    label: 'Marketing',
+    items: [
+      { to: '/marketing/dashboard', label: 'Dashboard', icon: DashboardOutlinedIcon },
+      { to: '/marketing/socials', label: 'Socials', icon: ShareOutlinedIcon },
+      { to: '/marketing/campaigns', label: 'Campaigns', icon: CampaignOutlinedIcon },
+      { to: '/marketing/content-calendar', label: 'Content Calendar', icon: CalendarMonthOutlinedIcon },
+      { to: '/marketing/leads', label: 'Leads', icon: PersonAddAltOutlinedIcon },
+      { to: '/marketing/competitors', label: 'Competitors', icon: TrackChangesOutlinedIcon },
+      { to: '/marketing/events', label: 'Events & Webinars', icon: EventOutlinedIcon },
+      { to: '/marketing/press', label: 'Press & Media', icon: NewspaperOutlinedIcon },
+      { to: '/marketing/newsletter', label: 'Newsletter', icon: MailOutlineIcon },
+      { to: '/marketing/seo', label: 'SEO / Website', icon: TravelExploreOutlinedIcon },
+      { to: '/marketing/brand-assets', label: 'Brand Assets', icon: PaletteOutlinedIcon },
+    ],
+  },
+  {
+    label: 'Partnerships',
+    items: [
+      { to: '/partnerships/follow-ups', label: 'Follow-ups Today', icon: PhoneCallbackOutlinedIcon },
+      { to: '/partnerships/firms', label: 'Partner Firms', icon: HandshakeOutlinedIcon },
     ],
   },
   {
@@ -98,6 +140,7 @@ const NAV_GROUPS = [
       { to: '/import', label: 'Import CSV', icon: UploadFileOutlinedIcon },
       { to: '/automation', label: 'Automation', icon: BoltOutlinedIcon },
       { to: '/ai-assistant', label: 'AI Assistant', icon: SmartToyOutlinedIcon },
+      { to: '/esignatures', label: 'E-Signatures', icon: BorderColorOutlinedIcon },
     ],
   },
 ];
@@ -113,6 +156,8 @@ const ROLE_TO_NAV_GROUP_LABELS = {
   hr: ['HR'],
   legal_hod: ['Legal'],
   compliance_hod: ['Legal'],
+  marketing_hod: ['Marketing'],
+  partnerships_hod: ['Partnerships'],
 };
 
 const ADMIN_NAV_GROUP = {

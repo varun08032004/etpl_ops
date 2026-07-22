@@ -14,6 +14,9 @@ const rateLimit = require('express-rate-limit'); // npm install express-rate-lim
 const { safeQuery, withTransaction } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { fireEvent } = require('../services/automationEngine');
+const { getLevelsRequired, canActAtLevel } = require('../services/approvalChain');
+const ledger = require('../services/ledger');
+const { computeVarianceAndAlert } = require('../services/budgetVariance');
 
 router.use(authenticate);
 
@@ -106,31 +109,8 @@ router.put('/thresholds/:id', requireRole('admin'), async (req, res) => {
   }
 });
 
-async function getLevelsRequired(requestType, amount) {
-  const { rows: [band] } = await safeQuery(
-    `SELECT levels_required FROM approval_thresholds
-     WHERE request_type = $1 AND min_amount <= $2 AND (max_amount IS NULL OR max_amount > $2)
-     ORDER BY min_amount DESC LIMIT 1`,
-    [requestType, amount]
-  );
-  return band ? band.levels_required : 3; // fail safe: unknown amount band requires full chain, not auto-approve
-}
-
-// Who's allowed to act at a given level for a given claim.
-// L1 = the claimant's own manager. L2 = anyone with role 'finance'.
-// L3 = owner specifically (not admin-bypass — mirrors services/approvals.js's
-// "only the real Founder" pattern for final sign-off).
-async function canActAtLevel(level, claim, staff) {
-  if (staff.role === 'owner') return true; // Founder can act at any level, always
-  if (level === 1) {
-    if (staff.role === 'admin') return true;
-    const { rows: [emp] } = await safeQuery(`SELECT manager_id FROM employees WHERE id = $1`, [claim.employee_id]);
-    return emp && emp.manager_id === staff.employee_id;
-  }
-  if (level === 2) return ['admin', 'finance'].includes(staff.role);
-  if (level === 3) return false; // only owner, handled above
-  return false;
-}
+// getLevelsRequired and canActAtLevel now come from ../services/approvalChain —
+// shared with routes/purchaseRequests.js so both approval chains stay in sync.
 
 // ── submit a claim ──────────────────────────────────────────────────────────
 // Receipt attachment is a SEPARATE step now (see PATCH /:id/receipt below) —
@@ -243,7 +223,7 @@ router.get('/expense-claims/pending-my-approval', async (req, res) => {
     const mine = [];
     for (const claim of pending) {
       const nextLevel = claim.current_level + 1;
-      if (await canActAtLevel(nextLevel, claim, req.staff)) {
+      if (await canActAtLevel(nextLevel, claim.employee_id, req.staff)) {
         mine.push({ ...claim, next_level: nextLevel });
       }
     }
@@ -292,7 +272,7 @@ router.get('/expense-claims/:id', async (req, res) => {
 
     const isSelf = req.staff.employee_id === claim.employee_id;
     const isPrivileged = ['owner', 'admin', 'finance'].includes(req.staff.role);
-    const isNextApprover = await canActAtLevel(claim.current_level + 1, claim, req.staff);
+    const isNextApprover = await canActAtLevel(claim.current_level + 1, claim.employee_id, req.staff);
 
     // Anyone who has ALREADY acted on this claim keeps visibility into it even
     // after it moves past their level — otherwise an L1 manager who approved
@@ -340,7 +320,7 @@ router.post('/expense-claims/:id/decide', async (req, res) => {
       if (claim.status !== 'pending') { const e = new Error(`Claim is already ${claim.status}`); e.httpStatus = 400; throw e; }
 
       const nextLevel = claim.current_level + 1;
-      if (!(await canActAtLevel(nextLevel, claim, req.staff))) {
+      if (!(await canActAtLevel(nextLevel, claim.employee_id, req.staff))) {
         const e = new Error(`You are not the required approver for level ${nextLevel} of this claim`);
         e.httpStatus = 403;
         throw e;
@@ -380,6 +360,218 @@ router.post('/expense-claims/:id/decide', async (req, res) => {
   } catch (err) {
     console.error('[finance:expense-claims:decide]', err);
     res.status(err.httpStatus || 500).json({ error: err.httpStatus ? err.message : 'Failed to record decision' });
+  }
+});
+
+// ── budgets — department/category budgets per fiscal period ────────────────
+// Distinct from Expenses' category_budgets (subscription-tracking specific).
+// This is Finance's planning tool (SRS §8.7): set what a department/category
+// SHOULD spend, then compare against what it actually did.
+router.post('/budgets', requireRole('finance'), async (req, res) => {
+  try {
+    const { department, category, fiscal_year_label, budgeted_amount_inr } = req.body;
+    if (!department || !fiscal_year_label || budgeted_amount_inr == null) {
+      return res.status(400).json({ error: 'department, fiscal_year_label, and budgeted_amount_inr are required' });
+    }
+    const amt = Number(budgeted_amount_inr);
+    if (!Number.isFinite(amt) || amt < 0) return res.status(400).json({ error: 'budgeted_amount_inr must be a number ≥ 0' });
+
+    const { rows: [budget] } = await safeQuery(
+      `INSERT INTO budgets (department, category, fiscal_year_label, budgeted_amount_inr, created_by)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (department, category, fiscal_year_label)
+       DO UPDATE SET budgeted_amount_inr = $4, updated_at = NOW()
+       RETURNING *`,
+      [department, category || null, fiscal_year_label, amt, req.staff.id]
+    );
+    res.status(201).json({ budget });
+  } catch (err) {
+    console.error('[finance:budgets:create]', err);
+    res.status(500).json({ error: 'Failed to save budget' });
+  }
+});
+
+router.get('/budgets', requireRole('finance'), async (req, res) => {
+  try {
+    const { fiscal_year_label } = req.query;
+    const params = [];
+    let where = '';
+    if (fiscal_year_label) { params.push(fiscal_year_label); where = `WHERE fiscal_year_label = $1`; }
+    const { rows } = await safeQuery(`SELECT * FROM budgets ${where} ORDER BY department, category NULLS FIRST`, params);
+    res.json({ budgets: rows });
+  } catch (err) {
+    console.error('[finance:budgets:list]', err);
+    res.status(500).json({ error: 'Failed to fetch budgets' });
+  }
+});
+
+// Actual-vs-budget — IMPORTANT CAVEAT: proper department-level actuals need
+// cost-center/department tagging on the general ledger (Accounting module),
+// which doesn't exist yet. This approximates "actual spend" using only the
+// two sources we can currently attribute with confidence: Recurring Expenses
+// (category-tagged already) and Payroll (treated as the whole "Salaries"
+// department). Anything else spent through Accounting/Bookkeeping with no
+// department tag won't show up here — that's a real gap, not hidden below.
+router.get('/budgets/variance', requireRole('finance'), async (req, res) => {
+  try {
+    const { fiscal_year_label } = req.query;
+    if (!fiscal_year_label) return res.status(400).json({ error: 'fiscal_year_label query param is required' });
+
+    const results = await computeVarianceAndAlert(fiscal_year_label);
+
+    res.json({
+      fiscalYearLabel: fiscal_year_label,
+      budgets: results,
+      note: 'Actual spend is approximated from Recurring Expenses and Payroll only. Full department-level actuals require cost-center tagging on the general ledger (Accounting module) — not yet implemented.',
+    });
+  } catch (err) {
+    console.error('[finance:budgets:variance]', err);
+    res.status(500).json({ error: 'Failed to compute budget variance' });
+  }
+});
+
+// ── cash flow / burn rate / runway ──────────────────────────────────────────
+// Finance's core forward-looking metric (SRS §8.7, DASH-04). Reads FROM
+// Accounting's ledger (via ledger.getProfitAndLoss) and from bank_accounts —
+// doesn't own or duplicate either, just interprets them.
+router.get('/cash-flow', requireRole('finance'), async (req, res) => {
+  try {
+    const { rows: [{ total }] } = await safeQuery(`SELECT COALESCE(SUM(current_balance),0) AS total FROM bank_accounts`);
+    const totalCashInr = Number(total);
+
+    const now = new Date();
+    const trailingMonths = 3;
+    const fromDate = new Date(now.getFullYear(), now.getMonth() - trailingMonths, 1).toISOString().slice(0, 10);
+    const toDate = now.toISOString().slice(0, 10);
+
+    let monthlyBurnInr = 0;
+    try {
+      const pnl = await ledger.getProfitAndLoss(fromDate, toDate);
+      monthlyBurnInr = Number(pnl.totalExpense) / trailingMonths;
+    } catch (pnlErr) {
+      console.error('[finance:cash-flow] Failed to compute burn rate from ledger:', pnlErr.message);
+    }
+
+    const runwayMonths = monthlyBurnInr > 0 ? totalCashInr / monthlyBurnInr : null;
+
+    res.json({
+      asOf: toDate,
+      totalCashInr,
+      trailingMonthlyBurnInr: monthlyBurnInr,
+      runwayMonths,
+      note: 'Burn rate is a trailing 3-month average from Accounting P&L. This is historical — see GET /cash-flow/forecast for a forward-looking projection.',
+    });
+  } catch (err) {
+    console.error('[finance:cash-flow]', err);
+    res.status(500).json({ error: 'Failed to compute cash flow summary' });
+  }
+});
+
+// ── forward-looking cash flow forecast ──────────────────────────────────────
+// Combines three sources of KNOWN future outflow: recurring expenses (current
+// environment pricing), average of the last 3 paid payroll runs, and pending/
+// approved purchase requests bucketed by needed_by_date. This is deliberately
+// NOT a full P&L forecast — it doesn't know about one-off Accounting bills or
+// invoices outside these three sources. It answers "given what I already know
+// is committed, when do I run low" — not "predict everything."
+router.get('/cash-flow/forecast', requireRole('finance'), async (req, res) => {
+  try {
+    const monthsAhead = Math.min(Math.max(parseInt(req.query.months, 10) || 6, 1), 12);
+
+    const { rows: [{ total }] } = await safeQuery(`SELECT COALESCE(SUM(current_balance),0) AS total FROM bank_accounts`);
+    const startingCashInr = Number(total);
+
+    const { rows: [envRow] } = await safeQuery(`SELECT value FROM app_settings WHERE key = 'environment_mode'`);
+    const env = envRow?.value || 'testnet';
+
+    function monthlyMultiplier(frequency, customDays) {
+      switch (frequency) {
+        case 'weekly': return 52 / 12;
+        case 'monthly': return 1;
+        case 'quarterly': return 1 / 3;
+        case 'yearly': return 1 / 12;
+        case 'custom_days': return 30 / (customDays || 30);
+        default: return 1;
+      }
+    }
+
+    const { rows: recurringItems } = await safeQuery(`SELECT * FROM recurring_expenses WHERE is_active = true`);
+    let monthlyRecurringInr = 0;
+    for (const rec of recurringItems) {
+      const effectiveAmount = env === 'production' ? Number(rec.prod_amount) : Number(rec.testnet_amount);
+      const monthlyOwn = effectiveAmount * monthlyMultiplier(rec.frequency, rec.custom_interval_days);
+      let monthlyInr = monthlyOwn;
+      if (rec.currency !== 'INR') {
+        // Uses the most recently cached FX rate, not a live lookup — a forecast
+        // doesn't need to hit the FX API on every request, and a day-old rate
+        // is more than precise enough for a multi-month projection.
+        const { rows: [rateRow] } = await safeQuery(
+          `SELECT rate_to_inr FROM fx_rate_cache WHERE currency = $1 ORDER BY rate_date DESC LIMIT 1`,
+          [rec.currency]
+        );
+        if (rateRow) monthlyInr = monthlyOwn * Number(rateRow.rate_to_inr);
+      }
+      monthlyRecurringInr += monthlyInr;
+    }
+
+    const { rows: recentRuns } = await safeQuery(
+      `SELECT total_net FROM payroll_runs WHERE status = 'paid' ORDER BY period_year DESC, period_month DESC LIMIT 3`
+    );
+    const avgMonthlyPayrollInr = recentRuns.length
+      ? recentRuns.reduce((sum, r) => sum + Number(r.total_net), 0) / recentRuns.length
+      : 0;
+
+    const { rows: pendingPRs } = await safeQuery(
+      `SELECT estimated_amount, needed_by_date FROM purchase_requests WHERE status IN ('pending', 'approved')`
+    );
+
+    const forecast = [];
+    let runningCash = startingCashInr;
+    const now = new Date();
+
+    for (let i = 0; i < monthsAhead; i++) {
+      const monthDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      const monthLabel = monthDate.toLocaleString('en-IN', { month: 'short', year: 'numeric' });
+
+      let purchaseRequestOutflow = 0;
+      for (const pr of pendingPRs) {
+        const prDate = pr.needed_by_date ? new Date(pr.needed_by_date) : null;
+        // No needed_by_date, or a date already in the past → assume it lands in
+        // the current month rather than silently vanishing from the forecast.
+        const belongsHere = prDate
+          ? (prDate.getFullYear() === monthDate.getFullYear() && prDate.getMonth() === monthDate.getMonth())
+          : i === 0;
+        const isPastDue = prDate && prDate < now && i === 0;
+        if (belongsHere || isPastDue) purchaseRequestOutflow += Number(pr.estimated_amount);
+      }
+
+      const totalOutflow = monthlyRecurringInr + avgMonthlyPayrollInr + purchaseRequestOutflow;
+      runningCash -= totalOutflow;
+
+      forecast.push({
+        month: monthLabel,
+        recurringExpensesInr: monthlyRecurringInr,
+        payrollInr: avgMonthlyPayrollInr,
+        purchaseRequestsInr: purchaseRequestOutflow,
+        totalOutflowInr: totalOutflow,
+        projectedCashInr: runningCash,
+      });
+    }
+
+    const monthGoingNegative = forecast.findIndex((f) => f.projectedCashInr < 0);
+
+    res.json({
+      startingCashInr,
+      monthlyRecurringExpensesInr: monthlyRecurringInr,
+      avgMonthlyPayrollInr,
+      pendingPurchaseRequestsCount: pendingPRs.length,
+      forecast,
+      monthsUntilNegative: monthGoingNegative === -1 ? null : monthGoingNegative + 1,
+      note: 'Combines known recurring expenses, the average of your last 3 paid payroll runs, and pending/approved purchase requests. Does NOT include one-off Accounting bills or invoices outside these three sources — treat this as a floor estimate of known commitments, not a complete forecast.',
+    });
+  } catch (err) {
+    console.error('[finance:cash-flow:forecast]', err);
+    res.status(500).json({ error: 'Failed to compute cash flow forecast' });
   }
 });
 

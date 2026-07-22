@@ -13,16 +13,22 @@
 const { safeQuery } = require('../../db/pool');
 const axisBankAdapter = require('./axisBankAdapter');
 
-const ADAPTERS_BY_BANK_ACCOUNT = {
-  // TODO: once you know which bank_accounts.id corresponds to your Axis
-  // current account, map it here, e.g.:
-  //   'a1b2c3d4-....': axisBankAdapter,
-  // For now this defaults every bank account to the Axis adapter, since
-  // that's the only one configured. Extend this map when you add a second bank.
+// Registry keyed by bank_accounts.provider — add a new adapter file + one
+// line here when you add a second bank. Everything else (this engine, the
+// portfolio page, reconciliation UI) needs zero changes.
+const ADAPTERS_BY_PROVIDER = {
+  axis: axisBankAdapter,
+  // hdfc: require('./hdfcBankAdapter'),  // example for when you add a second bank
 };
 
-function getAdapterForBankAccount(bankAccountId) {
-  return ADAPTERS_BY_BANK_ACCOUNT[bankAccountId] || axisBankAdapter;
+async function getAdapterForBankAccount(bankAccountId) {
+  const { rows: [account] } = await safeQuery(`SELECT provider FROM bank_accounts WHERE id = $1`, [bankAccountId]);
+  const provider = account?.provider;
+  const adapter = ADAPTERS_BY_PROVIDER[provider];
+  if (!adapter) {
+    throw new Error(`No adapter configured for bank account provider "${provider}". This account is likely set to 'manual' — sync isn't available for manual accounts, only reconciliation against manually-entered transactions.`);
+  }
+  return adapter;
 }
 
 /**
@@ -30,7 +36,7 @@ function getAdapterForBankAccount(bankAccountId) {
  * Safe to call repeatedly — de-duplicates on (bank_account_id, external_transaction_id).
  */
 async function syncBankAccount(bankAccountId) {
-  const adapter = getAdapterForBankAccount(bankAccountId);
+  const adapter = await getAdapterForBankAccount(bankAccountId);
 
   const { rows: [syncState] } = await safeQuery(
     `SELECT * FROM bank_sync_state WHERE bank_account_id = $1`,

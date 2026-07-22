@@ -46,10 +46,24 @@ async function nextNumber(client, prefix, table, column) {
  * @returns {Promise<{id:string, entryNumber:string}>}
  */
 async function postJournalEntry(entry) {
-  const { entryDate, source, sourceType, sourceId, narration, createdBy, lines } = entry;
+  const { entryDate, source, sourceType, sourceId, narration, createdBy, lines, allowClosedPeriod } = entry;
 
   if (!Array.isArray(lines) || lines.length < 2) {
     throw new Error('A journal entry needs at least 2 lines');
+  }
+
+  // A closed fiscal period is a hard stop for every caller (invoices, payroll,
+  // manual entries, everything) — the ONLY exception is the closing entry
+  // itself, which is necessarily dated inside the period it's closing.
+  // closeFiscalPeriod() below is the only caller that sets allowClosedPeriod.
+  if (!allowClosedPeriod) {
+    const { rows: [closed] } = await safeQuery(
+      `SELECT label FROM fiscal_periods WHERE is_closed = true AND $1::date BETWEEN start_date AND end_date`,
+      [entryDate]
+    );
+    if (closed) {
+      throw new Error(`${entryDate} falls inside "${closed.label}", which is closed. Reopen the period or use a current date.`);
+    }
   }
 
   let totalDebit = 0;
@@ -88,6 +102,100 @@ async function postJournalEntry(entry) {
 
     return { id: je.id, entryNumber: je.entry_number };
   });
+}
+
+async function listFiscalPeriods() {
+  const { rows } = await safeQuery(`SELECT * FROM fiscal_periods ORDER BY start_date DESC`);
+  return rows;
+}
+
+async function createFiscalPeriod({ label, startDate, endDate }) {
+  const { rows: [period] } = await safeQuery(
+    `INSERT INTO fiscal_periods (label, start_date, end_date) VALUES ($1,$2,$3) RETURNING *`,
+    [label, startDate, endDate]
+  );
+  return period;
+}
+
+/**
+ * Closes a fiscal period: posts ONE balanced journal entry that zeroes every
+ * income/expense account's net-for-the-period (by debiting income / crediting
+ * expense back to nil) and rolls the resulting net profit (or loss) into the
+ * Retained Earnings equity account (chart_of_accounts code '3200').
+ *
+ * Why this works without any special-casing in the report queries: P&L and
+ * Balance Sheet are always computed by summing journal_lines filtered by
+ * entry_date. A closing entry dated at the period's own end_date falls
+ * INSIDE the range just reported on, so it exactly cancels what was just
+ * summed — that account's net-for-this-period becomes zero. Next period's
+ * report has a date range that starts after this entry, so it never sees it
+ * — the account effectively "resets" for the new period, with zero extra
+ * logic needed anywhere else in the codebase.
+ */
+async function closeFiscalPeriod(fiscalPeriodId, { closedBy }) {
+  const { rows: [period] } = await safeQuery(`SELECT * FROM fiscal_periods WHERE id = $1`, [fiscalPeriodId]);
+  if (!period) throw Object.assign(new Error('Fiscal period not found'), { status: 404 });
+  if (period.is_closed) throw Object.assign(new Error(`"${period.label}" is already closed`), { status: 400 });
+
+  // Idempotency: if a closing entry was already posted for this period (e.g.
+  // a previous attempt posted the entry but failed before marking is_closed),
+  // don't post a second one — just finish marking it closed.
+  const { rows: [existingClose] } = await safeQuery(
+    `SELECT id FROM journal_entries WHERE source_type = 'fiscal_period_close' AND source_id = $1`,
+    [fiscalPeriodId]
+  );
+
+  let journalEntry = null;
+  if (!existingClose) {
+    const pnl = await getProfitAndLoss(period.start_date, period.end_date);
+
+    const { rows: [retainedEarnings] } = await safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '3200'`);
+    if (!retainedEarnings) throw new Error('Retained Earnings account (code 3200) not found in chart of accounts');
+
+    const lines = [
+      ...pnl.income.map((a) => ({ accountId: a.id, debit: a.amount, description: `Close ${period.label}: zero ${a.name}` })),
+      ...pnl.expenses.map((a) => ({ accountId: a.id, credit: a.amount, description: `Close ${period.label}: zero ${a.name}` })),
+    ];
+
+    if (pnl.netProfit >= 0 && pnl.netProfit > 0) {
+      lines.push({ accountId: retainedEarnings.id, credit: pnl.netProfit, description: `Net profit for ${period.label}` });
+    } else if (pnl.netProfit < 0) {
+      lines.push({ accountId: retainedEarnings.id, debit: -pnl.netProfit, description: `Net loss for ${period.label}` });
+    }
+
+    if (lines.length >= 2) {
+      journalEntry = await postJournalEntry({
+        entryDate: period.end_date,
+        source: 'adjustment',
+        sourceType: 'fiscal_period_close',
+        sourceId: period.id,
+        narration: `Year-end close: ${period.label}`,
+        createdBy: closedBy,
+        lines,
+        allowClosedPeriod: true, // this IS the closing entry — dated inside the period it closes, by design
+      });
+    }
+    // If there was no P&L activity at all in the period (lines.length < 2,
+    // i.e. nothing to zero out and no profit/loss), there's nothing to post —
+    // still fine to mark the period closed below.
+  }
+
+  const { rows: [updated] } = await safeQuery(
+    `UPDATE fiscal_periods SET is_closed = true, closed_at = NOW(), closed_by = $1 WHERE id = $2 RETURNING *`,
+    [closedBy, fiscalPeriodId]
+  );
+
+  return { period: updated, journalEntry };
+}
+
+/** Owner/Founder-only escape hatch — reopens a closed period (e.g. an error was found after close). Does NOT reverse the closing entry automatically; use reverseJournalEntry for that if needed. */
+async function reopenFiscalPeriod(fiscalPeriodId) {
+  const { rows: [updated] } = await safeQuery(
+    `UPDATE fiscal_periods SET is_closed = false, closed_at = NULL, closed_by = NULL WHERE id = $1 RETURNING *`,
+    [fiscalPeriodId]
+  );
+  if (!updated) throw Object.assign(new Error('Fiscal period not found'), { status: 404 });
+  return updated;
 }
 
 /**
@@ -287,4 +395,8 @@ module.exports = {
   getProfitAndLoss,
   getBalanceSheet,
   nextNumber,
+  listFiscalPeriods,
+  createFiscalPeriod,
+  closeFiscalPeriod,
+  reopenFiscalPeriod,
 };

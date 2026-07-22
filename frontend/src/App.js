@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
+import SignDocument from './pages/SignDocument';
 import Dashboard from './pages/Dashboard';
 import MyProfile from './pages/MyProfile';
 import { EmployeeList, EmployeeDetail } from './pages/Employees';
@@ -32,12 +33,27 @@ import Certifications from './pages/Certifications';
 import IPAssets from './pages/IPAssets';
 import DataGovernance from './pages/DataGovernance';
 import Finance from './pages/Finance';
+import BankAccounts from './pages/BankAccounts';
+import ESignatures from './pages/ESignatures';
 import { CompanyList, CompanyDetail } from './pages/CRM';
+import MarketingSocials from './pages/MarketingSocials';
+import MarketingCampaigns from './pages/MarketingCampaigns';
+import MarketingContentCalendar from './pages/MarketingContentCalendar';
+import MarketingBrandAssets from './pages/MarketingBrandAssets';
+import MarketingDashboard from './pages/MarketingDashboard';
+import MarketingLeads from './pages/MarketingLeads';
+import MarketingCompetitors from './pages/MarketingCompetitors';
+import MarketingEvents from './pages/MarketingEvents';
+import MarketingPress from './pages/MarketingPress';
+import MarketingNewsletter from './pages/MarketingNewsletter';
+import MarketingSeo from './pages/MarketingSeo';
+import PartnershipFirms from './pages/PartnershipFirms';
+import PartnershipFollowUps from './pages/PartnershipFollowUps';
 
-// Widened to include legal_hod/compliance_hod — matches Layout.jsx's
-// PRIVILEGED_ROLES, so those roles get Dashboard as their home screen too
-// instead of the self-service MyProfile view.
-const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod'];
+// Widened to include legal_hod/compliance_hod/marketing_hod/partnerships_hod —
+// matches Layout.jsx's PRIVILEGED_ROLES, so those roles get Dashboard as
+// their home screen too instead of the self-service MyProfile view.
+const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'partnerships_hod'];
 
 function ProtectedRoutes() {
   const { staff, loading } = useAuth();
@@ -49,8 +65,7 @@ function ProtectedRoutes() {
 }
 
 // The root path shows different content depending on role — company-wide
-// financials for owner/admin/hr/finance/legal_hod/compliance_hod, a personal
-// profile for everyone else.
+// financials for privileged roles, a personal profile for everyone else.
 function Home() {
   const { staff } = useAuth();
   return PRIVILEGED_ROLES.includes(staff?.role) ? <Dashboard /> : <MyProfile />;
@@ -65,6 +80,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/sign/:token" element={<SignDocument />} />
             <Route element={<ProtectedRoutes />}>
               <Route path="/" element={<Home />} />
               <Route path="/employees" element={<EmployeeList />} />
@@ -95,6 +111,21 @@ export default function App() {
               <Route path="/ip-assets" element={<IPAssets />} />
               <Route path="/data-governance" element={<DataGovernance />} />
               <Route path="/finance" element={<Finance />} />
+              <Route path="/bank-accounts" element={<BankAccounts />} />
+              <Route path="/esignatures" element={<ESignatures />} />
+              <Route path="/marketing/socials" element={<MarketingSocials />} />
+              <Route path="/marketing/campaigns" element={<MarketingCampaigns />} />
+              <Route path="/marketing/content-calendar" element={<MarketingContentCalendar />} />
+              <Route path="/marketing/brand-assets" element={<MarketingBrandAssets />} />
+              <Route path="/marketing/dashboard" element={<MarketingDashboard />} />
+              <Route path="/marketing/leads" element={<MarketingLeads />} />
+              <Route path="/marketing/competitors" element={<MarketingCompetitors />} />
+              <Route path="/marketing/events" element={<MarketingEvents />} />
+              <Route path="/marketing/press" element={<MarketingPress />} />
+              <Route path="/marketing/newsletter" element={<MarketingNewsletter />} />
+              <Route path="/marketing/seo" element={<MarketingSeo />} />
+              <Route path="/partnerships/firms" element={<PartnershipFirms />} />
+              <Route path="/partnerships/follow-ups" element={<PartnershipFollowUps />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

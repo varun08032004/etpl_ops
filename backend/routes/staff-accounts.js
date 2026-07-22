@@ -147,7 +147,7 @@ router.post('/:id/reset-password', requireRole('admin'), async (req, res) => {
 router.put('/:id/role', requireRole('admin'), async (req, res) => {
   try {
     const { role } = req.body;
-    const validRoles = ['owner', 'admin', 'hr', 'finance', 'manager', 'employee'];
+    const validRoles = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'partnerships_hod', 'manager', 'employee'];
     if (!validRoles.includes(role)) return res.status(400).json({ error: 'Invalid role' });
 
     if (role === 'owner' && req.staff.role !== 'owner') {

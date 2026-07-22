@@ -49,6 +49,7 @@ app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/expense-claims', require('./routes/expenseClaims')); // NEW — employee reimbursement claims, distinct from routes/expenses.js's recurring company bills
 app.use('/api/settings', require('./routes/settings')); // NEW — real Settings module (SRS §8.23): compliance rates, PT/tax slabs, app settings
+app.use('/api/esignatures', require('./routes/esignatures')); // NEW — lightweight built-in e-signature (internal tracking + public /sign/:token links)
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/compliance', require('./routes/compliance'));
 app.use('/api/one-time-registrations', require('./routes/oneTimeRegistrations'));
@@ -61,6 +62,19 @@ app.use('/api/platform-sync', require('./routes/platform-sync'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/attendance', require('./routes/attendance'));
+app.use('/api/marketing/social-accounts', require('./routes/marketingSocial')); // NEW — Marketing module: Socials portfolio page
+app.use('/api/marketing/campaigns', require('./routes/marketingCampaigns')); // NEW — Marketing module: Campaigns page
+app.use('/api/marketing/content-calendar', require('./routes/marketingContent')); // NEW — Marketing module: Content Calendar page
+app.use('/api/marketing/brand-assets', require('./routes/marketingAssets')); // NEW — Marketing module: Brand Assets page
+app.use('/api/marketing/leads', require('./routes/marketingLeads')); // NEW — Marketing module: Leads page (converts into CRM parties)
+app.use('/api/marketing/competitors', require('./routes/marketingCompetitors')); // NEW — Marketing module: Competitor tracker page
+app.use('/api/marketing/events', require('./routes/marketingEvents')); // NEW — Marketing module: Events & Webinars page
+app.use('/api/marketing/press', require('./routes/marketingPress')); // NEW — Marketing module: Press & Media page
+app.use('/api/marketing/newsletter', require('./routes/marketingNewsletter')); // NEW — Marketing module: Newsletter/Email tracker page
+app.use('/api/marketing/seo', require('./routes/marketingSeo')); // NEW — Marketing module: SEO/website analytics page
+app.use('/api/marketing/dashboard', require('./routes/marketingDashboard')); // NEW — Marketing module: Dashboard overview page
+app.use('/api/partnerships/firms', require('./routes/partnershipFirms')); // NEW — Partnerships module: BDE target account tracker (CA/audit/ESG firms)
+app.use('/api/partnerships/activities', require('./routes/partnershipActivities')); // NEW — Partnerships module: call log + follow-ups
 
 app.use((err, req, res, next) => {
   console.error('[unhandled]', err);

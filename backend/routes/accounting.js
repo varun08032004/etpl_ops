@@ -5,12 +5,78 @@ const router = express.Router();
 const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const ledger = require('../services/ledger');
+const { logAction } = require('../services/auditLog');
 
 router.use(authenticate);
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
-// ── chart of accounts ───────────────────────────────────────────────────────
+// ── fiscal periods (year-end close) ─────────────────────────────────────────
+router.get('/fiscal-periods', requireRole('finance'), async (req, res) => {
+  try {
+    const periods = await ledger.listFiscalPeriods();
+    res.json({ fiscalPeriods: periods });
+  } catch (err) {
+    console.error('[accounting:fiscal-periods:list]', err);
+    res.status(500).json({ error: 'Failed to fetch fiscal periods' });
+  }
+});
+
+router.post('/fiscal-periods', requireRole('finance'), async (req, res) => {
+  try {
+    const { label, start_date, end_date } = req.body;
+    if (!label || !start_date || !end_date) return res.status(400).json({ error: 'label, start_date, and end_date are required' });
+    const period = await ledger.createFiscalPeriod({ label, startDate: start_date, endDate: end_date });
+    res.status(201).json({ fiscalPeriod: period });
+  } catch (err) {
+    console.error('[accounting:fiscal-periods:create]', err);
+    if (err.code === '23505') return res.status(409).json({ error: 'A fiscal period with this label already exists' });
+    res.status(500).json({ error: 'Failed to create fiscal period' });
+  }
+});
+
+// Dry run — shows exactly what the closing entry WOULD post, without posting
+// anything. Finance should always check this before actually closing.
+router.get('/fiscal-periods/:id/close-preview', requireRole('finance'), async (req, res) => {
+  try {
+    const { rows: [period] } = await safeQuery(`SELECT * FROM fiscal_periods WHERE id = $1`, [req.params.id]);
+    if (!period) return res.status(404).json({ error: 'Fiscal period not found' });
+    const pnl = await ledger.getProfitAndLoss(period.start_date, period.end_date);
+    res.json({ period, preview: pnl });
+  } catch (err) {
+    console.error('[accounting:fiscal-periods:preview]', err);
+    res.status(500).json({ error: 'Failed to preview close' });
+  }
+});
+
+// Closing the books is irreversible in spirit (reopening is an explicit,
+// logged escape hatch, not a normal workflow) — owner/admin only.
+router.post('/fiscal-periods/:id/close', requireRole(), async (req, res) => {
+  try {
+    const { period, journalEntry } = await ledger.closeFiscalPeriod(req.params.id, { closedBy: req.staff.id });
+    await logAction({
+      staffId: req.staff.id, action: 'fiscal_period.closed', entity: 'fiscal_periods', entityId: period.id,
+      newValue: { label: period.label, journalEntryId: journalEntry?.id || null },
+    });
+    res.json({ fiscalPeriod: period, journalEntry });
+  } catch (err) {
+    console.error('[accounting:fiscal-periods:close]', err);
+    res.status(err.status || 500).json({ error: err.message || 'Failed to close fiscal period' });
+  }
+});
+
+router.post('/fiscal-periods/:id/reopen', requireRole(), async (req, res) => {
+  try {
+    const period = await ledger.reopenFiscalPeriod(req.params.id);
+    await logAction({ staffId: req.staff.id, action: 'fiscal_period.reopened', entity: 'fiscal_periods', entityId: period.id, newValue: { label: period.label } });
+    res.json({ fiscalPeriod: period });
+  } catch (err) {
+    console.error('[accounting:fiscal-periods:reopen]', err);
+    res.status(err.status || 500).json({ error: err.message || 'Failed to reopen fiscal period' });
+  }
+});
+
+
 // ── bank accounts (for payment/mark-paid dialogs across the app) ───────────
 router.get('/bank-accounts', async (req, res) => {
   try {

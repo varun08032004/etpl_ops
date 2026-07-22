@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Box, Typography, Paper, Tabs, Tab, Table, TableHead, TableRow, TableCell, TableBody, TextField, Grid, Divider, MenuItem, Button, Alert, Chip, CircularProgress } from '@mui/material';
+import { Box, Typography, Paper, Tabs, Tab, Table, TableHead, TableRow, TableCell, TableBody, TextField, Grid, Divider, MenuItem, Button, Alert, Chip, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
 import SyncOutlinedIcon from '@mui/icons-material/SyncOutlined';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
@@ -434,6 +434,152 @@ function RevenueGrowth() {
   );
 }
 
+function FiscalYearClose() {
+  const [periods, setPeriods] = useState([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState({ label: '', start_date: '', end_date: '' });
+  const [error, setError] = useState('');
+  const [previewFor, setPreviewFor] = useState(null); // period being previewed/closed
+  const [preview, setPreview] = useState(null);
+  const [closing, setClosing] = useState(false);
+
+  const load = () => client.get('/accounting/fiscal-periods').then(({ data }) => setPeriods(data.fiscalPeriods)).catch(() => setPeriods([]));
+  useEffect(() => { load(); }, []);
+
+  const createPeriod = async () => {
+    setError('');
+    try {
+      await client.post('/accounting/fiscal-periods', form);
+      setCreateOpen(false);
+      setForm({ label: '', start_date: '', end_date: '' });
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to create period');
+    }
+  };
+
+  const openPreview = async (period) => {
+    setPreviewFor(period);
+    setPreview(null);
+    const { data } = await client.get(`/accounting/fiscal-periods/${period.id}/close-preview`);
+    setPreview(data.preview);
+  };
+
+  const confirmClose = async () => {
+    setClosing(true);
+    setError('');
+    try {
+      await client.post(`/accounting/fiscal-periods/${previewFor.id}/close`);
+      setPreviewFor(null);
+      setPreview(null);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to close period');
+    } finally {
+      setClosing(false);
+    }
+  };
+
+  const reopen = async (period) => {
+    if (!window.confirm(`Reopen "${period.label}"? This does not undo the closing journal entry — use Reverse on that entry separately if it was posted in error.`)) return;
+    await client.post(`/accounting/fiscal-periods/${period.id}/reopen`);
+    load();
+  };
+
+  return (
+    <Box>
+      <Alert severity="warning" sx={{ mb: 2.5 }}>
+        Closing a period posts a real journal entry that zeroes every income/expense account's
+        balance for that period and rolls net profit (or loss) into Retained Earnings. It also
+        locks the period — no new or edited entries can be dated inside it afterwards. Always
+        check the preview before confirming.
+      </Alert>
+
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+        <Button variant="contained" onClick={() => setCreateOpen(true)}>New fiscal period</Button>
+      </Box>
+
+      <Paper>
+        <Table>
+          <TableHead>
+            <TableRow><TableCell>Period</TableCell><TableCell>Dates</TableCell><TableCell>Status</TableCell><TableCell align="right"></TableCell></TableRow>
+          </TableHead>
+          <TableBody>
+            {periods.map((p) => (
+              <TableRow key={p.id}>
+                <TableCell>{p.label}</TableCell>
+                <TableCell className="figure">{p.start_date?.slice(0, 10)} → {p.end_date?.slice(0, 10)}</TableCell>
+                <TableCell>
+                  <Chip size="small" label={p.is_closed ? 'Closed' : 'Open'} color={p.is_closed ? 'default' : 'success'} />
+                </TableCell>
+                <TableCell align="right">
+                  {p.is_closed
+                    ? <Button size="small" color="warning" onClick={() => reopen(p)}>Reopen</Button>
+                    : <Button size="small" variant="outlined" onClick={() => openPreview(p)}>Preview & close</Button>}
+                </TableCell>
+              </TableRow>
+            ))}
+            {!periods.length && <TableRow><TableCell colSpan={4} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No fiscal periods yet.</TableCell></TableRow>}
+          </TableBody>
+        </Table>
+      </Paper>
+
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>New fiscal period</DialogTitle>
+        <DialogContent>
+          <TextField fullWidth label="Label" placeholder="e.g. FY2025-26" margin="normal" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} />
+          <TextField fullWidth type="date" label="Start date" InputLabelProps={{ shrink: true }} margin="normal" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
+          <TextField fullWidth type="date" label="End date" InputLabelProps={{ shrink: true }} margin="normal" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
+          {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={createPeriod} disabled={!form.label || !form.start_date || !form.end_date}>Create</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(previewFor)} onClose={() => setPreviewFor(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Close {previewFor?.label}?</DialogTitle>
+        <DialogContent>
+          {!preview ? <CircularProgress size={24} /> : (
+            <>
+              <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mb: 1.5 }}>
+                This is exactly what will be posted — nothing happens until you click Confirm below.
+              </Typography>
+              {preview.income.map((a) => (
+                <Box key={a.id} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.4 }}>
+                  <Typography sx={{ fontSize: '0.85rem' }}>{a.name} (zero out)</Typography>
+                  <Typography sx={{ fontSize: '0.85rem' }} className="figure">Dr <Money amount={a.amount} /></Typography>
+                </Box>
+              ))}
+              {preview.expenses.map((a) => (
+                <Box key={a.id} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.4 }}>
+                  <Typography sx={{ fontSize: '0.85rem' }}>{a.name} (zero out)</Typography>
+                  <Typography sx={{ fontSize: '0.85rem' }} className="figure">Cr <Money amount={a.amount} /></Typography>
+                </Box>
+              ))}
+              <Divider sx={{ my: 1.5 }} />
+              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                <Typography sx={{ fontWeight: 600 }}>Net {preview.netProfit >= 0 ? 'profit' : 'loss'} → Retained Earnings</Typography>
+                <Typography sx={{ fontWeight: 600 }} className="figure">
+                  {preview.netProfit >= 0 ? 'Cr' : 'Dr'} <Money amount={Math.abs(preview.netProfit)} />
+                </Typography>
+              </Box>
+              {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPreviewFor(null)}>Cancel</Button>
+          <Button variant="contained" color="warning" onClick={confirmClose} disabled={!preview || closing}>
+            {closing ? 'Closing…' : 'Confirm close'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}
+
 export default function Accounting() {
   const [tab, setTab] = useState(0);
   return (
@@ -445,12 +591,14 @@ export default function Accounting() {
         <Tab label="Balance Sheet" />
         <Tab label="Platform Sync" />
         <Tab label="Growth" />
+        <Tab label="Year-End Close" />
       </Tabs>
       {tab === 0 && <TrialBalance />}
       {tab === 1 && <ProfitAndLoss />}
       {tab === 2 && <BalanceSheet />}
       {tab === 3 && <PlatformSync />}
       {tab === 4 && <RevenueGrowth />}
+      {tab === 5 && <FiscalYearClose />}
     </Box>
   );
 }
