@@ -20,6 +20,22 @@
 
 const { safeQuery } = require('../db/pool');
 
+/**
+ * Checks whether the given employee is the head of a department that grants
+ * a specific role (e.g. 'hr'). Distinct from an employee simply belonging to
+ * such a department — this checks actual headship (departments.head_employee_id),
+ * used for authorizing HOD-level destructive actions like permanently
+ * deleting an employee record.
+ */
+async function isHeadOfDepartmentGrantingRole(employeeId, role) {
+  if (!employeeId) return false;
+  const { rows } = await safeQuery(
+    `SELECT 1 FROM departments WHERE head_employee_id = $1 AND $2 = ANY(granted_roles)`,
+    [employeeId, role]
+  );
+  return rows.length > 0;
+}
+
 async function getMyDepartmentAccess(staff) {
   // Owner/admin already bypass every requireRole() check — no need to grant
   // anything extra, and no need for a DB round trip on every request for them.
@@ -52,4 +68,4 @@ async function getMyDepartmentAccess(staff) {
   };
 }
 
-module.exports = { getMyDepartmentAccess };
+module.exports = { getMyDepartmentAccess, isHeadOfDepartmentGrantingRole };

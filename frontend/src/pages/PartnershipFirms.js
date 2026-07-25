@@ -73,7 +73,9 @@ export default function PartnershipFirms() {
     client.get('/departments/my-access')
       .then(({ data }) => {
         const dept = data.deptAccess;
-        setIsPartnershipsHead(!!(dept?.isHOD && dept?.departmentName === 'Partnerships'));
+        // Partnerships is now a team under Sales, not its own department —
+        // check for Sales headship instead.
+        setIsPartnershipsHead(!!(dept?.isHOD && dept?.departmentName === 'Sales'));
       })
       .catch(() => setIsPartnershipsHead(false));
   }, [staff?.role]);

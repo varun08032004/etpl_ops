@@ -4,31 +4,45 @@
 // BANK RECONCILIATION MATCHING ENGINE
 // ============================================================================
 // Bank-agnostic on purpose: this file only talks to the normalized shape
-// returned by an adapter (currently services/bankFeeds/axisBankAdapter.js).
-// If you ever add a second bank account on a different bank, write a new
-// adapter with the same fetchTransactions() contract and this file needs
-// zero changes.
+// returned by an adapter. If you add a second BANK (different provider),
+// write a new adapter file with the same fetchTransactions() contract and
+// add one line to ADAPTERS_BY_PROVIDER below — no other changes needed.
+//
+// MULTI-ACCOUNT: as of this version, credentials are resolved per bank_accounts
+// row (api_client_id/api_client_secret/api_base_url/account_number) and passed
+// into the adapter call — so 3 accounts on the same provider each sync with
+// their own credentials instead of accidentally sharing one global config.
 // ============================================================================
 
 const { safeQuery } = require('../../db/pool');
 const axisBankAdapter = require('./axisBankAdapter');
 
-// Registry keyed by bank_accounts.provider — add a new adapter file + one
-// line here when you add a second bank. Everything else (this engine, the
-// portfolio page, reconciliation UI) needs zero changes.
 const ADAPTERS_BY_PROVIDER = {
   axis: axisBankAdapter,
   // hdfc: require('./hdfcBankAdapter'),  // example for when you add a second bank
 };
 
-async function getAdapterForBankAccount(bankAccountId) {
-  const { rows: [account] } = await safeQuery(`SELECT provider FROM bank_accounts WHERE id = $1`, [bankAccountId]);
-  const provider = account?.provider;
-  const adapter = ADAPTERS_BY_PROVIDER[provider];
+async function getAccountWithAdapter(bankAccountId) {
+  const { rows: [account] } = await safeQuery(
+    `SELECT id, provider, account_number, api_client_id, api_client_secret, api_base_url
+     FROM bank_accounts WHERE id = $1`,
+    [bankAccountId]
+  );
+  if (!account) throw new Error(`Bank account ${bankAccountId} not found`);
+
+  const adapter = ADAPTERS_BY_PROVIDER[account.provider];
   if (!adapter) {
-    throw new Error(`No adapter configured for bank account provider "${provider}". This account is likely set to 'manual' — sync isn't available for manual accounts, only reconciliation against manually-entered transactions.`);
+    throw new Error(`No adapter configured for bank account provider "${account.provider}". This account is likely set to 'manual' — sync isn't available for manual accounts, only reconciliation against manually-entered transactions.`);
   }
-  return adapter;
+
+  const credentials = {
+    clientId: account.api_client_id,
+    clientSecret: account.api_client_secret,
+    apiBaseUrl: account.api_base_url,
+    accountNumber: account.account_number,
+  };
+
+  return { adapter, credentials };
 }
 
 /**
@@ -36,7 +50,7 @@ async function getAdapterForBankAccount(bankAccountId) {
  * Safe to call repeatedly — de-duplicates on (bank_account_id, external_transaction_id).
  */
 async function syncBankAccount(bankAccountId) {
-  const adapter = await getAdapterForBankAccount(bankAccountId);
+  const { adapter, credentials } = await getAccountWithAdapter(bankAccountId);
 
   const { rows: [syncState] } = await safeQuery(
     `SELECT * FROM bank_sync_state WHERE bank_account_id = $1`,
@@ -48,7 +62,7 @@ async function syncBankAccount(bankAccountId) {
   const toDate = new Date().toISOString().slice(0, 10);
 
   try {
-    const transactions = await adapter.fetchTransactions(fromDate, toDate);
+    const transactions = await adapter.fetchTransactions(fromDate, toDate, credentials);
 
     let inserted = 0;
     let latestDate = fromDate;
@@ -95,9 +109,6 @@ async function syncBankAccount(bankAccountId) {
  *   2. FUZZY: same amount (± ₹1) AND transaction date within 10 days, but
  *      no exact-date match found → auto-reconcile, confidence 0.7.
  *   3. No match → left unmatched for manual reconciliation via the UI.
- *
- * Never invents a match on amount alone without a date window — that's how
- * you'd accidentally reconcile the wrong Vercel charge against the wrong month.
  */
 async function autoMatch(bankAccountId) {
   const { rows: candidates } = await safeQuery(

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   TextField, InputAdornment, Button, Dialog, DialogTitle, DialogContent,
@@ -14,6 +14,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import RestoreIcon from '@mui/icons-material/Restore';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import client from '../api/client';
 import StatusChip from '../components/StatusChip';
 import Money from '../components/Money';
@@ -58,10 +59,16 @@ function EmployeeList() {
   const [quickTeamOpen, setQuickTeamOpen] = useState(false);
   const [quickTeamName, setQuickTeamName] = useState('');
   const [quickTeamSaving, setQuickTeamSaving] = useState(false);
+  // Off by default — exited employees have real payroll/leave history that's
+  // never deleted, but there's no reason to clutter the day-to-day People
+  // list with people who no longer work here. Their record is one toggle
+  // away, not gone.
+  const [showExited, setShowExited] = useState(false);
 
-  const load = async (q) => {
-    const { data } = await client.get('/employees', { params: q ? { search: q } : {} });
-    setEmployees(data.employees);
+  const load = async (q, includeExited = showExited) => {
+    const params = q ? { search: q } : {};
+    const { data } = await client.get('/employees', { params });
+    setEmployees(includeExited ? data.employees : data.employees.filter((e) => e.status !== 'exited'));
   };
 
   useEffect(() => {
@@ -170,11 +177,17 @@ function EmployeeList() {
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => { resetForm(); setOpen(true); }}>Add employee</Button>
       </Box>
 
-      <TextField
-        fullWidth placeholder="Search by name, code, or email" value={search} onChange={handleSearch}
-        size="small" sx={{ mb: 2, maxWidth: 360 }}
-        InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
-      />
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+        <TextField
+          placeholder="Search by name, code, or email" value={search} onChange={handleSearch}
+          size="small" sx={{ maxWidth: 360, flex: 1 }}
+          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+        />
+        <FormControlLabel
+          control={<Switch size="small" checked={showExited} onChange={(e) => { setShowExited(e.target.checked); load(search, e.target.checked); }} />}
+          label={<Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>Show exited employees</Typography>}
+        />
+      </Box>
 
       <Paper>
         <Table>
@@ -388,6 +401,7 @@ function EmployeeList() {
 function EmployeeDetail() {
   const { id } = useParams();
   const { staff } = useAuth();
+  const navigate = useNavigate();
   const [employee, setEmployee] = useState(null);
   const [tab, setTab] = useState(0);
   const [docs, setDocs] = useState([]);
@@ -407,6 +421,18 @@ function EmployeeDetail() {
   const [exitForm, setExitForm] = useState({ exit_date: '', reason: '' });
   const [exiting, setExiting] = useState(false);
   const [reinstating, setReinstating] = useState(false);
+
+  // Frontend visibility is a convenience gate (owner/admin) — the backend is
+  // the real authority and additionally allows the actual HR department
+  // head, which this button can't easily detect client-side without another
+  // round trip. If a plain HR employee who isn't the HOD clicks this and
+  // somehow saw it, the backend correctly 403s them.
+  const canPermanentDelete = ['owner', 'admin'].includes(staff?.role);
+  const [permDeleteOpen, setPermDeleteOpen] = useState(false);
+  const [permDeleteConfirmText, setPermDeleteConfirmText] = useState('');
+  const [permDeleteError, setPermDeleteError] = useState('');
+  const [permDeleteBlocked, setPermDeleteBlocked] = useState(null); // { blocking, counts, error } from a 409
+  const [permDeleting, setPermDeleting] = useState(false);
 
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '', role: 'employee' });
@@ -535,6 +561,40 @@ function EmployeeDetail() {
     }
   };
 
+  const openPermDelete = () => {
+    setPermDeleteConfirmText('');
+    setPermDeleteError('');
+    setPermDeleteBlocked(null);
+    setPermDeleteOpen(true);
+  };
+
+  // Called twice in the "blocked by other records" path: once with force
+  // omitted (to surface exactly what's linked), once with force:true after
+  // the person explicitly confirms they want those records removed too.
+  // Never called with force for a payroll block — that path has no bypass.
+  const attemptPermanentDelete = async (force = false) => {
+    setPermDeleting(true);
+    setPermDeleteError('');
+    try {
+      const { data } = await client.post(`/employees/${id}/permanent-delete`, { force });
+      if (data.pending) {
+        setPermDeleteOpen(false);
+        setMessage({ severity: 'info', text: data.message });
+      } else {
+        navigate('/employees');
+      }
+    } catch (err) {
+      const errData = err.response?.data;
+      if (errData?.blocking) {
+        setPermDeleteBlocked(errData);
+      } else {
+        setPermDeleteError(errData?.error || 'Failed to delete employee record');
+      }
+    } finally {
+      setPermDeleting(false);
+    }
+  };
+
   const openCreateLogin = () => {
     const suggested = employee.work_email || '';
     setLoginForm({ email: suggested, password: '', role: 'employee' });
@@ -567,11 +627,18 @@ function EmployeeDetail() {
         </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
           {employee.status === 'exited' ? (
-            canReinstate && (
-              <Button variant="outlined" color="success" startIcon={<RestoreIcon />} onClick={handleReinstate} disabled={reinstating}>
-                {reinstating ? 'Reinstating…' : 'Reinstate'}
-              </Button>
-            )
+            <>
+              {canReinstate && (
+                <Button variant="outlined" color="success" startIcon={<RestoreIcon />} onClick={handleReinstate} disabled={reinstating}>
+                  {reinstating ? 'Reinstating…' : 'Reinstate'}
+                </Button>
+              )}
+              {canPermanentDelete && (
+                <Button variant="outlined" color="error" startIcon={<DeleteForeverIcon />} onClick={openPermDelete}>
+                  Permanently delete
+                </Button>
+              )}
+            </>
           ) : (
             <>
               {canEdit && (
@@ -773,6 +840,54 @@ function EmployeeDetail() {
           </DialogActions>
         </Dialog>
       )}
+
+      <Dialog open={permDeleteOpen} onClose={() => setPermDeleteOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Permanently delete {employee.full_name}?</DialogTitle>
+        <DialogContent>
+          <Alert severity="error" sx={{ mb: 2 }}>
+            This cannot be undone. Their employee record, leave history, documents, goals, and
+            performance reviews will be permanently removed. Payroll records are never deleted —
+            if any exist for this person, this action will be blocked instead.
+          </Alert>
+
+          {!permDeleteBlocked && (
+            <>
+              <Typography sx={{ fontSize: '0.85rem', mb: 1 }}>
+                Type <strong>{employee.full_name}</strong> to confirm.
+              </Typography>
+              <TextField
+                fullWidth value={permDeleteConfirmText} onChange={(e) => setPermDeleteConfirmText(e.target.value)}
+                placeholder={employee.full_name} autoFocus
+              />
+            </>
+          )}
+
+          {permDeleteBlocked?.blocking === 'payroll' && (
+            <Alert severity="warning">{permDeleteBlocked.error}</Alert>
+          )}
+
+          {permDeleteBlocked?.blocking === 'other' && (
+            <Alert severity="warning" sx={{ mt: 1 }}>{permDeleteBlocked.error}</Alert>
+          )}
+
+          {permDeleteError && <Alert severity="error" sx={{ mt: 2 }}>{permDeleteError}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPermDeleteOpen(false)}>Cancel</Button>
+          {permDeleteBlocked?.blocking === 'other' ? (
+            <Button variant="contained" color="error" onClick={() => attemptPermanentDelete(true)} disabled={permDeleting}>
+              {permDeleting ? 'Deleting…' : 'I understand — delete anyway'}
+            </Button>
+          ) : permDeleteBlocked?.blocking !== 'payroll' && (
+            <Button
+              variant="contained" color="error" onClick={() => attemptPermanentDelete(false)}
+              disabled={permDeleting || permDeleteConfirmText !== employee.full_name}
+            >
+              {permDeleting ? 'Deleting…' : 'Permanently delete'}
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={exitOpen} onClose={() => setExitOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Exit {employee.full_name}</DialogTitle>

@@ -103,7 +103,7 @@ async function approveRequest(requestId, reviewedBy) {
   if (!executor) {
     throw new Error(`No executor registered for action_type "${request.action_type}" — is that module loaded?`);
   }
-  const result = await executor(request.target_id, request.payload);
+  const result = await executor(request.target_id, request.payload, reviewedBy);
 
   const { rows: [updated] } = await safeQuery(
     `UPDATE approval_requests SET status = 'approved', reviewed_by = $1, reviewed_at = NOW() WHERE id = $2 RETURNING *`,

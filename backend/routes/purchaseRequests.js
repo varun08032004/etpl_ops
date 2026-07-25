@@ -5,7 +5,7 @@
 // control — reimbursement after spend already happened). A purchase request
 // must be approved BEFORE anything is bought. Shares the same L1 (Reporting
 // Manager) -> L2 (Finance) -> L3 (Owner) approval chain as expense claims,
-// via the shared services/approvalChain.js — same threshold config table
+// via the shared services/spendApprovalChain.js — same threshold config table
 // (approval_thresholds, request_type = 'purchase_request'), same escalation
 // rules, same row-lock pattern to close the decide race condition.
 
@@ -15,7 +15,7 @@ const rateLimit = require('express-rate-limit');
 const { safeQuery, withTransaction } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { fireEvent } = require('../services/automationEngine');
-const { getLevelsRequired, canActAtLevel } = require('../services/approvalChain');
+const { getLevelsRequired, canActAtLevel } = require('../services/spendApprovalChain');
 
 router.use(authenticate);
 

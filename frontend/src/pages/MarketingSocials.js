@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Grid, Button, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, MenuItem, Alert, Chip, IconButton, Avatar, Tooltip,
+  TextField, MenuItem, Alert, Chip, IconButton, Avatar, Tooltip, CircularProgress,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/EditOutlined';
 import DeleteIcon from '@mui/icons-material/DeleteOutline';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import VerifiedIcon from '@mui/icons-material/Verified';
+import SyncIcon from '@mui/icons-material/Sync';
 import InstagramIcon from '@mui/icons-material/Instagram';
 import LinkedInIcon from '@mui/icons-material/LinkedIn';
 import YouTubeIcon from '@mui/icons-material/YouTube';
@@ -54,6 +55,10 @@ export default function MarketingSocials() {
   const canDelete = staff?.role === 'owner';
 
   const [accounts, setAccounts] = useState([]);
+  const [syncingId, setSyncingId] = useState(null);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncError, setSyncError] = useState('');
+  const SYNCABLE_PLATFORMS = ['instagram', 'twitter', 'youtube'];
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
@@ -119,6 +124,36 @@ export default function MarketingSocials() {
     }
   };
 
+  const handleSync = async (a) => {
+    setSyncingId(a.id);
+    setSyncError('');
+    try {
+      await client.post(`/marketing/social-accounts/${a.id}/sync`);
+      load();
+    } catch (err) {
+      setSyncError(`${a.display_name}: ${err.response?.data?.error || 'Sync failed'}`);
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
+  const handleSyncAll = async () => {
+    setSyncingAll(true);
+    setSyncError('');
+    try {
+      const { data } = await client.post('/marketing/social-accounts/sync-all');
+      const failed = data.results.filter((r) => !r.ok);
+      if (failed.length) {
+        setSyncError(failed.map((f) => `${f.display_name}: ${f.error}`).join(' · '));
+      }
+      load();
+    } catch (err) {
+      setSyncError(err.response?.data?.error || 'Sync failed');
+    } finally {
+      setSyncingAll(false);
+    }
+  };
+
   const handleDelete = async (a) => {
     if (!window.confirm(`Remove "${a.display_name}" (${PLATFORM_META[a.platform]?.label})? This cannot be undone.`)) return;
     await client.delete(`/marketing/social-accounts/${a.id}`);
@@ -134,8 +169,20 @@ export default function MarketingSocials() {
             Portfolio of every social/handle the company runs — followers, links, and ownership.
           </Typography>
         </Box>
-        {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add account</Button>}
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {canEdit && (
+            <Button
+              variant="outlined" startIcon={syncingAll ? <CircularProgress size={16} /> : <SyncIcon />}
+              onClick={handleSyncAll} disabled={syncingAll}
+            >
+              {syncingAll ? 'Syncing…' : 'Sync all'}
+            </Button>
+          )}
+          {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add account</Button>}
+        </Box>
       </Box>
+
+      {syncError && <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setSyncError('')}>{syncError}</Alert>}
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={6} sm={3}>
@@ -205,6 +252,15 @@ export default function MarketingSocials() {
                     </Button>
                   ) : <span />}
                   <Box>
+                    {canEdit && SYNCABLE_PLATFORMS.includes(a.platform) && (
+                      <Tooltip title={a.last_stats_update ? `Last synced ${a.last_stats_update.slice(0, 10)}` : 'Sync live stats'}>
+                        <span>
+                          <IconButton size="small" onClick={() => handleSync(a)} disabled={syncingId === a.id}>
+                            {syncingId === a.id ? <CircularProgress size={16} /> : <SyncIcon sx={{ fontSize: 18 }} />}
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
                     {canEdit && (
                       <Tooltip title="Edit">
                         <IconButton size="small" onClick={() => openEdit(a)}><EditIcon sx={{ fontSize: 18 }} /></IconButton>

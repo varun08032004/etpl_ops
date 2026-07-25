@@ -36,8 +36,13 @@ import EventOutlinedIcon from '@mui/icons-material/EventOutlined';
 import NewspaperOutlinedIcon from '@mui/icons-material/NewspaperOutlined';
 import MailOutlineIcon from '@mui/icons-material/MailOutline';
 import TravelExploreOutlinedIcon from '@mui/icons-material/TravelExploreOutlined';
+import EditNoteOutlinedIcon from '@mui/icons-material/EditNoteOutlined';
 import HandshakeOutlinedIcon from '@mui/icons-material/HandshakeOutlined';
 import PhoneCallbackOutlinedIcon from '@mui/icons-material/PhoneCallbackOutlined';
+import MapOutlinedIcon from '@mui/icons-material/MapOutlined';
+import NewReleasesOutlinedIcon from '@mui/icons-material/NewReleasesOutlined';
+import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
+import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import PersonOutlinedIcon from '@mui/icons-material/PersonOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
@@ -46,11 +51,11 @@ import { useAuth } from '../context/AuthContext';
 import NotificationBell from './NotificationBell';
 import client from '../api/client';
 
-// Owner/admin/hr/finance/legal_hod/compliance_hod/marketing_hod/partnerships_hod
-// get the full operational console. Everyone else (manager/employee) gets a
-// scoped self-service view — they should not see company-wide financials,
+// Owner/admin/hr/finance/legal_hod/compliance_hod/marketing_hod/sales_hod/
+// product_hod get the full operational console. Everyone else (manager/employee)
+// gets a scoped self-service view — they should not see company-wide financials,
 // other people's records, or admin tools like Team logins / CSV import.
-const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'partnerships_hod'];
+const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'sales_hod', 'product_hod', 'accounting_hod'];
 const ADMIN_ROLES = ['owner', 'admin'];
 
 // Grouped instead of one flat list — 13+ items in a row was too much to scan.
@@ -60,6 +65,10 @@ const NAV_GROUPS = [
     items: [
       { to: '/', label: 'Dashboard', icon: DashboardOutlinedIcon, end: true },
       { to: '/analytics', label: 'Analytics', icon: InsightsOutlinedIcon },
+      // Lets privileged staff who are ALSO an employee (Founder included) open
+      // their own payslips/leave/assets without disturbing '/' staying on
+      // Dashboard as the shared home screen for this whole role set.
+      { to: '/my-profile', label: 'My Profile', icon: PersonOutlinedIcon },
     ],
   },
   {
@@ -72,11 +81,13 @@ const NAV_GROUPS = [
     ],
   },
   {
-    label: 'Revenue',
+    label: 'Sales',
     items: [
       { to: '/crm', label: 'CRM', icon: BusinessOutlinedIcon },
       { to: '/sales', label: 'Sales', icon: TrendingUpOutlinedIcon },
       { to: '/invoices', label: 'Invoices', icon: ReceiptLongOutlinedIcon },
+      { to: '/partnerships/follow-ups', label: 'Follow-ups Today', icon: PhoneCallbackOutlinedIcon },
+      { to: '/partnerships/firms', label: 'Partner Firms', icon: HandshakeOutlinedIcon },
     ],
   },
   {
@@ -99,6 +110,15 @@ const NAV_GROUPS = [
     ],
   },
   {
+    label: 'Product',
+    items: [
+      { to: '/product/roadmap', label: 'Roadmap', icon: MapOutlinedIcon },
+      { to: '/product/releases', label: 'Releases', icon: NewReleasesOutlinedIcon },
+      { to: '/product/feedback', label: 'Feedback & Bugs', icon: BugReportOutlinedIcon },
+      { to: '/product/beta-users', label: 'Beta Users', icon: ScienceOutlinedIcon },
+    ],
+  },
+  {
     label: 'Marketing',
     items: [
       { to: '/marketing/dashboard', label: 'Dashboard', icon: DashboardOutlinedIcon },
@@ -111,14 +131,8 @@ const NAV_GROUPS = [
       { to: '/marketing/press', label: 'Press & Media', icon: NewspaperOutlinedIcon },
       { to: '/marketing/newsletter', label: 'Newsletter', icon: MailOutlineIcon },
       { to: '/marketing/seo', label: 'SEO / Website', icon: TravelExploreOutlinedIcon },
+      { to: '/marketing/blog', label: 'Blog', icon: EditNoteOutlinedIcon },
       { to: '/marketing/brand-assets', label: 'Brand Assets', icon: PaletteOutlinedIcon },
-    ],
-  },
-  {
-    label: 'Partnerships',
-    items: [
-      { to: '/partnerships/follow-ups', label: 'Follow-ups Today', icon: PhoneCallbackOutlinedIcon },
-      { to: '/partnerships/firms', label: 'Partner Firms', icon: HandshakeOutlinedIcon },
     ],
   },
   {
@@ -152,12 +166,14 @@ const NAV_GROUPS = [
 // accounting.js/invoices.js/expenses.js already gate behind requireRole
 // ('finance') — see middleware/auth.js + services/departmentAccess.js).
 const ROLE_TO_NAV_GROUP_LABELS = {
-  finance: ['Revenue', 'Accounting', 'Finance'],
+  finance: ['Sales', 'Accounting', 'Finance'],
   hr: ['HR'],
   legal_hod: ['Legal'],
   compliance_hod: ['Legal'],
   marketing_hod: ['Marketing'],
-  partnerships_hod: ['Partnerships'],
+  sales_hod: ['Sales'],
+  product_hod: ['Product'],
+  accounting_hod: ['Accounting'],
 };
 
 const ADMIN_NAV_GROUP = {

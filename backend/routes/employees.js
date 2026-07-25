@@ -2,12 +2,13 @@
 
 const express = require('express');
 const router = express.Router();
-const { safeQuery } = require('../db/pool');
+const { safeQuery, withTransaction } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { fireEvent } = require('../services/automationEngine');
 const { logAction } = require('../services/auditLog');
 const { registerApprovalAction, createApprovalRequest } = require('../services/approvals');
 const { buildEmployeeActionChain } = require('../services/approvalChain');
+const { isHeadOfDepartmentGrantingRole } = require('../services/departmentAccess');
 
 router.use(authenticate);
 
@@ -28,6 +29,78 @@ async function exitEmployee(employeeId, payload) {
   return rows[0];
 }
 registerApprovalAction('employee.exit', (targetId, payload) => exitEmployee(targetId, payload));
+
+// ── permanent deletion — irreversible, only for already-exited employees ───
+// Never available for payroll records: this is a hard compliance line, not
+// a preference, and there is deliberately no bypass for it anywhere below.
+// Everything else (leave requests, documents, goals, reviews, asset
+// assignment, recruitment link) can be force-cleared by whoever is
+// authorized, since it's the employee's own operational data rather than
+// a statutory financial record.
+async function getEmployeeDependencyCounts(employeeId) {
+  const queries = {
+    payroll_items: `SELECT COUNT(*) FROM payroll_items WHERE employee_id = $1`,
+    leave_requests: `SELECT COUNT(*) FROM leave_requests WHERE employee_id = $1`,
+    documents: `SELECT COUNT(*) FROM documents WHERE entity_type = 'employee' AND entity_id = $1`,
+    assets: `SELECT COUNT(*) FROM assets WHERE assigned_to = $1`,
+    goals: `SELECT COUNT(*) FROM goals WHERE employee_id = $1`,
+    performance_reviews: `SELECT COUNT(*) FROM performance_reviews WHERE employee_id = $1`,
+    job_applications: `SELECT COUNT(*) FROM job_applications WHERE hired_employee_id = $1`,
+  };
+  const counts = {};
+  for (const [key, sql] of Object.entries(queries)) {
+    const { rows: [row] } = await safeQuery(sql, [employeeId]);
+    counts[key] = Number(row.count);
+  }
+  return counts;
+}
+
+// actingStaffId is who is actually executing the deletion at the moment it
+// happens — the owner themselves on the immediate path, or the Founder who
+// gave final sign-off on the admin/HR-HOD-initiated path (services/
+// approvals.js passes this as the 3rd argument to every registered executor).
+async function hardDeleteEmployee(employeeId, payload, actingStaffId) {
+  return withTransaction(async (client) => {
+    const { rows: [employee] } = await client.query(`SELECT * FROM employees WHERE id = $1`, [employeeId]);
+    if (!employee) throw Object.assign(new Error('Employee not found'), { status: 404 });
+
+    // Defensive re-check, even though the route already blocked this before
+    // ever reaching here — payroll history is never destroyed by this path,
+    // full stop.
+    const { rows: [{ count: payrollCount }] } = await client.query(
+      `SELECT COUNT(*) FROM payroll_items WHERE employee_id = $1`, [employeeId]
+    );
+    if (Number(payrollCount) > 0) {
+      throw Object.assign(new Error('Cannot delete — payroll records exist for this employee and must be retained for statutory compliance.'), { status: 409 });
+    }
+
+    // Unlink references that would otherwise dangle or block deletion.
+    await client.query(`UPDATE departments SET head_employee_id = NULL WHERE head_employee_id = $1`, [employeeId]);
+    await client.query(`UPDATE teams SET team_head_id = NULL WHERE team_head_id = $1`, [employeeId]);
+    await client.query(`UPDATE employees SET manager_id = NULL WHERE manager_id = $1`, [employeeId]);
+    await client.query(`UPDATE staff_accounts SET employee_id = NULL, is_active = false WHERE employee_id = $1`, [employeeId]);
+    await client.query(`UPDATE job_applications SET hired_employee_id = NULL WHERE hired_employee_id = $1`, [employeeId]);
+    await client.query(`UPDATE assets SET assigned_to = NULL, status = 'in_stock' WHERE assigned_to = $1`, [employeeId]);
+
+    // The employee's own operational records — removed alongside them.
+    await client.query(`DELETE FROM leave_requests WHERE employee_id = $1`, [employeeId]);
+    await client.query(`DELETE FROM goals WHERE employee_id = $1`, [employeeId]);
+    await client.query(`DELETE FROM performance_reviews WHERE employee_id = $1`, [employeeId]);
+    await client.query(`DELETE FROM documents WHERE entity_type = 'employee' AND entity_id = $1`, [employeeId]);
+
+    await client.query(`DELETE FROM employees WHERE id = $1`, [employeeId]);
+
+    // Full pre-deletion snapshot of the row, so the audit log retains exactly
+    // what existed even though the row itself is now gone permanently.
+    await logAction({
+      staffId: actingStaffId, action: 'employee.hard_deleted', entity: 'employees', entityId: employeeId,
+      oldValue: employee,
+    });
+
+    return { id: employee.id, full_name: employee.full_name };
+  });
+}
+registerApprovalAction('employee.hard_delete', (targetId, payload, actingStaffId) => hardDeleteEmployee(targetId, payload, actingStaffId));
 
 // ── self-service: resolve the logged-in staff member's own employee record ──
 // Must be defined BEFORE the /:id routes below, or Express would treat "me" as an :id.
@@ -323,6 +396,79 @@ router.post('/:id/reinstate', requireRole('hr'), async (req, res) => {
   } catch (err) {
     console.error('[employees:reinstate]', err);
     res.status(500).json({ error: 'Failed to reinstate employee' });
+  }
+});
+
+// ── permanent deletion — Founder: immediate. Admin or the HR department
+// head: goes through the resolved approval chain (Team Head → Dept Head →
+// CEO → Founder, same mechanism as exit), ending in Founder sign-off since
+// this is irreversible and more destructive than exit. Only ever available
+// once an employee is already exited — this finishes an offboarding that's
+// already happened, it doesn't replace Exit. ─────────────────────────────
+router.post('/:id/permanent-delete', async (req, res) => {
+  try {
+    const { force, reason } = req.body;
+
+    const { rows: [employee] } = await safeQuery(`SELECT * FROM employees WHERE id = $1`, [req.params.id]);
+    if (!employee) return res.status(404).json({ error: 'Employee not found' });
+    if (employee.status !== 'exited') {
+      return res.status(400).json({ error: 'This employee must be exited first — use Exit, then Permanent Delete once they are fully offboarded.' });
+    }
+
+    const isOwner = req.staff.role === 'owner';
+    const isAdmin = req.staff.role === 'admin';
+    const isHrHod = await isHeadOfDepartmentGrantingRole(req.staff.employee_id, 'hr');
+    if (!isOwner && !isAdmin && !isHrHod) {
+      return res.status(403).json({ error: 'Only the Founder, an Admin, or the HR department head can permanently delete an employee record' });
+    }
+
+    const counts = await getEmployeeDependencyCounts(req.params.id);
+
+    if (counts.payroll_items > 0) {
+      return res.status(409).json({
+        error: `Cannot permanently delete — ${counts.payroll_items} payroll record(s) exist for this employee, which must be retained for statutory compliance. Their record will remain as "exited" instead.`,
+        blocking: 'payroll',
+        counts,
+      });
+    }
+
+    const otherDependencyCount = counts.leave_requests + counts.documents + counts.assets + counts.goals + counts.performance_reviews + counts.job_applications;
+    if (otherDependencyCount > 0 && !force) {
+      return res.status(409).json({
+        error: `This employee has ${otherDependencyCount} related record(s) — ${counts.leave_requests} leave request(s), ${counts.documents} document(s), ${counts.assets} asset assignment(s), ${counts.goals} goal(s), ${counts.performance_reviews} performance review(s), ${counts.job_applications} recruitment link(s). Deleting will remove or unlink all of these. Confirm to proceed.`,
+        blocking: 'other',
+        counts,
+      });
+    }
+
+    if (isOwner) {
+      const result = await hardDeleteEmployee(req.params.id, { force }, req.staff.id);
+      return res.json({ deleted: true, result });
+    }
+
+    // Admin or HR HOD: requests instead of acting directly, same "propose,
+    // Founder approves" model used for exit/department-delete/team-delete
+    // throughout this app.
+    const chain = await buildEmployeeActionChain(employee.id, req.staff.id);
+    const request = await createApprovalRequest({
+      actionType: 'employee.hard_delete',
+      targetType: 'employee',
+      targetId: employee.id,
+      targetLabel: employee.full_name,
+      requestedBy: req.staff.id,
+      reason: reason || null,
+      payload: { force: !!force },
+      chain,
+    });
+
+    res.status(202).json({
+      pending: true,
+      request,
+      message: `Permanent deletion of ${employee.full_name} requested — next approver: ${chain[0].label}.`,
+    });
+  } catch (err) {
+    console.error('[employees:permanent-delete]', err);
+    res.status(err.status || 500).json({ error: err.message || 'Failed to process permanent deletion' });
   }
 });
 

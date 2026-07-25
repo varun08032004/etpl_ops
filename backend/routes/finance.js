@@ -7,6 +7,14 @@
 //      through a sequential L1 (Reporting Manager) -> L2 (Finance
 //      Controller) -> L3 (CFO/Founder) chain, with how many levels required
 //      determined by amount at submission time (snapshotted).
+//
+// NOTE: server.js also mounts a separate routes/expenseClaims.js at
+// /api/expense-claims. As of this file, the frontend (Finance.jsx) still
+// calls /finance/expense-claims/* exclusively — this file's implementation
+// is the hardened, currently-live one (row-lock on decide, receipt-upload
+// flow, cross-level visibility). Reconcile which one is canonical before
+// treating both as active — don't run two parallel expense-claim systems
+// without a decision on which owns the data.
 
 const express = require('express');
 const router = express.Router();
@@ -14,7 +22,7 @@ const rateLimit = require('express-rate-limit'); // npm install express-rate-lim
 const { safeQuery, withTransaction } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { fireEvent } = require('../services/automationEngine');
-const { getLevelsRequired, canActAtLevel } = require('../services/approvalChain');
+const { getLevelsRequired, canActAtLevel } = require('../services/spendApprovalChain');
 const ledger = require('../services/ledger');
 const { computeVarianceAndAlert } = require('../services/budgetVariance');
 
@@ -45,6 +53,23 @@ router.use((req, res, next) => {
 });
 
 const ALLOWED_CLAIM_CATEGORIES = ['travel', 'meals', 'software', 'office_supplies', 'client_entertainment', 'training', 'other'];
+
+// Maps expense_claims.category (free text — there's no category_id FK on this
+// table, confirmed against the real schema) to a chart-of-accounts CODE for
+// posting the reimbursement journal entry. Only 'travel', 'software', and
+// 'office_supplies' have a clean dedicated account today — everything else
+// falls back to Miscellaneous (5990) until you create dedicated accounts for
+// them (meals, client entertainment, training don't have an obvious existing
+// match in your chart of accounts as of the last check).
+const CLAIM_CATEGORY_TO_ACCOUNT_CODE = {
+  travel: '5500',            // Travel & Conveyance
+  software: '5300',          // Software & SaaS Tools
+  office_supplies: '5900',   // Office Supplies & Utilities
+  client_entertainment: '5600', // Marketing & Advertising — closest existing fit, not a perfect one
+  meals: '5990',             // Miscellaneous — no dedicated account exists yet
+  training: '5990',          // Miscellaneous — no dedicated account exists yet
+  other: '5990',             // Miscellaneous
+};
 
 function paginationParams(req) {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
@@ -109,8 +134,12 @@ router.put('/thresholds/:id', requireRole('admin'), async (req, res) => {
   }
 });
 
-// getLevelsRequired and canActAtLevel now come from ../services/approvalChain —
+// getLevelsRequired and canActAtLevel come from ../services/spendApprovalChain —
 // shared with routes/purchaseRequests.js so both approval chains stay in sync.
+// (Named spendApprovalChain, not approvalChain, to avoid colliding with the
+// pre-existing org-governance file of that name — buildEmployeeActionChain
+// etc. serve a completely different purpose: approving deletions of
+// departments/teams/staff accounts, not amount-threshold spend approvals.)
 
 // ── submit a claim ──────────────────────────────────────────────────────────
 // Receipt attachment is a SEPARATE step now (see PATCH /:id/receipt below) —
@@ -572,6 +601,78 @@ router.get('/cash-flow/forecast', requireRole('finance'), async (req, res) => {
   } catch (err) {
     console.error('[finance:cash-flow:forecast]', err);
     res.status(500).json({ error: 'Failed to compute cash flow forecast' });
+  }
+});
+
+// ── reimburse a fully-approved claim — pays out and posts the ledger entry ──
+// This is the step that was missing entirely: claims could reach 'approved'
+// status but nothing ever actually paid the employee back or recorded it in
+// Accounting. journal_entry_id already existed on the expense_claims table
+// (confirmed via schema check) waiting for exactly this — it was just never
+// populated by anything until now.
+router.post('/expense-claims/:id/reimburse', requireRole('finance'), async (req, res) => {
+  try {
+    const { bank_account_id } = req.body;
+    if (!bank_account_id) return res.status(400).json({ error: 'bank_account_id is required' });
+
+    // Idempotency guard, same pattern as expenses.js's mark-paid: atomically
+    // claim the row so a double-click or retry can't post two journal entries
+    // for the same reimbursement.
+    const { rows: [claim] } = await safeQuery(
+      `UPDATE expense_claims SET status = 'reimbursing' WHERE id = $1 AND status = 'approved' AND journal_entry_id IS NULL RETURNING *`,
+      [req.params.id]
+    );
+    if (!claim) {
+      const { rows: [existing] } = await safeQuery(`SELECT status, journal_entry_id FROM expense_claims WHERE id = $1`, [req.params.id]);
+      if (!existing) return res.status(404).json({ error: 'Claim not found' });
+      if (existing.journal_entry_id) return res.status(409).json({ error: 'This claim has already been reimbursed' });
+      return res.status(400).json({ error: `Claim must be fully approved before reimbursing (currently "${existing.status}")` });
+    }
+
+    try {
+      const accountCode = CLAIM_CATEGORY_TO_ACCOUNT_CODE[claim.category] || '5990';
+      const { rows: [expenseAccount] } = await safeQuery(`SELECT id FROM chart_of_accounts WHERE code = $1`, [accountCode]);
+      if (!expenseAccount) {
+        throw Object.assign(new Error(`No chart-of-accounts entry found for code "${accountCode}" (mapped from category "${claim.category}") — set this account up before reimbursing.`), { httpStatus: 500 });
+      }
+
+      const { rows: [bank] } = await safeQuery(`SELECT ledger_account_id FROM bank_accounts WHERE id = $1`, [bank_account_id]);
+      if (!bank) throw Object.assign(new Error('Bank account not found'), { httpStatus: 404 });
+      if (!bank.ledger_account_id) throw Object.assign(new Error('This bank account has no linked ledger account'), { httpStatus: 400 });
+
+      const { rows: [emp] } = await safeQuery(`SELECT full_name FROM employees WHERE id = $1`, [claim.employee_id]);
+
+      const je = await ledger.postJournalEntry({
+        entryDate: new Date().toISOString().slice(0, 10),
+        source: 'expense_claim', sourceType: 'expense_claim', sourceId: claim.id,
+        narration: `Reimbursement: ${claim.description || claim.category} (${emp?.full_name || claim.employee_id})`,
+        createdBy: req.staff.id,
+        lines: [
+          { accountId: expenseAccount.id, debit: claim.amount, description: claim.description || claim.category },
+          { accountId: bank.ledger_account_id, credit: claim.amount, description: `Reimbursed to ${emp?.full_name || claim.employee_id}` },
+        ],
+      });
+
+      const { rows: [updated] } = await safeQuery(
+        `UPDATE expense_claims SET status = 'reimbursed', journal_entry_id = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+        [je.id, claim.id]
+      );
+
+      fireEvent('expense_claim.reimbursed', { claimId: claim.id, amount: claim.amount, employeeName: emp?.full_name, link: '/finance' })
+        .catch((err) => console.error('[finance:fireEvent] expense_claim.reimbursed failed:', err));
+
+      res.json({ claim: updated, journalEntry: je });
+    } catch (innerErr) {
+      // Release the lock back to 'approved' so this can be retried — nothing
+      // was actually posted if we got here (the journal entry call itself
+      // either succeeded, in which case we already returned above, or threw
+      // before any partial DB write happened here).
+      await safeQuery(`UPDATE expense_claims SET status = 'approved' WHERE id = $1`, [claim.id]);
+      throw innerErr;
+    }
+  } catch (err) {
+    console.error('[finance:expense-claims:reimburse]', err);
+    res.status(err.httpStatus || 500).json({ error: err.httpStatus ? err.message : 'Failed to process reimbursement' });
   }
 });
 

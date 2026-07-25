@@ -418,10 +418,14 @@ export default function OrgStructure() {
                 onChange={(e) => setDeptForm({ ...deptForm, granted_roles: typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value })}
                 helperText="Every employee in this department gets these modules automatically — same as if their login had that role, without changing their actual role."
               >
-                <MenuItem value="finance">Finance (Revenue, Accounting, Invoices, Payroll expenses, Finance)</MenuItem>
+                <MenuItem value="finance">Finance (Sales, Accounting, Invoices, Payroll expenses, Finance)</MenuItem>
+                <MenuItem value="accounting_hod">Accounting — HOD tier (Accounting module only, no Sales/Finance)</MenuItem>
                 <MenuItem value="hr">HR (People, Attendance, Org Structure, leave approvals for this dept)</MenuItem>
                 <MenuItem value="legal_hod">Legal — HOD tier (Registrations, Compliance)</MenuItem>
                 <MenuItem value="compliance_hod">Compliance — HOD tier (Registrations, Compliance)</MenuItem>
+                <MenuItem value="marketing_hod">Marketing — HOD tier (Socials, Campaigns, Content, Leads, etc.)</MenuItem>
+                <MenuItem value="sales_hod">Sales — HOD tier (CRM, Sales, Invoices, Partner Firms, Follow-ups)</MenuItem>
+                <MenuItem value="product_hod">Product — HOD tier (Roadmap, Releases, Feedback, Beta Users)</MenuItem>
               </TextField>
             </Grid>
           </Grid>

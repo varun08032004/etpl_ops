@@ -1,102 +1,101 @@
 'use strict';
 
 // ============================================================================
-// AXIS BANK ADAPTER — PLACEHOLDER
+// AXIS BANK ADAPTER — PLACEHOLDER, now MULTI-ACCOUNT capable
 // ============================================================================
-// This is the ONLY file that needs to change once you have your Axis Bank
-// API credentials. Everything else (matching engine, routes, UI) talks to
-// this adapter through fetchTransactions() below and doesn't care which bank
-// is behind it — so swapping banks later, or adding a second one, means
-// writing one new adapter file, not touching the reconciliation logic.
+// Previously read ONE global set of credentials from env vars — meaning
+// every bank_accounts row set to provider='axis' would try to sync using
+// the SAME account number, which is wrong the moment you have more than one
+// Axis account. Now takes credentials as a parameter, sourced per-account
+// from bank_accounts.api_client_id / api_client_secret / api_base_url /
+// account_number (see services/bankFeeds/bankReconciliationEngine.js, which
+// resolves these from the DB row and passes them in here).
 //
-// TODO once you have Axis API access:
-//   1. Set these env vars: AXIS_BANK_CLIENT_ID, AXIS_BANK_CLIENT_SECRET,
-//      AXIS_BANK_API_BASE_URL, AXIS_BANK_ACCOUNT_NUMBER (or however their
-//      docs name these — check Axis's actual API/developer portal for exact
-//      auth flow, likely OAuth2 client-credentials or a signed-request scheme).
-//   2. Implement authenticate() to get/refresh an access token.
-//   3. Implement the real HTTP call inside fetchTransactions() — replace the
-//      "NOT CONFIGURED" throw with an actual axios/fetch call to Axis's
-//      statement or transaction-history endpoint.
-//   4. Map Axis's response shape into the normalized shape documented below
-//      so nothing downstream needs to change.
+// Falls back to env vars (AXIS_BANK_CLIENT_ID etc.) ONLY if a given account's
+// row has no credentials set — this keeps your original single-account setup
+// working without forcing an immediate migration of existing data.
+//
+// TODO once you have Axis API access, same as before:
+//   1. Implement authenticate() for real (OAuth2 client-credentials, or
+//      whatever Axis's actual docs specify).
+//   2. Implement the real HTTP call inside fetchTransactions().
+//   3. Map Axis's response shape into the normalized shape documented below.
 // ============================================================================
 
-const AXIS_CONFIG = {
-  clientId: process.env.AXIS_BANK_CLIENT_ID || null,
-  clientSecret: process.env.AXIS_BANK_CLIENT_SECRET || null,
-  apiBaseUrl: process.env.AXIS_BANK_API_BASE_URL || null,
-  accountNumber: process.env.AXIS_BANK_ACCOUNT_NUMBER || null,
-};
-
-function isConfigured() {
-  return !!(AXIS_CONFIG.clientId && AXIS_CONFIG.clientSecret && AXIS_CONFIG.apiBaseUrl && AXIS_CONFIG.accountNumber);
+function resolveCredentials(credentials) {
+  return {
+    clientId: credentials?.clientId || process.env.AXIS_BANK_CLIENT_ID || null,
+    clientSecret: credentials?.clientSecret || process.env.AXIS_BANK_CLIENT_SECRET || null,
+    apiBaseUrl: credentials?.apiBaseUrl || process.env.AXIS_BANK_API_BASE_URL || null,
+    accountNumber: credentials?.accountNumber || process.env.AXIS_BANK_ACCOUNT_NUMBER || null,
+  };
 }
 
-let cachedToken = null;
-let tokenExpiresAt = 0;
+function isConfigured(credentials) {
+  const c = resolveCredentials(credentials);
+  return !!(c.clientId && c.clientSecret && c.apiBaseUrl && c.accountNumber);
+}
 
-async function authenticate() {
+// Token cache is now keyed by account number, since different accounts have
+// different credentials and therefore different tokens — a single module-level
+// token variable would leak one account's token into another account's calls.
+const tokenCache = new Map(); // accountNumber -> { token, expiresAt }
+
+async function authenticate(config) {
   // TODO: replace with Axis's real auth flow once you have their API docs.
-  // Typical pattern for corporate banking APIs (adjust to what Axis actually specifies):
   //
-  //   const response = await fetch(`${AXIS_CONFIG.apiBaseUrl}/oauth/token`, {
+  //   const response = await fetch(`${config.apiBaseUrl}/oauth/token`, {
   //     method: 'POST',
   //     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   //     body: new URLSearchParams({
   //       grant_type: 'client_credentials',
-  //       client_id: AXIS_CONFIG.clientId,
-  //       client_secret: AXIS_CONFIG.clientSecret,
+  //       client_id: config.clientId,
+  //       client_secret: config.clientSecret,
   //     }),
   //   });
   //   const data = await response.json();
-  //   cachedToken = data.access_token;
-  //   tokenExpiresAt = Date.now() + (data.expires_in * 1000) - 30000; // refresh 30s early
-  //   return cachedToken;
+  //   const token = data.access_token;
+  //   tokenCache.set(config.accountNumber, { token, expiresAt: Date.now() + (data.expires_in * 1000) - 30000 });
+  //   return token;
 
-  throw new Error('[axisBankAdapter] Axis Bank API not configured yet — set AXIS_BANK_* environment variables once your account/API access is ready.');
+  throw new Error(`[axisBankAdapter] Axis Bank API not configured for account "${config.accountNumber}" — set credentials on this bank account (or the AXIS_BANK_* env vars) once your API access is ready.`);
 }
 
-async function getValidToken() {
-  if (cachedToken && Date.now() < tokenExpiresAt) return cachedToken;
-  return authenticate();
+async function getValidToken(config) {
+  const cached = tokenCache.get(config.accountNumber);
+  if (cached && Date.now() < cached.expiresAt) return cached.token;
+  return authenticate(config);
 }
 
 /**
- * Fetches transactions for the configured Axis account within a date range.
+ * Fetches transactions for a given account within a date range.
  *
- * Returns an array of NORMALIZED transaction objects, regardless of bank:
- *   {
- *     externalTransactionId: string,   // Axis's own unique transaction/reference ID
- *     transactionDate: 'YYYY-MM-DD',
- *     amount: number,                  // always positive
- *     direction: 'debit' | 'credit',
- *     description: string,             // narration/particulars from the statement
- *     rawPayload: object,              // the original API response line, kept as-is
- *   }
+ * @param {string} fromDate
+ * @param {string} toDate
+ * @param {object} [credentials] - per-account credentials, resolved by the
+ *   caller from bank_accounts.api_client_id / api_client_secret / api_base_url
+ *   / account_number. Falls back to env vars if omitted (single-account setups).
  *
- * This normalized shape is what the matching engine and routes consume —
- * so the ONLY thing that changes when Axis's actual API is wired in is the
- * body of this function; nothing downstream needs to change.
+ * Returns an array of NORMALIZED transaction objects, same shape as before:
+ *   { externalTransactionId, transactionDate, amount, direction, description, rawPayload }
  */
-async function fetchTransactions(fromDate, toDate) {
-  if (!isConfigured()) {
+async function fetchTransactions(fromDate, toDate, credentials) {
+  const config = resolveCredentials(credentials);
+  if (!isConfigured(credentials)) {
     throw new Error(
-      '[axisBankAdapter] Not configured. Set AXIS_BANK_CLIENT_ID, AXIS_BANK_CLIENT_SECRET, ' +
-      'AXIS_BANK_API_BASE_URL, and AXIS_BANK_ACCOUNT_NUMBER once you have your Axis Bank ' +
-      'API account and credentials. Until then, bank sync will fail gracefully with this error ' +
-      '— it will not silently pretend to succeed.'
+      `[axisBankAdapter] Not configured for account "${config.accountNumber || 'unknown'}". Set api_client_id/api_client_secret/api_base_url ` +
+      'on this bank account row, or the AXIS_BANK_* environment variables as a fallback, once you have your Axis Bank API credentials. ' +
+      'Until then, bank sync will fail gracefully with this error — it will not silently pretend to succeed.'
     );
   }
 
-  const token = await getValidToken();
+  const token = await getValidToken(config);
 
-  // TODO: replace with the real Axis statement/transaction-history API call.
-  // Example shape (adjust endpoint path, params, and response parsing to match
-  // Axis's actual API docs once you have them):
+  // TODO: replace with the real Axis statement/transaction-history API call,
+  // using config.apiBaseUrl / config.accountNumber / token. Example shape:
   //
   //   const response = await fetch(
-  //     `${AXIS_CONFIG.apiBaseUrl}/accounts/${AXIS_CONFIG.accountNumber}/transactions?from=${fromDate}&to=${toDate}`,
+  //     `${config.apiBaseUrl}/accounts/${config.accountNumber}/transactions?from=${fromDate}&to=${toDate}`,
   //     { headers: { Authorization: `Bearer ${token}` } }
   //   );
   //   const data = await response.json();

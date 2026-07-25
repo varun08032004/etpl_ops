@@ -8,7 +8,7 @@ import client from '../api/client';
 import Money from '../components/Money';
 import { useAuth } from '../context/AuthContext';
 
-const STATUS_COLOR = { pending: 'warning', approved: 'success', rejected: 'error', paid: 'info', cancelled: 'default', converted_to_bill: 'info' };
+const STATUS_COLOR = { pending: 'warning', approved: 'success', rejected: 'error', paid: 'info', cancelled: 'default', converted_to_bill: 'info', reimbursing: 'warning', reimbursed: 'info' };
 const CATEGORIES = ['travel', 'meals', 'software', 'office_supplies', 'client_entertainment', 'training', 'other'];
 
 // ════════════════════════════════════════════════════════════════════════
@@ -76,7 +76,7 @@ function SubmitClaimDialog({ open, onClose, onSubmitted }) {
   );
 }
 
-function ClaimsTable({ claims, showEmployee, onDecide, onLoadMore, hasMore }) {
+function ClaimsTable({ claims, showEmployee, onDecide, onReimburse, onLoadMore, hasMore }) {
   return (
     <Paper>
       <Table size="small">
@@ -88,7 +88,7 @@ function ClaimsTable({ claims, showEmployee, onDecide, onLoadMore, hasMore }) {
             <TableCell align="right">Amount</TableCell>
             <TableCell>Level</TableCell>
             <TableCell>Status</TableCell>
-            {onDecide && <TableCell align="right">Decide</TableCell>}
+            {(onDecide || onReimburse) && <TableCell align="right">Action</TableCell>}
           </TableRow>
         </TableHead>
         <TableBody>
@@ -100,12 +100,16 @@ function ClaimsTable({ claims, showEmployee, onDecide, onLoadMore, hasMore }) {
               <TableCell align="right"><Money amount={c.amount} size="0.85rem" /></TableCell>
               <TableCell sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>{c.current_level}/{c.levels_required}</TableCell>
               <TableCell><Chip size="small" label={c.status} color={STATUS_COLOR[c.status]} /></TableCell>
-              {onDecide && (
+              {onDecide && c.status === 'pending' && (
                 <TableCell align="right">
                   <Button size="small" color="error" onClick={() => onDecide(c, 'rejected')}>Reject</Button>
                   <Button size="small" variant="contained" onClick={() => onDecide(c, 'approved')}>Approve</Button>
                 </TableCell>
               )}
+              {onReimburse && c.status === 'approved' && (
+                <TableCell align="right"><Button size="small" variant="outlined" onClick={() => onReimburse(c)}>Reimburse</Button></TableCell>
+              )}
+              {onReimburse && !onDecide && !['pending', 'approved'].includes(c.status) && <TableCell />}
             </TableRow>
           ))}
           {!claims.length && (
@@ -118,6 +122,56 @@ function ClaimsTable({ claims, showEmployee, onDecide, onLoadMore, hasMore }) {
   );
 }
 
+function ReimburseDialog({ claim, onClose, onSaved }) {
+  const [bankAccountId, setBankAccountId] = useState('');
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!claim) return;
+    setBankAccountId('');
+    setError('');
+    client.get('/bank-accounts').then(({ data }) => setBankAccounts(data.accounts || [])).catch(() => setBankAccounts([]));
+  }, [claim]);
+
+  const handleReimburse = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await client.post(`/finance/expense-claims/${claim.id}/reimburse`, { bank_account_id: bankAccountId });
+      onClose();
+      onSaved();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to reimburse claim');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!claim} onClose={onClose} maxWidth="xs" fullWidth>
+      <DialogTitle>Reimburse claim — {claim?.employee_name}</DialogTitle>
+      <DialogContent>
+        <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mb: 1 }}>
+          {claim?.description || claim?.category}
+        </Typography>
+        <Box sx={{ mb: 2 }}><Money amount={claim?.amount} size="1rem" /></Box>
+        <TextField fullWidth select label="Pay from bank account" value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)}>
+          {bankAccounts.map((b) => <MenuItem key={b.id} value={b.id}>{b.account_name}</MenuItem>)}
+        </TextField>
+        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" onClick={handleReimburse} disabled={saving || !bankAccountId}>
+          {saving ? 'Processing…' : 'Confirm reimbursement'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 function ExpenseClaimsSection({ canSeeAll }) {
   const [subTab, setSubTab] = useState(0);
   const [myClaims, setMyClaims] = useState([]);
@@ -127,6 +181,7 @@ function ExpenseClaimsSection({ canSeeAll }) {
   const [allClaimsTotal, setAllClaimsTotal] = useState(0);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [message, setMessage] = useState(null);
+  const [reimburseClaim, setReimburseClaim] = useState(null);
   const PAGE_SIZE = 50;
 
   const loadMine = () => client.get('/finance/expense-claims/mine', { params: { limit: PAGE_SIZE, offset: 0 } })
@@ -165,8 +220,9 @@ function ExpenseClaimsSection({ canSeeAll }) {
       </Tabs>
       {subTab === 0 && <ClaimsTable claims={myClaims} showEmployee={false} onLoadMore={loadMoreMine} hasMore={myClaims.length < myClaimsTotal} />}
       {subTab === 1 && <ClaimsTable claims={pendingApproval} showEmployee onDecide={decide} />}
-      {subTab === 2 && canSeeAll && <ClaimsTable claims={allClaims} showEmployee onLoadMore={loadMoreAll} hasMore={allClaims.length < allClaimsTotal} />}
+      {subTab === 2 && canSeeAll && <ClaimsTable claims={allClaims} showEmployee onReimburse={setReimburseClaim} onLoadMore={loadMoreAll} hasMore={allClaims.length < allClaimsTotal} />}
       <SubmitClaimDialog open={submitOpen} onClose={() => setSubmitOpen(false)} onSubmitted={loadMine} />
+      <ReimburseDialog claim={reimburseClaim} onClose={() => setReimburseClaim(null)} onSaved={loadAll} />
     </Box>
   );
 }

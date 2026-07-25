@@ -12,7 +12,7 @@ router.use(authenticate);
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
 // ── fiscal periods (year-end close) ─────────────────────────────────────────
-router.get('/fiscal-periods', requireRole('finance'), async (req, res) => {
+router.get('/fiscal-periods', requireRole('finance', 'accounting_hod'), async (req, res) => {
   try {
     const periods = await ledger.listFiscalPeriods();
     res.json({ fiscalPeriods: periods });
@@ -22,7 +22,7 @@ router.get('/fiscal-periods', requireRole('finance'), async (req, res) => {
   }
 });
 
-router.post('/fiscal-periods', requireRole('finance'), async (req, res) => {
+router.post('/fiscal-periods', requireRole('finance', 'accounting_hod'), async (req, res) => {
   try {
     const { label, start_date, end_date } = req.body;
     if (!label || !start_date || !end_date) return res.status(400).json({ error: 'label, start_date, and end_date are required' });
@@ -37,7 +37,7 @@ router.post('/fiscal-periods', requireRole('finance'), async (req, res) => {
 
 // Dry run — shows exactly what the closing entry WOULD post, without posting
 // anything. Finance should always check this before actually closing.
-router.get('/fiscal-periods/:id/close-preview', requireRole('finance'), async (req, res) => {
+router.get('/fiscal-periods/:id/close-preview', requireRole('finance', 'accounting_hod'), async (req, res) => {
   try {
     const { rows: [period] } = await safeQuery(`SELECT * FROM fiscal_periods WHERE id = $1`, [req.params.id]);
     if (!period) return res.status(404).json({ error: 'Fiscal period not found' });
@@ -50,7 +50,9 @@ router.get('/fiscal-periods/:id/close-preview', requireRole('finance'), async (r
 });
 
 // Closing the books is irreversible in spirit (reopening is an explicit,
-// logged escape hatch, not a normal workflow) — owner/admin only.
+// logged escape hatch, not a normal workflow) — owner/admin only. Deliberately
+// NOT extended to accounting_hod/finance — this is a step above day-to-day
+// bookkeeping access.
 router.post('/fiscal-periods/:id/close', requireRole(), async (req, res) => {
   try {
     const { period, journalEntry } = await ledger.closeFiscalPeriod(req.params.id, { closedBy: req.staff.id });
@@ -110,7 +112,7 @@ router.get('/accounts', async (req, res) => {
   }
 });
 
-router.post('/accounts', requireRole('finance'), async (req, res) => {
+router.post('/accounts', requireRole('finance', 'accounting_hod'), async (req, res) => {
   try {
     const { code, name, account_type, parent_id, is_group, description } = req.body;
     if (!code || !name || !account_type) {
@@ -129,7 +131,7 @@ router.post('/accounts', requireRole('finance'), async (req, res) => {
 });
 
 // ── manual journal entry ────────────────────────────────────────────────────
-router.post('/journal-entries', requireRole('finance'), async (req, res) => {
+router.post('/journal-entries', requireRole('finance', 'accounting_hod'), async (req, res) => {
   try {
     const { entry_date, narration, lines } = req.body;
     if (!entry_date || !Array.isArray(lines) || lines.length < 2) {
@@ -181,7 +183,7 @@ router.get('/journal-entries', async (req, res) => {
 });
 
 // ── reports ──────────────────────────────────────────────────────────────────
-router.get('/reports/trial-balance', requireRole('finance'), async (req, res) => {
+router.get('/reports/trial-balance', requireRole('finance', 'accounting_hod'), async (req, res) => {
   try {
     const report = await ledger.getTrialBalance(req.query.as_of || null);
     res.json(report);
@@ -191,7 +193,7 @@ router.get('/reports/trial-balance', requireRole('finance'), async (req, res) =>
   }
 });
 
-router.get('/reports/profit-and-loss', requireRole('finance'), async (req, res) => {
+router.get('/reports/profit-and-loss', requireRole('finance', 'accounting_hod'), async (req, res) => {
   try {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to query params are required (YYYY-MM-DD)' });
@@ -203,7 +205,7 @@ router.get('/reports/profit-and-loss', requireRole('finance'), async (req, res) 
   }
 });
 
-router.get('/reports/balance-sheet', requireRole('finance'), async (req, res) => {
+router.get('/reports/balance-sheet', requireRole('finance', 'accounting_hod'), async (req, res) => {
   try {
     const asOf = req.query.as_of || new Date().toISOString().slice(0, 10);
     const report = await ledger.getBalanceSheet(asOf);
@@ -215,7 +217,7 @@ router.get('/reports/balance-sheet', requireRole('finance'), async (req, res) =>
 });
 
 // Simple cash-flow / runway view — useful at <100 employee startup scale
-router.get('/reports/cashflow-runway', requireRole('finance'), async (req, res) => {
+router.get('/reports/cashflow-runway', requireRole('finance', 'accounting_hod'), async (req, res) => {
   try {
     const months = parseInt(req.query.months || '6', 10);
     const results = [];
@@ -260,7 +262,7 @@ router.get('/reports/cashflow-runway', requireRole('finance'), async (req, res) 
 // Monthly revenue trend split by Subscription vs Services revenue (our two
 // actual income accounts, 4100/4200), plus month-over-month growth. Built
 // directly off journal_lines so it always matches what's actually posted.
-router.get('/reports/revenue-growth', requireRole('finance'), async (req, res) => {
+router.get('/reports/revenue-growth', requireRole('finance', 'accounting_hod'), async (req, res) => {
   try {
     const months = Math.min(Math.max(parseInt(req.query.months || '12', 10), 1), 36);
 
@@ -318,7 +320,7 @@ router.get('/reports/revenue-growth', requireRole('finance'), async (req, res) =
 // CGST/SGST/IGST actually posted (output tax payable) for a date range —
 // what you'd hand to your CA for a GSTR filing. Pulled straight from the
 // ledger, not re-derived, so it's guaranteed to match the books.
-router.get('/reports/gst-summary', requireRole('finance'), async (req, res) => {
+router.get('/reports/gst-summary', requireRole('finance', 'accounting_hod'), async (req, res) => {
   try {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from and to query params are required (YYYY-MM-DD)' });

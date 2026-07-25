@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
-  Button, Dialog, DialogTitle, DialogContent, DialogActions, Grid, TextField, MenuItem, Alert,
+  Button, Dialog, DialogTitle, DialogContent, DialogActions, Grid, TextField, MenuItem, Alert, IconButton,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import client from '../api/client';
 import StatusChip from '../components/StatusChip';
 import Money from '../components/Money';
@@ -25,9 +26,20 @@ export default function Payroll() {
   const [disburseError, setDisburseError] = useState('');
   const [syncingRunId, setSyncingRunId] = useState(null);
 
+  // Add/remove employee on a draft run.
+  const [allEmployees, setAllEmployees] = useState([]);
+  const [addEmployeeOpen, setAddEmployeeOpen] = useState(false);
+  const [employeeToAdd, setEmployeeToAdd] = useState('');
+  const [addingEmployee, setAddingEmployee] = useState(false);
+  const [addEmployeeError, setAddEmployeeError] = useState('');
+  const [removingItemId, setRemovingItemId] = useState(null);
+
   const load = () => client.get('/payroll/runs').then(({ data }) => setRuns(data.payrollRuns || [])).catch(() => setRuns([]));
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    client.get('/employees', { params: { status: 'active' } }).then(({ data }) => setAllEmployees(data.employees || [])).catch(() => setAllEmployees([]));
+  }, []);
 
   const handleCreate = async () => {
     setSaving(true);
@@ -79,6 +91,47 @@ export default function Payroll() {
   const openDetail = async (id) => {
     const { data } = await client.get(`/payroll/runs/${id}`);
     setDetail(data);
+  };
+
+  // Only offer employees not already on this run — the backend would reject
+  // a duplicate anyway, but filtering here saves a wasted round trip.
+  const employeesNotOnRun = detail
+    ? allEmployees.filter((e) => !detail.items.some((it) => it.employee_id === e.id))
+    : [];
+
+  const openAddEmployee = () => {
+    setEmployeeToAdd('');
+    setAddEmployeeError('');
+    setAddEmployeeOpen(true);
+  };
+
+  const confirmAddEmployee = async () => {
+    setAddingEmployee(true);
+    setAddEmployeeError('');
+    try {
+      await client.post(`/payroll/runs/${detail.run.id}/items`, { employee_id: employeeToAdd });
+      setAddEmployeeOpen(false);
+      openDetail(detail.run.id);
+      load();
+    } catch (err) {
+      setAddEmployeeError(err.response?.data?.error || 'Failed to add employee to this run');
+    } finally {
+      setAddingEmployee(false);
+    }
+  };
+
+  const removeEmployee = async (itemId, employeeName) => {
+    if (!window.confirm(`Remove ${employeeName} from this payroll run?`)) return;
+    setRemovingItemId(itemId);
+    try {
+      await client.delete(`/payroll/runs/${detail.run.id}/items/${itemId}`);
+      openDetail(detail.run.id);
+      load();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to remove employee from this run');
+    } finally {
+      setRemovingItemId(null);
+    }
   };
 
   return (
@@ -140,13 +193,30 @@ export default function Payroll() {
         <Paper sx={{ p: 3, mt: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography sx={{ fontWeight: 600 }}>{MONTHS[detail.run.period_month - 1]} {detail.run.period_year} — breakdown</Typography>
-            <Button size="small" variant="outlined" onClick={() => window.open(`/api/payroll/runs/${detail.run.id}/payslips.zip`, '_blank')}>
-              Download all payslips (.zip)
-            </Button>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              {detail.run.status === 'draft' && (
+                <Button size="small" variant="outlined" startIcon={<AddIcon fontSize="small" />} onClick={openAddEmployee}>
+                  Add employee
+                </Button>
+              )}
+              <Button size="small" variant="outlined" onClick={() => window.open(`/api/payroll/runs/${detail.run.id}/payslips.zip`, '_blank')}>
+                Download all payslips (.zip)
+              </Button>
+            </Box>
           </Box>
+          {detail.run.status === 'draft' && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              This run is still a draft — you can add or remove employees until it's disbursed.
+            </Alert>
+          )}
           <Table size="small">
             <TableHead>
-              <TableRow><TableCell>Employee</TableCell><TableCell align="right">Gross</TableCell><TableCell align="right">PF</TableCell><TableCell align="right">PT</TableCell><TableCell align="right">LOP days</TableCell><TableCell align="right">Net</TableCell><TableCell>Status</TableCell><TableCell align="right">Payslip</TableCell></TableRow>
+              <TableRow>
+                <TableCell>Employee</TableCell><TableCell align="right">Gross</TableCell><TableCell align="right">PF</TableCell>
+                <TableCell align="right">PT</TableCell><TableCell align="right">LOP days</TableCell><TableCell align="right">Net</TableCell>
+                <TableCell>Status</TableCell><TableCell align="right">Payslip</TableCell>
+                {detail.run.status === 'draft' && <TableCell align="right"></TableCell>}
+              </TableRow>
             </TableHead>
             <TableBody>
               {detail.items.map((it) => (
@@ -166,6 +236,13 @@ export default function Payroll() {
                   <TableCell align="right">
                     <Button size="small" onClick={() => window.open(`/api/payroll/runs/${detail.run.id}/items/${it.id}/payslip.pdf`, '_blank')}>PDF</Button>
                   </TableCell>
+                  {detail.run.status === 'draft' && (
+                    <TableCell align="right">
+                      <IconButton size="small" disabled={removingItemId === it.id} onClick={() => removeEmployee(it.id, it.full_name)}>
+                        <DeleteOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
@@ -192,6 +269,26 @@ export default function Payroll() {
         <DialogActions>
           <Button onClick={() => setOpen(false)}>Cancel</Button>
           <Button variant="contained" onClick={handleCreate} disabled={saving}>{saving ? 'Creating…' : 'Create run'}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={addEmployeeOpen} onClose={() => setAddEmployeeOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Add employee to {detail && `${MONTHS[detail.run.period_month - 1]} ${detail.run.period_year}`}</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mb: 2 }}>
+            Computed the same way as everyone else on this run — attendance, CTC breakup, and statutory deductions all apply.
+          </Typography>
+          <TextField fullWidth select label="Employee" value={employeeToAdd} onChange={(e) => setEmployeeToAdd(e.target.value)}>
+            {employeesNotOnRun.map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
+            {!employeesNotOnRun.length && <MenuItem value="" disabled>Every active employee is already on this run</MenuItem>}
+          </TextField>
+          {addEmployeeError && <Alert severity="error" sx={{ mt: 2 }}>{addEmployeeError}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddEmployeeOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={confirmAddEmployee} disabled={addingEmployee || !employeeToAdd}>
+            {addingEmployee ? 'Adding…' : 'Add'}
+          </Button>
         </DialogActions>
       </Dialog>
 

@@ -3,16 +3,17 @@
 //
 // Backs the Marketing module's "Socials" portfolio page — one row per
 // social handle the company runs (Instagram, Twitter/X, LinkedIn, YouTube,
-// etc). Follower/following/post counts are manually maintained fields
-// (last_stats_update tracks when they were last refreshed) rather than
-// live-synced — wiring up each platform's API is a separate integration
-// per platform; ask if you want that added for a specific one.
+// etc). Follower/following/post counts are manually maintained by default
+// (last_stats_update tracks when they were last refreshed); POST /:id/sync
+// below pulls live numbers for instagram/twitter/youtube via each
+// platform's official API (see services/socialSync.js for setup/limits).
 
 const express = require('express');
 const router = express.Router();
 const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole, requireDepartmentHead } = require('../middleware/auth');
 const { logAction } = require('../services/auditLog');
+const { syncStatsForPlatform, isSyncable } = require('../services/socialSync');
 
 router.use(authenticate);
 
@@ -132,6 +133,61 @@ router.delete('/:id', requireRole('owner'), async (req, res) => {
     console.error('[marketing-social:delete]', err);
     res.status(500).json({ error: 'Failed to delete social account' });
   }
+});
+
+// ── live sync — pulls real follower/following/post counts ──────────────────
+router.post('/:id/sync', requireMarketingOrAdmin, async (req, res) => {
+  try {
+    const { rows: [account] } = await safeQuery(`SELECT * FROM marketing_social_accounts WHERE id = $1`, [req.params.id]);
+    if (!account) return res.status(404).json({ error: 'Social account not found' });
+    if (!isSyncable(account.platform)) {
+      return res.status(400).json({ error: `Live sync isn't available for ${account.platform} yet — only instagram, twitter, and youtube are wired up.` });
+    }
+
+    const stats = await syncStatsForPlatform(account.platform, account.handle);
+
+    const { rows: [updated] } = await safeQuery(
+      `UPDATE marketing_social_accounts
+       SET followers_count = $1, following_count = $2, posts_count = $3, last_stats_update = CURRENT_DATE, updated_at = NOW()
+       WHERE id = $4 RETURNING *`,
+      [stats.followers_count, stats.following_count, stats.posts_count, req.params.id]
+    );
+
+    await logAction({ staffId: req.staff.id, action: 'marketing_social.synced', entity: 'marketing_social_accounts', entityId: updated.id, newValue: stats });
+
+    res.json({ account: updated });
+  } catch (err) {
+    console.error('[marketing-social:sync]', err);
+    res.status(err.status || 500).json({ error: err.message || 'Failed to sync stats' });
+  }
+});
+
+// Sync every syncable account in one go — used by a "Sync all" button and
+// could later be called from a cron job.
+router.post('/sync-all', requireMarketingOrAdmin, async (req, res) => {
+  const { rows: accounts } = await safeQuery(
+    `SELECT * FROM marketing_social_accounts WHERE platform IN ('instagram','twitter','youtube') AND status = 'active'`
+  );
+
+  const results = [];
+  for (const account of accounts) {
+    try {
+      const stats = await syncStatsForPlatform(account.platform, account.handle);
+      await safeQuery(
+        `UPDATE marketing_social_accounts
+         SET followers_count = $1, following_count = $2, posts_count = $3, last_stats_update = CURRENT_DATE, updated_at = NOW()
+         WHERE id = $4`,
+        [stats.followers_count, stats.following_count, stats.posts_count, account.id]
+      );
+      results.push({ id: account.id, display_name: account.display_name, ok: true, stats });
+    } catch (err) {
+      results.push({ id: account.id, display_name: account.display_name, ok: false, error: err.message });
+    }
+  }
+
+  await logAction({ staffId: req.staff.id, action: 'marketing_social.sync_all', entity: 'marketing_social_accounts', newValue: { synced: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length } });
+
+  res.json({ results });
 });
 
 module.exports = router;

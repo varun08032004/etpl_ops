@@ -47,13 +47,18 @@ import MarketingEvents from './pages/MarketingEvents';
 import MarketingPress from './pages/MarketingPress';
 import MarketingNewsletter from './pages/MarketingNewsletter';
 import MarketingSeo from './pages/MarketingSeo';
+import MarketingBlog from './pages/MarketingBlog';
 import PartnershipFirms from './pages/PartnershipFirms';
 import PartnershipFollowUps from './pages/PartnershipFollowUps';
+import ProductRoadmap from './pages/ProductRoadmap';
+import ProductReleases from './pages/ProductReleases';
+import ProductFeedback from './pages/ProductFeedback';
+import ProductBetaUsers from './pages/ProductBetaUsers';
 
-// Widened to include legal_hod/compliance_hod/marketing_hod/partnerships_hod —
-// matches Layout.jsx's PRIVILEGED_ROLES, so those roles get Dashboard as
-// their home screen too instead of the self-service MyProfile view.
-const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'partnerships_hod'];
+// Widened to include legal_hod/compliance_hod/marketing_hod/sales_hod/
+// product_hod — matches Layout.jsx's PRIVILEGED_ROLES, so those roles get
+// Dashboard as their home screen too instead of the self-service MyProfile view.
+const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'sales_hod', 'product_hod', 'accounting_hod'];
 
 function ProtectedRoutes() {
   const { staff, loading } = useAuth();
@@ -83,6 +88,7 @@ export default function App() {
             <Route path="/sign/:token" element={<SignDocument />} />
             <Route element={<ProtectedRoutes />}>
               <Route path="/" element={<Home />} />
+              <Route path="/my-profile" element={<MyProfile />} />
               <Route path="/employees" element={<EmployeeList />} />
               <Route path="/employees/:id" element={<EmployeeDetail />} />
               <Route path="/invoices" element={<Invoices />} />
@@ -124,8 +130,13 @@ export default function App() {
               <Route path="/marketing/press" element={<MarketingPress />} />
               <Route path="/marketing/newsletter" element={<MarketingNewsletter />} />
               <Route path="/marketing/seo" element={<MarketingSeo />} />
+              <Route path="/marketing/blog" element={<MarketingBlog />} />
               <Route path="/partnerships/firms" element={<PartnershipFirms />} />
               <Route path="/partnerships/follow-ups" element={<PartnershipFollowUps />} />
+              <Route path="/product/roadmap" element={<ProductRoadmap />} />
+              <Route path="/product/releases" element={<ProductReleases />} />
+              <Route path="/product/feedback" element={<ProductFeedback />} />
+              <Route path="/product/beta-users" element={<ProductBetaUsers />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

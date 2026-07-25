@@ -17,7 +17,10 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 
 router.use(authenticate);
 
-const PARTNERSHIPS_DEPARTMENT_NAME = 'Partnerships';
+// Partnerships is now a TEAM under the Sales department (not its own
+// department) — gate on Sales department headship, same as everything
+// else that used to be its own dept but got folded into a parent.
+const PARTNERSHIPS_DEPARTMENT_NAME = 'Sales';
 function requirePartnershipsOrAdmin(req, res, next) {
   if (['owner', 'admin'].includes(req.staff.role)) return next();
   return requireDepartmentHead(PARTNERSHIPS_DEPARTMENT_NAME)(req, res, next);

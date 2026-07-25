@@ -5,6 +5,7 @@ const router = express.Router();
 const crypto = require('crypto');
 const { safeQuery, withTransaction } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { logAction } = require('../services/auditLog');
 const ledger = require('../services/ledger');
 const axisPayoutAdapter = require('../services/bankFeeds/axisPayoutAdapter');
 const { generatePayslipPDF } = require('../services/payslipGenerator'); // npm install pdfkit
@@ -174,6 +175,58 @@ async function generateAndPersistPayslip({ run, item, uploadedBy }) {
   return pdfBuffer;
 }
 
+// Shared by POST /runs (bulk, every eligible employee) and POST /runs/:id/items
+// (manually adding one employee to an existing draft run) — so there is only
+// ONE implementation of the statutory math anywhere in this file, rather than
+// a second, subtly-different copy of it living in the manual-add path.
+async function computePayrollItemForEmployee(client, emp, { month, year, monthStart, monthEnd, daysInMonth }) {
+  const { rows: [absStats] } = await client.query(
+    `SELECT COUNT(*) FILTER (WHERE status = 'absent') AS absent_days
+     FROM attendance_records WHERE employee_id = $1 AND work_date BETWEEN $2 AND $3`,
+    [emp.id, monthStart, monthEnd]
+  );
+  const lopDays = Number(absStats?.absent_days || 0);
+  const payableFraction = Math.max(0, (daysInMonth - lopDays) / daysInMonth);
+
+  const wageCap = compliance.apply50PercentWageCapRule({
+    basic: Number(emp.basic_monthly || 0) * payableFraction,
+    da: Number(emp.da_monthly || 0) * payableFraction,
+    otherAllowances: Number(emp.other_allowances_monthly || 0) * payableFraction,
+  });
+  const grossPay = Math.round((wageCap.adjustedBasic + wageCap.adjustedDA + wageCap.adjustedOtherAllowances) * 100) / 100;
+  const basicPlusDA = wageCap.adjustedBasic + wageCap.adjustedDA;
+
+  const epf = await compliance.calculateEPF({ basicPlusDA, pfApplicable: emp.pf_applicable !== false });
+  const esicApplicable = await compliance.isESICApplicable({ grossMonthly: grossPay, employeeOverride: emp.esic_applicable });
+  const esic = compliance.calculateESIC({ grossMonthly: grossPay, applicable: esicApplicable });
+  const pt = await compliance.calculatePT({ grossMonthly: grossPay, state: emp.state || process.env.COMPANY_STATE, month });
+
+  const { rows: ytdRows } = await client.query(
+    `SELECT COALESCE(SUM(pi.gross_pay),0) AS ytd_gross, COALESCE(SUM(pi.tds_deduction),0) AS ytd_tds
+     FROM payroll_items pi JOIN payroll_runs pr ON pr.id = pi.payroll_run_id
+     WHERE pi.employee_id = $1 AND pr.period_year = $2
+       AND ((pr.period_year = $2 AND pr.period_month >= 4) OR (pr.period_year = $2 + 1 AND pr.period_month < 4))
+       AND NOT (pr.period_month = $3 AND pr.period_year = $2)`,
+    [emp.id, month >= 4 ? year : year - 1, month]
+  );
+  const tdsResult = await compliance.projectMonthlyTDS({
+    employee: emp,
+    currentMonthGross: grossPay,
+    ytdGrossThisFY: Number(ytdRows[0]?.ytd_gross || 0),
+    ytdTDSThisFY: Number(ytdRows[0]?.ytd_tds || 0),
+    calendarMonth: month,
+    calendarYear: year,
+  });
+
+  const totalDeductionsForEmployee = epf.employeeContribution + esic.employeeDeduction + pt.amount + tdsResult.monthlyTDS;
+  const netPay = Math.round((grossPay - totalDeductionsForEmployee) * 100) / 100;
+
+  return {
+    basic: wageCap.adjustedBasic, da: wageCap.adjustedDA, otherAllowances: wageCap.adjustedOtherAllowances,
+    grossPay, epf, esic, pt, tdsResult, lopDays, totalDeductionsForEmployee, netPay,
+  };
+}
+
 // ── create a draft payroll run for a month, computed from attendance + full statutory compliance ──
 router.post('/runs', requireRole('finance'), async (req, res) => {
   try {
@@ -189,7 +242,6 @@ router.post('/runs', requireRole('finance'), async (req, res) => {
     const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
     const daysInMonth = new Date(year, month, 0).getDate();
     const monthEnd = `${year}-${String(month).padStart(2, '0')}-${daysInMonth}`;
-    const fiscalYear = compliance.currentFiscalYearLabel(month, year);
 
     const run = await withTransaction(async (client) => {
       const { rows: [payrollRun] } = await client.query(
@@ -200,59 +252,20 @@ router.post('/runs', requireRole('finance'), async (req, res) => {
       let totalGross = 0, totalDeductions = 0, totalNet = 0;
 
       for (const emp of employees) {
-        const { rows: [absStats] } = await client.query(
-          `SELECT COUNT(*) FILTER (WHERE status = 'absent') AS absent_days
-           FROM attendance_records WHERE employee_id = $1 AND work_date BETWEEN $2 AND $3`,
-          [emp.id, monthStart, monthEnd]
-        );
-        const lopDays = Number(absStats?.absent_days || 0);
-        const payableFraction = Math.max(0, (daysInMonth - lopDays) / daysInMonth);
+        const calc = await computePayrollItemForEmployee(client, emp, { month, year, monthStart, monthEnd, daysInMonth });
 
-        const wageCap = compliance.apply50PercentWageCapRule({
-          basic: Number(emp.basic_monthly || 0) * payableFraction,
-          da: Number(emp.da_monthly || 0) * payableFraction,
-          otherAllowances: Number(emp.other_allowances_monthly || 0) * payableFraction,
-        });
-        const grossPay = Math.round((wageCap.adjustedBasic + wageCap.adjustedDA + wageCap.adjustedOtherAllowances) * 100) / 100;
-        const basicPlusDA = wageCap.adjustedBasic + wageCap.adjustedDA;
-
-        const epf = await compliance.calculateEPF({ basicPlusDA, pfApplicable: emp.pf_applicable !== false });
-        const esicApplicable = await compliance.isESICApplicable({ grossMonthly: grossPay, employeeOverride: emp.esic_applicable });
-        const esic = compliance.calculateESIC({ grossMonthly: grossPay, applicable: esicApplicable });
-        const pt = await compliance.calculatePT({ grossMonthly: grossPay, state: emp.state || process.env.COMPANY_STATE, month });
-
-        const { rows: ytdRows } = await client.query(
-          `SELECT COALESCE(SUM(pi.gross_pay),0) AS ytd_gross, COALESCE(SUM(pi.tds_deduction),0) AS ytd_tds
-           FROM payroll_items pi JOIN payroll_runs pr ON pr.id = pi.payroll_run_id
-           WHERE pi.employee_id = $1 AND pr.period_year = $2
-             AND ((pr.period_year = $2 AND pr.period_month >= 4) OR (pr.period_year = $2 + 1 AND pr.period_month < 4))
-             AND NOT (pr.period_month = $3 AND pr.period_year = $2)`,
-          [emp.id, month >= 4 ? year : year - 1, month]
-        );
-        const tdsResult = await compliance.projectMonthlyTDS({
-          employee: emp,
-          currentMonthGross: grossPay,
-          ytdGrossThisFY: Number(ytdRows[0]?.ytd_gross || 0),
-          ytdTDSThisFY: Number(ytdRows[0]?.ytd_tds || 0),
-          calendarMonth: month,
-          calendarYear: year,
-        });
-
-        const totalDeductionsForEmployee = epf.employeeContribution + esic.employeeDeduction + pt.amount + tdsResult.monthlyTDS;
-        const netPay = Math.round((grossPay - totalDeductionsForEmployee) * 100) / 100;
-
-        totalGross += grossPay;
-        totalDeductions += totalDeductionsForEmployee;
-        totalNet += netPay;
+        totalGross += calc.grossPay;
+        totalDeductions += calc.totalDeductionsForEmployee;
+        totalNet += calc.netPay;
 
         await client.query(
           `INSERT INTO payroll_items (payroll_run_id, employee_id, basic, hra, other_allowances, da_amount, gross_pay,
              pf_deduction, epf_employer_contribution, esic_employee_deduction, esic_employer_contribution,
              professional_tax, tds_deduction, loss_of_pay_days, net_pay, status)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending')`,
-          [payrollRun.id, emp.id, wageCap.adjustedBasic, 0, wageCap.adjustedOtherAllowances, wageCap.adjustedDA, grossPay,
-           epf.employeeContribution, epf.employerContribution, esic.employeeDeduction, esic.employerContribution,
-           pt.amount, tdsResult.monthlyTDS, lopDays, netPay]
+          [payrollRun.id, emp.id, calc.basic, 0, calc.otherAllowances, calc.da, calc.grossPay,
+           calc.epf.employeeContribution, calc.epf.employerContribution, calc.esic.employeeDeduction, calc.esic.employerContribution,
+           calc.pt.amount, calc.tdsResult.monthlyTDS, calc.lopDays, calc.netPay]
         );
       }
 
@@ -268,6 +281,105 @@ router.post('/runs', requireRole('finance'), async (req, res) => {
     console.error('[payroll:create-run]', err);
     if (err.code === '23505') return res.status(409).json({ error: 'Payroll run already exists for this month' });
     res.status(500).json({ error: err.message || 'Failed to create payroll run' });
+  }
+});
+
+// ── manually add one employee to an existing DRAFT run ─────────────────────
+// For someone missed by the bulk run (e.g. a contractor being paid this one
+// cycle, or someone whose status changed after the run was created). Uses
+// the exact same calculation as bulk creation above.
+router.post('/runs/:id/items', requireRole('finance'), async (req, res) => {
+  try {
+    const { employee_id } = req.body;
+    if (!employee_id) return res.status(400).json({ error: 'employee_id is required' });
+
+    const { rows: [run] } = await safeQuery(`SELECT * FROM payroll_runs WHERE id = $1`, [req.params.id]);
+    if (!run) return res.status(404).json({ error: 'Payroll run not found' });
+    if (run.status !== 'draft') {
+      return res.status(400).json({ error: `Cannot modify a run that is already "${run.status}" — only draft runs can be edited` });
+    }
+
+    const { rows: [existing] } = await safeQuery(
+      `SELECT id FROM payroll_items WHERE payroll_run_id = $1 AND employee_id = $2`,
+      [req.params.id, employee_id]
+    );
+    if (existing) return res.status(409).json({ error: 'This employee is already on this payroll run' });
+
+    const { rows: [emp] } = await safeQuery(`SELECT * FROM employees WHERE id = $1`, [employee_id]);
+    if (!emp) return res.status(404).json({ error: 'Employee not found' });
+
+    const month = run.period_month, year = run.period_year;
+    const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const monthEnd = `${year}-${String(month).padStart(2, '0')}-${daysInMonth}`;
+
+    const updatedRun = await withTransaction(async (client) => {
+      const calc = await computePayrollItemForEmployee(client, emp, { month, year, monthStart, monthEnd, daysInMonth });
+
+      await client.query(
+        `INSERT INTO payroll_items (payroll_run_id, employee_id, basic, hra, other_allowances, da_amount, gross_pay,
+           pf_deduction, epf_employer_contribution, esic_employee_deduction, esic_employer_contribution,
+           professional_tax, tds_deduction, loss_of_pay_days, net_pay, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending')`,
+        [req.params.id, emp.id, calc.basic, 0, calc.otherAllowances, calc.da, calc.grossPay,
+         calc.epf.employeeContribution, calc.epf.employerContribution, calc.esic.employeeDeduction, calc.esic.employerContribution,
+         calc.pt.amount, calc.tdsResult.monthlyTDS, calc.lopDays, calc.netPay]
+      );
+
+      const { rows: [updated] } = await client.query(
+        `UPDATE payroll_runs SET total_gross = total_gross + $1, total_deductions = total_deductions + $2, total_net = total_net + $3 WHERE id = $4 RETURNING *`,
+        [calc.grossPay, calc.totalDeductionsForEmployee, calc.netPay, req.params.id]
+      );
+      return updated;
+    });
+
+    await logAction({
+      staffId: req.staff.id, action: 'payroll_item.added', entity: 'payroll_runs', entityId: req.params.id,
+      newValue: { employee_id, full_name: emp.full_name, gross_pay: updatedRun.total_gross },
+    });
+
+    res.status(201).json({ payrollRun: updatedRun });
+  } catch (err) {
+    console.error('[payroll:add-item]', err);
+    res.status(500).json({ error: err.message || 'Failed to add employee to payroll run' });
+  }
+});
+
+// ── remove one employee from an existing DRAFT run ──────────────────────────
+router.delete('/runs/:runId/items/:itemId', requireRole('finance'), async (req, res) => {
+  try {
+    const { rows: [run] } = await safeQuery(`SELECT * FROM payroll_runs WHERE id = $1`, [req.params.runId]);
+    if (!run) return res.status(404).json({ error: 'Payroll run not found' });
+    if (run.status !== 'draft') {
+      return res.status(400).json({ error: `Cannot modify a run that is already "${run.status}" — only draft runs can be edited` });
+    }
+
+    const { rows: [item] } = await safeQuery(
+      `SELECT pi.*, e.full_name FROM payroll_items pi JOIN employees e ON e.id = pi.employee_id WHERE pi.id = $1 AND pi.payroll_run_id = $2`,
+      [req.params.itemId, req.params.runId]
+    );
+    if (!item) return res.status(404).json({ error: 'Payroll item not found on this run' });
+
+    const totalItemDeductions = Number(item.pf_deduction) + Number(item.esic_employee_deduction || 0) + Number(item.professional_tax) + Number(item.tds_deduction);
+
+    const updatedRun = await withTransaction(async (client) => {
+      await client.query(`DELETE FROM payroll_items WHERE id = $1`, [req.params.itemId]);
+      const { rows: [updated] } = await client.query(
+        `UPDATE payroll_runs SET total_gross = total_gross - $1, total_deductions = total_deductions - $2, total_net = total_net - $3 WHERE id = $4 RETURNING *`,
+        [item.gross_pay, totalItemDeductions, item.net_pay, req.params.runId]
+      );
+      return updated;
+    });
+
+    await logAction({
+      staffId: req.staff.id, action: 'payroll_item.removed', entity: 'payroll_runs', entityId: req.params.runId,
+      oldValue: { employee_id: item.employee_id, full_name: item.full_name, gross_pay: item.gross_pay, net_pay: item.net_pay },
+    });
+
+    res.json({ payrollRun: updatedRun });
+  } catch (err) {
+    console.error('[payroll:remove-item]', err);
+    res.status(500).json({ error: err.message || 'Failed to remove employee from payroll run' });
   }
 });
 
