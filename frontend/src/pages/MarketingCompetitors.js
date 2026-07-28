@@ -1,33 +1,128 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Grid, Button, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, MenuItem, Alert, Chip, IconButton, Tooltip,
+  TextField, MenuItem, Alert, Chip, IconButton, Tooltip, Tabs, Tab, Divider,
+  Table, TableHead, TableRow, TableCell, TableBody,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/EditOutlined';
 import DeleteIcon from '@mui/icons-material/DeleteOutline';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import StarIcon from '@mui/icons-material/Star';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
-const TIER_COLOR = { direct: 'error', indirect: 'warning', adjacent: 'default' };
+const CAP_OPTIONS = ['✅', '❌', '⚠️', 'N'];
+const REGION_LABEL = { india: '🇮🇳 India', global: '🌍 Global' };
 
-const emptyForm = { name: '', website: '', tier: 'direct', pricing_notes: '', strengths: '', weaknesses: '', last_reviewed_date: '', notes: '' };
+const emptyForm = {
+  company_name: '', region: 'india', is_featured: false, website: '', last_reviewed_date: '', notes: '',
+  country: '', hq_city: '', founded: '', funding_verified: '', team_size_verified: '', dev_stage: '', ceo_founders: '', overview_source: '',
+  cap_scope1: '', cap_scope2: '', cap_scope3: '', cap_supplier_portal: '', cap_ghg_inventory: '', cap_brsr: '', cap_cdp: '', cap_tcfd: '', cap_ccts: '', cap_audit_trail: '', capability_source_notes: '',
+  market_marketplace: '', market_credit_issuance: '', market_trading: '', market_retirement: '', market_registry_integration: '', market_tokenisation: '', market_blockchain_audit: '', market_onchain_settlement: '', market_source_notes: '',
+  pricing_model: '', pricing_type: '', est_price_range: '', free_trial: '', implementation_support: '', consulting_support: '', india_presence: '', commercial_source_notes: '',
+  target_customer: '', gtm_model: '', key_partners: '', audit_firm_alignment: '', govt_regulatory_alignment: '', investor_backed: '', international_expansion: '', strategic_notes: '',
+  customer_count: '', case_studies_published: '', testimonials_reviews: '', known_clients: '', industry_verticals: '', trust_signal: '', customer_proof_source_notes: '',
+};
+
+// One entry per Excel sheet — column order matches the source workbook
+// exactly (Company first, then left-to-right as it appeared in the sheet).
+const VIEW_SECTIONS = [
+  {
+    label: 'Company Overview',
+    columns: [
+      { key: 'country', label: 'Country' }, { key: 'hq_city', label: 'HQ City' }, { key: 'founded', label: 'Founded' },
+      { key: 'funding_verified', label: 'Funding (Verified)', wide: true }, { key: 'team_size_verified', label: 'Team Size (Verified)', wide: true },
+      { key: 'dev_stage', label: 'Dev Stage' }, { key: 'ceo_founders', label: 'CEO / Founders', wide: true }, { key: 'overview_source', label: 'Source', wide: true },
+      { key: 'website', label: 'Website', link: true },
+    ],
+  },
+  {
+    label: 'Product Capability',
+    columns: [
+      { key: 'cap_scope1', label: 'Scope 1', cap: true }, { key: 'cap_scope2', label: 'Scope 2', cap: true }, { key: 'cap_scope3', label: 'Scope 3', cap: true },
+      { key: 'cap_supplier_portal', label: 'Supplier Portal', cap: true }, { key: 'cap_ghg_inventory', label: 'GHG Inventory', cap: true },
+      { key: 'cap_brsr', label: 'BRSR', cap: true }, { key: 'cap_cdp', label: 'CDP', cap: true }, { key: 'cap_tcfd', label: 'TCFD', cap: true },
+      { key: 'cap_ccts', label: 'CCTS', cap: true }, { key: 'cap_audit_trail', label: 'Audit Trail', cap: true },
+      { key: 'capability_source_notes', label: 'Source Notes', wide: true },
+    ],
+  },
+  {
+    label: 'Carbon Market',
+    columns: [
+      { key: 'market_marketplace', label: 'Marketplace', cap: true }, { key: 'market_credit_issuance', label: 'Credit Issuance', cap: true },
+      { key: 'market_trading', label: 'Trading', cap: true }, { key: 'market_retirement', label: 'Retirement', cap: true },
+      { key: 'market_registry_integration', label: 'Registry Integration', cap: true }, { key: 'market_tokenisation', label: 'Tokenisation', cap: true },
+      { key: 'market_blockchain_audit', label: 'Blockchain Audit', cap: true }, { key: 'market_onchain_settlement', label: 'On-chain Settlement', cap: true },
+      { key: 'market_source_notes', label: 'Source Notes', wide: true },
+    ],
+  },
+  {
+    label: 'Commercial Analysis',
+    columns: [
+      { key: 'pricing_model', label: 'Pricing Model' }, { key: 'pricing_type', label: 'Pricing Type' },
+      { key: 'est_price_range', label: 'Est. Price Range', wide: true }, { key: 'free_trial', label: 'Free Trial' },
+      { key: 'implementation_support', label: 'Implementation Support', wide: true }, { key: 'consulting_support', label: 'Consulting Support', wide: true },
+      { key: 'india_presence', label: 'India Presence', wide: true }, { key: 'commercial_source_notes', label: 'Source Notes', wide: true },
+    ],
+  },
+  {
+    label: 'Strategic Analysis',
+    columns: [
+      { key: 'target_customer', label: 'Target Customer', wide: true }, { key: 'gtm_model', label: 'GTM Model', wide: true },
+      { key: 'key_partners', label: 'Key Partners', wide: true }, { key: 'audit_firm_alignment', label: 'Audit Firm Alignment', wide: true },
+      { key: 'govt_regulatory_alignment', label: 'Govt/Regulatory Alignment', wide: true }, { key: 'investor_backed', label: 'Investor Backed', wide: true },
+      { key: 'international_expansion', label: 'International Expansion', wide: true }, { key: 'strategic_notes', label: 'Strategic Notes', wide: true },
+    ],
+  },
+  {
+    label: 'Customer Proof',
+    columns: [
+      { key: 'customer_count', label: 'Customer Count' }, { key: 'case_studies_published', label: 'Case Studies Published', wide: true },
+      { key: 'testimonials_reviews', label: 'Testimonials/Reviews', wide: true }, { key: 'known_clients', label: 'Known Clients', wide: true },
+      { key: 'industry_verticals', label: 'Industry Verticals', wide: true }, { key: 'trust_signal', label: 'Trust Signal', wide: true },
+      { key: 'customer_proof_source_notes', label: 'Source Notes', wide: true },
+    ],
+  },
+];
+
+function CapCell({ value }) {
+  const color = value === '✅' ? 'success.main' : value === '⚠️' ? 'warning.main' : value === '❌' ? 'error.main' : 'text.disabled';
+  return <Typography component="span" sx={{ color, fontSize: '0.95rem' }}>{value || '—'}</Typography>;
+}
+
+function Section({ title, children }) {
+  return (
+    <Box sx={{ mb: 3 }}>
+      <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em', mb: 1.5 }}>
+        {title}
+      </Typography>
+      <Grid container spacing={2}>{children}</Grid>
+    </Box>
+  );
+}
 
 export default function MarketingCompetitors() {
   const { staff } = useAuth();
   const [isMarketingHead, setIsMarketingHead] = useState(false);
+  // Per request: add/edit/delete allowed for admin, Marketing HOD, and founder (owner) only.
   const canEdit = ['owner', 'admin'].includes(staff?.role) || isMarketingHead;
 
   const [competitors, setCompetitors] = useState([]);
+  const [regionFilter, setRegionFilter] = useState('');
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [tab, setTab] = useState(0);
+  const [viewTab, setViewTab] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const load = () => client.get('/marketing/competitors').then(({ data }) => setCompetitors(data.competitors)).catch(() => setCompetitors([]));
-  useEffect(() => { load(); }, []);
+  const load = () => {
+    const params = regionFilter ? { region: regionFilter } : {};
+    client.get('/marketing/competitors', { params }).then(({ data }) => setCompetitors(data.competitors)).catch(() => setCompetitors([]));
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [regionFilter]);
 
   useEffect(() => {
     if (['owner', 'admin'].includes(staff?.role)) return;
@@ -39,17 +134,16 @@ export default function MarketingCompetitors() {
       .catch(() => setIsMarketingHead(false));
   }, [staff?.role]);
 
-  const openCreate = () => { setEditingId(null); setForm(emptyForm); setError(''); setOpen(true); };
+  const openCreate = () => { setEditingId(null); setForm(emptyForm); setTab(0); setError(''); setOpen(true); };
   const openEdit = (c) => {
     setEditingId(c.id);
-    setForm({
-      name: c.name, website: c.website || '', tier: c.tier, pricing_notes: c.pricing_notes || '',
-      strengths: c.strengths || '', weaknesses: c.weaknesses || '',
-      last_reviewed_date: c.last_reviewed_date?.slice(0, 10) || '', notes: c.notes || '',
-    });
+    setForm({ ...emptyForm, ...c, last_reviewed_date: c.last_reviewed_date?.slice(0, 10) || '' });
+    setTab(0);
     setError('');
     setOpen(true);
   };
+
+  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
 
   const handleSave = async () => {
     setSaving(true);
@@ -67,10 +161,24 @@ export default function MarketingCompetitors() {
   };
 
   const handleDelete = async (c) => {
-    if (!window.confirm(`Delete "${c.name}"? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete "${c.company_name}"? This cannot be undone.`)) return;
     await client.delete(`/marketing/competitors/${c.id}`);
     load();
   };
+
+  const capField = (label, key) => (
+    <Grid item xs={6} sm={4} md={3}>
+      <TextField fullWidth select size="small" label={label} value={form[key] || ''} onChange={set(key)}>
+        <MenuItem value="">—</MenuItem>
+        {CAP_OPTIONS.map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
+      </TextField>
+    </Grid>
+  );
+  const textField = (label, key, opts = {}) => (
+    <Grid item xs={12} sm={opts.full ? 12 : 6}>
+      <TextField fullWidth size="small" label={label} value={form[key] || ''} onChange={set(key)} multiline={opts.multiline} rows={opts.multiline ? 2 : undefined} />
+    </Grid>
+  );
 
   return (
     <Box>
@@ -78,63 +186,249 @@ export default function MarketingCompetitors() {
         <Box>
           <Typography variant="h5">Competitors</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
-            Other players in CCTS/BRSR/ESG compliance software — pricing, positioning, and how EtherTrack stacks up.
+            Full competitive intelligence — company overview, product capability, carbon market, commercial, strategic, and customer proof.
           </Typography>
         </Box>
         {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add competitor</Button>}
       </Box>
 
-      <Grid container spacing={2}>
-        {competitors.map((c) => (
-          <Grid item xs={12} sm={6} md={4} key={c.id}>
-            <Paper sx={{ p: 2.5, height: '100%', display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Typography sx={{ fontWeight: 700, fontSize: '0.95rem', flex: 1 }} noWrap>{c.name}</Typography>
-                <Chip size="small" label={c.tier} color={TIER_COLOR[c.tier]} sx={{ textTransform: 'capitalize' }} />
-              </Box>
-              {c.pricing_notes && <Typography sx={{ fontSize: '0.78rem' }}><strong>Pricing:</strong> {c.pricing_notes}</Typography>}
-              {c.strengths && <Typography sx={{ fontSize: '0.78rem', color: 'success.main' }}><strong>Strengths:</strong> {c.strengths}</Typography>}
-              {c.weaknesses && <Typography sx={{ fontSize: '0.78rem', color: 'error.main' }}><strong>Weaknesses:</strong> {c.weaknesses}</Typography>}
-              {c.last_reviewed_date && <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>Last reviewed {c.last_reviewed_date.slice(0, 10)}</Typography>}
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 'auto', pt: 1 }}>
-                {c.website ? (
-                  <Button size="small" endIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />} href={c.website} target="_blank" rel="noopener noreferrer">Website</Button>
-                ) : <span />}
-                {canEdit && (
-                  <Box>
-                    <Tooltip title="Edit"><IconButton size="small" onClick={() => openEdit(c)}><EditIcon sx={{ fontSize: 18 }} /></IconButton></Tooltip>
-                    <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => handleDelete(c)}><DeleteIcon sx={{ fontSize: 18 }} /></IconButton></Tooltip>
-                  </Box>
-                )}
-              </Box>
-            </Paper>
-          </Grid>
-        ))}
-        {!competitors.length && (
-          <Grid item xs={12}><Paper sx={{ p: 4, textAlign: 'center', color: 'text.secondary' }}>No competitors tracked yet.</Paper></Grid>
-        )}
-      </Grid>
+      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 3, flexWrap: 'wrap' }}>
+        <TextField select size="small" label="Filter region" value={regionFilter} onChange={(e) => setRegionFilter(e.target.value)} sx={{ minWidth: 200 }}>
+          <MenuItem value="">All regions</MenuItem>
+          <MenuItem value="india">🇮🇳 India</MenuItem>
+          <MenuItem value="global">🌍 Global</MenuItem>
+        </TextField>
+        <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>
+          {competitors.length} compan{competitors.length === 1 ? 'y' : 'ies'} tracked
+        </Typography>
+      </Box>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>{editingId ? 'Edit' : 'Add'} competitor</DialogTitle>
+      <Tabs
+        value={viewTab} onChange={(e, v) => setViewTab(v)} variant="scrollable" scrollButtons="auto"
+        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider', '& .MuiTab-root': { fontSize: '0.85rem', fontWeight: 600, px: 3, py: 1.5 } }}
+      >
+        {VIEW_SECTIONS.map((s) => <Tab key={s.label} label={s.label} />)}
+      </Tabs>
+
+      <Paper
+        variant="outlined"
+        sx={{
+          width: '100%', overflowX: 'auto', borderRadius: 2,
+          '&::-webkit-scrollbar': { height: 12 },
+          '&::-webkit-scrollbar-track': { bgcolor: 'action.hover', borderRadius: 6 },
+          '&::-webkit-scrollbar-thumb': { bgcolor: 'text.disabled', borderRadius: 6, border: '3px solid transparent', backgroundClip: 'content-box' },
+          '&::-webkit-scrollbar-thumb:hover': { bgcolor: 'text.secondary' },
+          scrollbarWidth: 'auto',
+        }}
+      >
+        <Table sx={{ minWidth: 1400, borderCollapse: 'separate', borderSpacing: 0 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell
+                sx={{
+                  fontWeight: 700, fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.03em',
+                  position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 3, minWidth: 240,
+                  borderRight: '2px solid', borderColor: 'divider', py: 2, px: 2.5,
+                }}
+              >
+                Company
+              </TableCell>
+              {VIEW_SECTIONS[viewTab].columns.map((col) => (
+                <TableCell
+                  key={col.key}
+                  sx={{
+                    fontWeight: 700, fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.03em',
+                    minWidth: col.wide ? 320 : col.cap ? 130 : 190, py: 2, px: 2.5, whiteSpace: 'nowrap',
+                  }}
+                >
+                  {col.label}
+                </TableCell>
+              ))}
+              <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.03em', py: 2, px: 2.5, minWidth: 130 }}>
+                Action
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {competitors.map((c, i) => (
+              <TableRow key={c.id} hover sx={{ bgcolor: i % 2 === 0 ? 'transparent' : 'action.hover' }}>
+                <TableCell
+                  sx={{
+                    position: 'sticky', left: 0, bgcolor: i % 2 === 0 ? 'background.paper' : 'background.default',
+                    zIndex: 2, borderRight: '2px solid', borderColor: 'divider', py: 1.75, px: 2.5,
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    {c.is_featured && <StarIcon sx={{ fontSize: 16, color: 'warning.main' }} />}
+                    <Typography sx={{ fontWeight: 600, fontSize: '0.85rem' }}>{c.company_name}</Typography>
+                  </Box>
+                  <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', mt: 0.25 }}>{REGION_LABEL[c.region]}</Typography>
+                </TableCell>
+                {VIEW_SECTIONS[viewTab].columns.map((col) => (
+                  <TableCell
+                    key={col.key}
+                    sx={{
+                      fontSize: '0.8rem', py: 1.75, px: 2.5, lineHeight: 1.6,
+                      maxWidth: col.wide ? 380 : 220,
+                      ...(col.wide
+                        ? { whiteSpace: 'normal', wordBreak: 'break-word' }
+                        : { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }),
+                    }}
+                    title={!col.wide && !col.cap && !col.link ? (c[col.key] || '') : undefined}
+                  >
+                    {col.cap ? (
+                      <CapCell value={c[col.key]} />
+                    ) : col.link && c[col.key] ? (
+                      <Button size="small" endIcon={<OpenInNewIcon sx={{ fontSize: 12 }} />} href={c[col.key]} target="_blank" rel="noopener noreferrer" sx={{ p: 0, minWidth: 0, fontSize: '0.78rem' }}>
+                        Visit
+                      </Button>
+                    ) : (c[col.key] || '—')}
+                  </TableCell>
+                ))}
+                <TableCell align="right" sx={{ py: 1.75, px: 2.5, whiteSpace: 'nowrap' }}>
+                  <Button size="small" onClick={() => openEdit(c)}>{canEdit ? 'Edit' : 'View'}</Button>
+                  {canEdit && (
+                    <Tooltip title="Delete">
+                      <IconButton size="small" color="error" onClick={() => handleDelete(c)}><DeleteIcon sx={{ fontSize: 16 }} /></IconButton>
+                    </Tooltip>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+            {!competitors.length && (
+              <TableRow>
+                <TableCell colSpan={VIEW_SECTIONS[viewTab].columns.length + 2} sx={{ textAlign: 'center', py: 6, color: 'text.secondary' }}>
+                  No competitors tracked yet.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </Paper>
+
+      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>{editingId ? (canEdit ? 'Edit' : 'View') : 'Add'} competitor</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="Name" margin="normal" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <TextField fullWidth label="Website" margin="normal" value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} />
-          <TextField fullWidth select label="Tier" margin="normal" value={form.tier} onChange={(e) => setForm({ ...form, tier: e.target.value })}>
-            <MenuItem value="direct">Direct</MenuItem>
-            <MenuItem value="indirect">Indirect</MenuItem>
-            <MenuItem value="adjacent">Adjacent</MenuItem>
-          </TextField>
-          <TextField fullWidth label="Pricing notes" margin="normal" multiline rows={2} value={form.pricing_notes} onChange={(e) => setForm({ ...form, pricing_notes: e.target.value })} />
-          <TextField fullWidth label="Strengths" margin="normal" multiline rows={2} value={form.strengths} onChange={(e) => setForm({ ...form, strengths: e.target.value })} />
-          <TextField fullWidth label="Weaknesses" margin="normal" multiline rows={2} value={form.weaknesses} onChange={(e) => setForm({ ...form, weaknesses: e.target.value })} />
-          <TextField fullWidth type="date" label="Last reviewed" InputLabelProps={{ shrink: true }} margin="normal" value={form.last_reviewed_date} onChange={(e) => setForm({ ...form, last_reviewed_date: e.target.value })} />
-          <TextField fullWidth label="Notes" margin="normal" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
+            <TextField fullWidth label="Company name" size="small" margin="normal" value={form.company_name} onChange={set('company_name')} disabled={!canEdit} />
+            <TextField fullWidth select label="Region" size="small" margin="normal" value={form.region} onChange={set('region')} disabled={!canEdit} sx={{ minWidth: 160 }}>
+              <MenuItem value="india">🇮🇳 India</MenuItem>
+              <MenuItem value="global">🌍 Global</MenuItem>
+            </TextField>
+            <TextField fullWidth select label="Featured" size="small" margin="normal" value={form.is_featured ? 'yes' : 'no'} onChange={(e) => setForm({ ...form, is_featured: e.target.value === 'yes' })} disabled={!canEdit} sx={{ minWidth: 130 }}>
+              <MenuItem value="no">No</MenuItem>
+              <MenuItem value="yes">⭐ Yes</MenuItem>
+            </TextField>
+          </Box>
+
+          <Tabs value={tab} onChange={(e, v) => setTab(v)} variant="scrollable" scrollButtons="auto" sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
+            <Tab label="Overview" />
+            <Tab label="Product Capability" />
+            <Tab label="Carbon Market" />
+            <Tab label="Commercial" />
+            <Tab label="Strategic" />
+            <Tab label="Customer Proof" />
+          </Tabs>
+
+          <fieldset disabled={!canEdit} style={{ border: 'none', padding: 0, margin: 0 }}>
+            {tab === 0 && (
+              <Section title="Company Overview">
+                {textField('Country', 'country')}
+                {textField('HQ City', 'hq_city')}
+                {textField('Founded', 'founded')}
+                {textField('Dev Stage', 'dev_stage')}
+                {textField('Funding (verified)', 'funding_verified', { multiline: true, full: true })}
+                {textField('Team size (verified)', 'team_size_verified', { multiline: true, full: true })}
+                {textField('CEO / Founders', 'ceo_founders', { full: true })}
+                {textField('Source', 'overview_source', { multiline: true, full: true })}
+                {textField('Website', 'website')}
+                <Grid item xs={12} sm={6}>
+                  <TextField fullWidth size="small" type="date" label="Last reviewed" InputLabelProps={{ shrink: true }} value={form.last_reviewed_date} onChange={set('last_reviewed_date')} />
+                </Grid>
+              </Section>
+            )}
+
+            {tab === 1 && (
+              <Section title="Product Capability">
+                {capField('Scope 1', 'cap_scope1')}
+                {capField('Scope 2', 'cap_scope2')}
+                {capField('Scope 3', 'cap_scope3')}
+                {capField('Supplier Portal', 'cap_supplier_portal')}
+                {capField('GHG Inventory', 'cap_ghg_inventory')}
+                {capField('BRSR', 'cap_brsr')}
+                {capField('CDP', 'cap_cdp')}
+                {capField('TCFD', 'cap_tcfd')}
+                {capField('CCTS', 'cap_ccts')}
+                {capField('Audit Trail', 'cap_audit_trail')}
+                {textField('Source notes', 'capability_source_notes', { multiline: true, full: true })}
+              </Section>
+            )}
+
+            {tab === 2 && (
+              <Section title="Carbon Market Capability">
+                {capField('Marketplace', 'market_marketplace')}
+                {capField('Credit Issuance', 'market_credit_issuance')}
+                {capField('Trading', 'market_trading')}
+                {capField('Retirement', 'market_retirement')}
+                {capField('Registry Integration', 'market_registry_integration')}
+                {capField('Tokenisation', 'market_tokenisation')}
+                {capField('Blockchain Audit', 'market_blockchain_audit')}
+                {capField('On-chain Settlement', 'market_onchain_settlement')}
+                {textField('Source notes', 'market_source_notes', { multiline: true, full: true })}
+              </Section>
+            )}
+
+            {tab === 3 && (
+              <Section title="Commercial Analysis">
+                {textField('Pricing model', 'pricing_model')}
+                {textField('Pricing type', 'pricing_type')}
+                {textField('Est. price range', 'est_price_range', { full: true })}
+                {textField('Free trial', 'free_trial')}
+                {textField('India presence', 'india_presence')}
+                {textField('Implementation support', 'implementation_support', { multiline: true, full: true })}
+                {textField('Consulting support', 'consulting_support', { multiline: true, full: true })}
+                {textField('Source notes', 'commercial_source_notes', { multiline: true, full: true })}
+              </Section>
+            )}
+
+            {tab === 4 && (
+              <Section title="Strategic Analysis">
+                {textField('Target customer', 'target_customer', { multiline: true, full: true })}
+                {textField('GTM model', 'gtm_model', { multiline: true, full: true })}
+                {textField('Key partners', 'key_partners', { multiline: true, full: true })}
+                {textField('Audit firm alignment', 'audit_firm_alignment')}
+                {textField('Investor backed', 'investor_backed')}
+                {textField('International expansion', 'international_expansion')}
+                {textField('Govt/regulatory alignment', 'govt_regulatory_alignment', { multiline: true, full: true })}
+                {textField('Strategic notes', 'strategic_notes', { multiline: true, full: true })}
+              </Section>
+            )}
+
+            {tab === 5 && (
+              <Section title="Customer Proof">
+                {textField('Customer count', 'customer_count')}
+                {textField('Industry verticals', 'industry_verticals')}
+                {textField('Case studies published', 'case_studies_published', { multiline: true, full: true })}
+                {textField('Testimonials / reviews', 'testimonials_reviews', { multiline: true, full: true })}
+                {textField('Known clients', 'known_clients', { multiline: true, full: true })}
+                {textField('Trust signal', 'trust_signal', { multiline: true, full: true })}
+                {textField('Source notes', 'customer_proof_source_notes', { multiline: true, full: true })}
+              </Section>
+            )}
+
+            <Divider sx={{ my: 2 }} />
+            <TextField fullWidth label="General notes" multiline rows={2} size="small" value={form.notes || ''} onChange={set('notes')} />
+          </fieldset>
+
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving || !form.name}>{saving ? 'Saving…' : 'Save'}</Button>
+          <Button onClick={() => setOpen(false)}>{canEdit ? 'Cancel' : 'Close'}</Button>
+          {canEdit && (
+            <Button variant="contained" onClick={handleSave} disabled={saving || !form.company_name}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
     </Box>

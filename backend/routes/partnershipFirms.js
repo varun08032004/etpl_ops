@@ -91,7 +91,7 @@ router.post('/', requirePartnershipsOrAdmin, async (req, res) => {
     const { rows: [firm] } = await safeQuery(
       `INSERT INTO partnership_firms
         (firm_name, firm_type, city, services_offered, firm_size, contact_name, designation, email, phone, stage, source, assigned_bde, website, notes, created_by)
-       VALUES ($1,COALESCE($2,'ca_firm'),$3,COALESCE($4,'{}'),COALESCE($5,'unknown'),$6,$7,$8,$9,COALESCE($10,'prospect'),COALESCE($11,'cold_outreach'),$12,$13,$14,$15)
+       VALUES ($1,COALESCE($2::partnership_firm_type,'ca_firm'),$3,COALESCE($4,'{}'),COALESCE($5::partnership_firm_size,'unknown'),$6,$7,$8,$9,COALESCE($10::partnership_stage,'prospect'),COALESCE($11::partnership_source,'cold_outreach'),$12,$13,$14,$15)
        RETURNING *`,
       [firm_name, firm_type || null, city || null, services_offered || null, firm_size || null,
        contact_name || null, designation || null, email || null, phone || null, stage || null,

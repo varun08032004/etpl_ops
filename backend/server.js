@@ -81,6 +81,7 @@ app.use('/api/marketing/press', require('./routes/marketingPress')); // NEW — 
 app.use('/api/marketing/newsletter', require('./routes/marketingNewsletter')); // NEW — Marketing module: Newsletter/Email tracker page
 app.use('/api/marketing/seo', require('./routes/marketingSeo')); // NEW — Marketing module: SEO/website analytics page
 app.use('/api/marketing/dashboard', require('./routes/marketingDashboard')); // NEW — Marketing module: Dashboard overview page
+app.use('/api/marketing/blog', require('./routes/marketingBlog')); // was built but never mounted — no frontend page exists yet either, this just makes the API reachable
 app.use('/api/partnerships/firms', require('./routes/partnershipFirms')); // NEW — Partnerships module: BDE target account tracker (CA/audit/ESG firms)
 app.use('/api/partnerships/activities', require('./routes/partnershipActivities')); // NEW — Partnerships module: call log + follow-ups
 app.use('/api/product/features', require('./routes/productFeatures')); // NEW — Product module: Roadmap page

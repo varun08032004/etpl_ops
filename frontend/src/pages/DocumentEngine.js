@@ -8,6 +8,7 @@ import {
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import BlockOutlinedIcon from '@mui/icons-material/BlockOutlined';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import client from '../api/client';
 import StatusChip from '../components/StatusChip';
@@ -31,6 +32,7 @@ function isFieldApplicable(field, data) {
 export default function DocumentEngine() {
   const { staff } = useAuth();
   const canApprove = ['owner', 'admin', 'hr', 'finance'].includes(staff?.role);
+  const isAdmin = ['owner', 'admin'].includes(staff?.role); // hard-delete is stricter than void — matches the backend's requireRole('admin')
 
   const [templates, setTemplates] = useState([]);
   const [category, setCategory] = useState('all');
@@ -132,6 +134,16 @@ export default function DocumentEngine() {
     }
   };
 
+  const hardDelete = async (doc) => {
+    if (!window.confirm(`Permanently delete ${doc.document_number}? Unlike Void, this leaves no record and cannot be undone.`)) return;
+    try {
+      await client.delete(`/document-engine/generated/${doc.id}`);
+      loadGenerated();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to delete document');
+    }
+  };
+
   return (
     <Box>
       <Typography variant="h5" sx={{ mb: 0.5 }}>Document Engine</Typography>
@@ -214,6 +226,11 @@ export default function DocumentEngine() {
                   {canApprove && d.status !== 'void' && (
                     <Tooltip title="Void">
                       <IconButton size="small" onClick={() => openVoidDialog(d)}><BlockOutlinedIcon fontSize="small" /></IconButton>
+                    </Tooltip>
+                  )}
+                  {isAdmin && (
+                    <Tooltip title="Delete permanently (no audit trail — use Void instead for real documents)">
+                      <IconButton size="small" color="error" onClick={() => hardDelete(d)}><DeleteOutlineIcon fontSize="small" /></IconButton>
                     </Tooltip>
                   )}
                 </TableCell>

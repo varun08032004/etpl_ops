@@ -12,7 +12,7 @@ import { useAuth } from '../context/AuthContext';
 // same class of bug flagged earlier in App.js/Layout.js/staff-accounts.js:
 // any *_hod role added to ROLE_TO_NAV_GROUP_LABELS needs to also land here,
 // or it can never actually be assigned to a login through this page.
-const ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'sales_hod', 'product_hod', 'manager', 'employee'];
+const ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'sales_hod', 'product_hod', 'accounting_hod', 'manager', 'employee'];
 
 export default function Team() {
   const { staff: me } = useAuth();

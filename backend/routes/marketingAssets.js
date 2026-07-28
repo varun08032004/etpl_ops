@@ -61,7 +61,7 @@ router.post('/', requireMarketingOrAdmin, async (req, res) => {
 
     const { rows: [asset] } = await safeQuery(
       `INSERT INTO marketing_brand_assets (title, asset_type, external_url, document_id, description, tags, created_by)
-       VALUES ($1,COALESCE($2,'other'),$3,$4,$5,$6,$7) RETURNING *`,
+       VALUES ($1,COALESCE($2::marketing_asset_type,'other'),$3,$4,$5,$6,$7) RETURNING *`,
       [title, asset_type || null, external_url || null, document_id || null, description || null, parsedTags, req.staff.id]
     );
 

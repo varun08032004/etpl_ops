@@ -6,13 +6,16 @@ import {
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DownloadIcon from '@mui/icons-material/Download';
 import HistoryIcon from '@mui/icons-material/History';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import client from '../api/client';
 import StatusChip from '../components/StatusChip';
+import { useAuth } from '../context/AuthContext';
 
 const DOC_TYPES = ['contract', 'offer_letter', 'nda', 'policy', 'certificate', 'board_resolution', 'invoice_attachment', 'id_proof', 'other'];
 const ENTITY_TYPES = ['company', 'employee', 'vendor_customer', 'invoice', 'bill'];
 
 export default function Documents() {
+  const { staff } = useAuth();
   const [docs, setDocs] = useState([]);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
@@ -22,26 +25,95 @@ export default function Documents() {
   const [historyDoc, setHistoryDoc] = useState(null);
   const [history, setHistory] = useState([]);
 
+  // Duplicate-resolution dialog state — populated when the backend responds
+  // 409 to an upload because a document with the same title already exists
+  // in the same entity scope.
+  const [duplicateInfo, setDuplicateInfo] = useState(null); // { existing, message }
+  const [resolving, setResolving] = useState(false);
+
   const load = () => client.get('/documents').then(({ data }) => setDocs(data.documents));
   useEffect(() => { load(); }, []);
+
+  const buildFormData = (extra = {}) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    Object.entries(form).forEach(([k, v]) => { if (v) formData.append(k, v); });
+    Object.entries(extra).forEach(([k, v]) => formData.append(k, v));
+    return formData;
+  };
 
   const handleUpload = async () => {
     if (!file) return;
     setSaving(true);
     setError('');
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      Object.entries(form).forEach(([k, v]) => { if (v) formData.append(k, v); });
-      await client.post('/documents', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      setOpen(false);
-      setFile(null);
-      setForm({ title: '', doc_type: 'contract', entity_type: 'company', entity_id: '', expiry_date: '' });
+      await client.post('/documents', buildFormData(), { headers: { 'Content-Type': 'multipart/form-data' } });
+      closeUploadDialog();
+      load();
+    } catch (err) {
+      if (err.response?.status === 409 && err.response?.data?.duplicate) {
+        // Don't close the upload dialog yet — the duplicate dialog stacks
+        // on top of it, and file/form state needs to stay intact so
+        // "Replace" or "Upload anyway" can still use them.
+        setDuplicateInfo(err.response.data);
+      } else {
+        setError(err.response?.data?.error || 'Upload failed');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const closeUploadDialog = () => {
+    setOpen(false);
+    setFile(null);
+    setForm({ title: '', doc_type: 'contract', entity_type: 'company', entity_id: '', expiry_date: '' });
+  };
+
+  // "Replace" — uploads the new file as the next version of the existing
+  // document (reuses the existing new-version endpoint), rather than as an
+  // unrelated separate document.
+  const handleReplace = async () => {
+    setResolving(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      await client.post(`/documents/${duplicateInfo.existing.id}/new-version`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setDuplicateInfo(null);
+      closeUploadDialog();
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to replace document');
+      setDuplicateInfo(null);
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  // "Upload anyway" — proceeds as a genuinely separate document, bypassing
+  // the duplicate check via allow_duplicate.
+  const handleUploadAnyway = async () => {
+    setResolving(true);
+    try {
+      await client.post('/documents', buildFormData({ allow_duplicate: 'true' }), { headers: { 'Content-Type': 'multipart/form-data' } });
+      setDuplicateInfo(null);
+      closeUploadDialog();
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Upload failed');
+      setDuplicateInfo(null);
     } finally {
-      setSaving(false);
+      setResolving(false);
+    }
+  };
+
+  const handleDelete = async (doc) => {
+    if (!window.confirm(`Permanently delete "${doc.title}"? This removes the file and cannot be undone.`)) return;
+    try {
+      await client.delete(`/documents/${doc.id}`);
+      load();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to delete document');
     }
   };
 
@@ -71,6 +143,7 @@ export default function Documents() {
               <TableCell>Type</TableCell>
               <TableCell>Linked to</TableCell>
               <TableCell>Version</TableCell>
+              <TableCell>Last updated</TableCell>
               <TableCell>Expiry</TableCell>
               <TableCell>Uploaded by</TableCell>
               <TableCell align="right">Actions</TableCell>
@@ -83,6 +156,9 @@ export default function Documents() {
                 <TableCell><StatusChip status={d.doc_type} /></TableCell>
                 <TableCell sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>{d.entity_type}{d.entity_id ? ` · ${d.entity_id.slice(0, 8)}` : ''}</TableCell>
                 <TableCell className="figure">v{d.version}</TableCell>
+                <TableCell className="figure" sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>
+                  {d.created_at ? new Date(d.created_at).toLocaleDateString() : '—'}
+                </TableCell>
                 <TableCell className="figure">
                   {d.expiry_date ? (
                     <Typography component="span" sx={{ color: new Date(d.expiry_date) < new Date() ? 'error.main' : 'inherit', fontSize: '0.85rem' }}>
@@ -98,11 +174,16 @@ export default function Documents() {
                   <Tooltip title="Version history">
                     <IconButton size="small" onClick={() => openHistory(d)}><HistoryIcon fontSize="small" /></IconButton>
                   </Tooltip>
+                  {['owner', 'admin', 'hr'].includes(staff?.role) && (
+                    <Tooltip title="Delete">
+                      <IconButton size="small" color="error" onClick={() => handleDelete(d)}><DeleteOutlineIcon fontSize="small" /></IconButton>
+                    </Tooltip>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
             {!docs.length && (
-              <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No documents yet.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No documents yet.</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
@@ -134,6 +215,24 @@ export default function Documents() {
           <Button onClick={() => setOpen(false)}>Cancel</Button>
           <Button variant="contained" onClick={handleUpload} disabled={saving || !file || !form.title}>
             {saving ? 'Uploading…' : 'Upload'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Duplicate found — offer Replace (new version) or Upload anyway ── */}
+      <Dialog open={!!duplicateInfo} onClose={() => setDuplicateInfo(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Duplicate document found</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning">{duplicateInfo?.message}</Alert>
+          <Typography variant="body2" sx={{ mt: 2 }}>
+            Replace it with this new file as the next version, or upload this as a separate, unrelated document instead?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDuplicateInfo(null)} disabled={resolving}>Cancel</Button>
+          <Button onClick={handleUploadAnyway} disabled={resolving}>Upload as separate</Button>
+          <Button variant="contained" onClick={handleReplace} disabled={resolving}>
+            {resolving ? 'Replacing…' : `Replace (→ v${(duplicateInfo?.existing?.version || 1) + 1})`}
           </Button>
         </DialogActions>
       </Dialog>

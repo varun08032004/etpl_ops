@@ -67,7 +67,7 @@ router.post('/', requireMarketingOrAdmin, async (req, res) => {
     const { rows: [item] } = await safeQuery(
       `INSERT INTO marketing_content_calendar
         (title, content_type, platform, social_account_id, campaign_id, scheduled_date, status, caption, link_url, assigned_to, notes, created_by)
-       VALUES ($1,COALESCE($2,'post'),$3,$4,$5,$6,COALESCE($7,'idea'),$8,$9,$10,$11,$12)
+       VALUES ($1,COALESCE($2::marketing_content_type,'post'),$3,$4,$5,$6,COALESCE($7::marketing_content_status,'idea'),$8,$9,$10,$11,$12)
        RETURNING *`,
       [title, content_type || null, platform || null, social_account_id || null, campaign_id || null,
        scheduled_date || null, status || null, caption || null, link_url || null, assigned_to || null,

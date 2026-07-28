@@ -78,7 +78,7 @@ router.post('/', requirePartnershipsOrAdmin, async (req, res) => {
 
     const { rows: [activity] } = await safeQuery(
       `INSERT INTO partnership_activities (firm_id, activity_type, activity_date, outcome, next_follow_up_date, logged_by)
-       VALUES ($1,COALESCE($2,'cold_call'),COALESCE($3,CURRENT_DATE),$4,$5,$6)
+       VALUES ($1,COALESCE($2::partnership_activity_type,'cold_call'),COALESCE($3,CURRENT_DATE),$4,$5,$6)
        RETURNING *`,
       [firm_id, activity_type || null, activity_date || null, outcome || null, next_follow_up_date || null, req.staff.id]
     );

@@ -66,7 +66,7 @@ router.post('/', requireMarketingOrAdmin, async (req, res) => {
     const { rows: [campaign] } = await safeQuery(
       `INSERT INTO marketing_campaigns
         (name, objective, channel, status, start_date, end_date, budget, amount_spent, leads_generated, conversions, owner_employee_id, notes, created_by)
-       VALUES ($1,$2,$3,COALESCE($4,'planned'),$5,$6,COALESCE($7,0),COALESCE($8,0),COALESCE($9,0),COALESCE($10,0),$11,$12,$13)
+       VALUES ($1,$2,$3,COALESCE($4::marketing_campaign_status,'planned'),$5,$6,COALESCE($7,0),COALESCE($8,0),COALESCE($9,0),COALESCE($10,0),$11,$12,$13)
        RETURNING *`,
       [name, objective || null, channel || null, status || null, start_date || null, end_date || null,
        budget ?? null, amount_spent ?? null, leads_generated ?? null, conversions ?? null,

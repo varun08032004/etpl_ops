@@ -49,7 +49,7 @@ router.post('/', requireMarketingOrAdmin, async (req, res) => {
     const { rows: [event] } = await safeQuery(
       `INSERT INTO marketing_events
         (name, event_type, role, status, start_date, end_date, location, is_virtual, cost, leads_generated, url, owner_employee_id, notes, created_by)
-       VALUES ($1,COALESCE($2,'other'),COALESCE($3,'attendee'),COALESCE($4,'planned'),$5,$6,$7,COALESCE($8,false),COALESCE($9,0),COALESCE($10,0),$11,$12,$13,$14)
+       VALUES ($1,COALESCE($2::marketing_event_type,'other'),COALESCE($3::marketing_event_role,'attendee'),COALESCE($4::marketing_event_status,'planned'),$5,$6,$7,COALESCE($8,false),COALESCE($9,0),COALESCE($10,0),$11,$12,$13,$14)
        RETURNING *`,
       [name, event_type || null, role || null, status || null, start_date || null, end_date || null,
        location || null, is_virtual ?? null, cost ?? null, leads_generated ?? null, url || null,

@@ -70,7 +70,7 @@ router.post('/', requireMarketingOrAdmin, async (req, res) => {
       `INSERT INTO marketing_social_accounts
         (platform, display_name, handle, profile_url, followers_count, following_count, posts_count,
          is_verified, status, owner_employee_id, bio, last_stats_update, notes, created_by)
-       VALUES ($1,$2,$3,$4,COALESCE($5,0),COALESCE($6,0),COALESCE($7,0),COALESCE($8,false),COALESCE($9,'active'),$10,$11,$12,$13,$14)
+       VALUES ($1,$2,$3,$4,COALESCE($5,0),COALESCE($6,0),COALESCE($7,0),COALESCE($8,false),COALESCE($9::marketing_account_status,'active'),$10,$11,$12,$13,$14)
        RETURNING *`,
       [platform, display_name, handle || null, profile_url || null, followers_count ?? null,
        following_count ?? null, posts_count ?? null, is_verified ?? null, status || null,

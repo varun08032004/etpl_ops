@@ -39,7 +39,7 @@ router.post('/', requireMarketingOrAdmin, async (req, res) => {
 
     const { rows: [mention] } = await safeQuery(
       `INSERT INTO marketing_press_mentions (title, publication, mention_type, url, published_date, sentiment, notes, created_by)
-       VALUES ($1,$2,COALESCE($3,'article'),$4,$5,COALESCE($6,'neutral'),$7,$8) RETURNING *`,
+       VALUES ($1,$2,COALESCE($3::marketing_press_type,'article'),$4,$5,COALESCE($6::marketing_press_sentiment,'neutral'),$7,$8) RETURNING *`,
       [title, publication || null, mention_type || null, url || null, published_date || null,
        sentiment || null, notes || null, req.staff.id]
     );

@@ -319,6 +319,24 @@ router.get('/generated/:id/download', async (req, res) => {
 });
 
 // ── approve a generated document (e.g. HR/finance sign-off before it's sent) ─
+// Maps a document_templates.code to the closest matching Documents-page
+// doc_type, so approved Document Engine output shows up sensibly filed
+// there instead of everything landing in "other".
+function mapTemplateCodeToDocType(code) {
+  const map = {
+    OFFER_LETTER: 'offer_letter',
+    NDA: 'nda',
+    BOARD_RESOLUTION: 'board_resolution',
+    SHARE_CERTIFICATE: 'certificate',
+    EMPLOYMENT_AGREEMENT: 'contract',
+    INTERNSHIP_AGREEMENT: 'contract',
+    IP_ASSIGNMENT_AGREEMENT: 'contract',
+    VENDOR_AGREEMENT: 'contract',
+    CUSTOMER_SERVICE_AGREEMENT: 'contract',
+  };
+  return map[code] || 'other';
+}
+
 router.post('/generated/:id/approve', requireRole('admin', 'hr', 'finance'), async (req, res) => {
   try {
     const { rows: [updated] } = await safeQuery(
@@ -326,6 +344,36 @@ router.post('/generated/:id/approve', requireRole('admin', 'hr', 'finance'), asy
       [req.staff.id, req.params.id]
     );
     if (!updated) return res.status(404).json({ error: 'Document not found' });
+
+    // Surface this into the general Documents page too — reuses the SAME
+    // storage_path (no re-upload of the file) and just adds a metadata row
+    // so it shows up alongside manually uploaded documents. Best-effort:
+    // if this fails, the approval itself still succeeded, so we log and
+    // move on rather than failing the whole request.
+    try {
+      const { rows: [alreadyMirrored] } = await safeQuery(`SELECT id FROM documents WHERE storage_path = $1 LIMIT 1`, [updated.storage_path]);
+      const { rows: [template] } = await safeQuery(`SELECT * FROM document_templates WHERE id = $1`, [updated.template_id]);
+      if (template && !alreadyMirrored) {
+        await safeQuery(
+          `INSERT INTO documents (title, doc_type, entity_type, entity_id, storage_path, file_name, file_size_bytes, mime_type, uploaded_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            `${template.name} — ${updated.document_number}`,
+            mapTemplateCodeToDocType(template.code),
+            updated.entity_type || 'company',
+            updated.entity_id || null,
+            updated.storage_path,
+            updated.file_name,
+            null, // file size not tracked on generated_documents — left null rather than guessed
+            'application/pdf',
+            updated.generated_by,
+          ]
+        );
+      }
+    } catch (linkErr) {
+      console.warn('[document-engine:approve] could not mirror into documents table, continuing:', linkErr.message);
+    }
+
     await auditLog.logAction({ staffId: req.staff.id, action: 'document.approved', entity: 'generated_documents', entityId: updated.id });
     res.json({ document: updated });
   } catch (err) {
@@ -356,6 +404,36 @@ router.post('/generated/:id/void', requireRole('admin', 'hr', 'finance'), async 
   } catch (err) {
     console.error('[document-engine:void]', err);
     res.status(500).json({ error: 'Failed to void document' });
+  }
+});
+
+// ── permanently delete a generated document ─────────────────────────────────
+// Distinct from /void: void keeps the row (status flips to 'void') so a gap
+// in a sequenced number stays explainable — appropriate for a real, issued
+// legal document that turned out to be wrong. This is for outright removing
+// junk/test generations that were never meant to exist at all. Admin-only
+// since it's irreversible and, unlike void, does NOT preserve an audit
+// trail — use void instead for anything that was ever a real document.
+router.delete('/generated/:id', requireRole('admin'), async (req, res) => {
+  try {
+    const { rows: [doc] } = await safeQuery(`SELECT * FROM generated_documents WHERE id = $1`, [req.params.id]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+    await storage.deleteFile(doc.storage_path).catch((err) =>
+      console.warn('[document-engine:delete] storage cleanup failed, continuing:', err.message)
+    );
+
+    // Clean up the mirrored row in the general Documents page too, if this
+    // was ever approved and surfaced there (see /generated/:id/approve).
+    await safeQuery(`DELETE FROM documents WHERE storage_path = $1`, [doc.storage_path]);
+
+    await safeQuery(`DELETE FROM generated_documents WHERE id = $1`, [req.params.id]);
+    await auditLog.logAction({ staffId: req.staff.id, action: 'document.deleted', entity: 'generated_documents', entityId: doc.id, oldValue: { document_number: doc.document_number } });
+
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error('[document-engine:delete]', err);
+    res.status(500).json({ error: 'Failed to delete document' });
   }
 });
 

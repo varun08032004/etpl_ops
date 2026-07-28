@@ -493,8 +493,9 @@ router.get('/runs/:runId/items/:itemId/payslip.pdf', requireRole('finance'), asy
     if (!run) return res.status(404).json({ error: 'Payroll run not found' });
 
     const { rows: [item] } = await safeQuery(
-      `SELECT pi.*, e.full_name, e.employee_code, e.designation, e.pan_number
+      `SELECT pi.*, e.full_name, e.employee_code, d.title AS designation, e.pan_number
        FROM payroll_items pi JOIN employees e ON e.id = pi.employee_id
+       LEFT JOIN designations d ON d.id = e.designation_id
        WHERE pi.id = $1 AND pi.payroll_run_id = $2`,
       [req.params.itemId, req.params.runId]
     );
@@ -521,8 +522,9 @@ router.get('/runs/:runId/payslips.zip', requireRole('finance'), async (req, res)
     if (!run) return res.status(404).json({ error: 'Payroll run not found' });
 
     const { rows: items } = await safeQuery(
-      `SELECT pi.*, e.full_name, e.employee_code, e.designation, e.pan_number
+      `SELECT pi.*, e.full_name, e.employee_code, d.title AS designation, e.pan_number
        FROM payroll_items pi JOIN employees e ON e.id = pi.employee_id
+       LEFT JOIN designations d ON d.id = e.designation_id
        WHERE pi.payroll_run_id = $1`,
       [req.params.runId]
     );
@@ -553,8 +555,9 @@ router.get('/me/payslips/:itemId/pdf', async (req, res) => {
     if (!req.staff.employee_id) return res.status(404).json({ error: 'This login is not linked to an employee record' });
 
     const { rows: [item] } = await safeQuery(
-      `SELECT pi.*, e.full_name, e.employee_code, e.designation, e.pan_number
+      `SELECT pi.*, e.full_name, e.employee_code, d.title AS designation, e.pan_number
        FROM payroll_items pi JOIN employees e ON e.id = pi.employee_id
+       LEFT JOIN designations d ON d.id = e.designation_id
        WHERE pi.id = $1`,
       [req.params.itemId]
     );
@@ -577,7 +580,7 @@ router.get('/me/payslips/:itemId/pdf', async (req, res) => {
 
 
 // ── disburse via direct Axis Bank payouts + post the accounting entry ──────
-// Requires each employee to have bank_account_number + bank_ifsc_code on file.
+// Requires each employee to have bank_account_number + bank_ifsc on file.
 router.post('/runs/:id/disburse', requireRole('finance'), disburseLimiter, async (req, res) => {
   try {
     const payoutMode = (req.body?.mode || 'IMPS').toUpperCase();
@@ -613,7 +616,7 @@ router.post('/runs/:id/disburse', requireRole('finance'), disburseLimiter, async
     let items;
     try {
       const { rows } = await safeQuery(
-        `SELECT pi.*, e.bank_account_number, e.bank_ifsc_code, e.bank_account_holder_name, e.full_name
+        `SELECT pi.*, e.bank_account_number, e.bank_ifsc, e.full_name
          FROM payroll_items pi JOIN employees e ON e.id = pi.employee_id WHERE pi.payroll_run_id = $1`,
         [req.params.id]
       );
@@ -621,7 +624,7 @@ router.post('/runs/:id/disburse', requireRole('finance'), disburseLimiter, async
 
       const results = [];
       for (const item of items) {
-        if (!item.bank_account_number || !item.bank_ifsc_code) {
+        if (!item.bank_account_number || !item.bank_ifsc) {
           await safeQuery(`UPDATE payroll_items SET status='failed', failure_reason=$1 WHERE id=$2`,
             ['No bank account/IFSC on file for employee', item.id]);
           results.push({ employee: item.full_name, status: 'failed', reason: 'missing bank details' });
@@ -630,8 +633,8 @@ router.post('/runs/:id/disburse', requireRole('finance'), disburseLimiter, async
         try {
           const payout = await axisPayoutAdapter.initiatePayout({
             beneficiaryAccountNumber: item.bank_account_number,
-            beneficiaryIFSC: item.bank_ifsc_code,
-            beneficiaryName: item.bank_account_holder_name || item.full_name,
+            beneficiaryIFSC: item.bank_ifsc,
+            beneficiaryName: item.full_name,
             amount: Number(item.net_pay),
             mode: payoutMode,
             referenceId: `payroll-${run.id}-${item.employee_id}`,

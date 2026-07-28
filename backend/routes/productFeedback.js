@@ -53,7 +53,7 @@ router.post('/', requireProductOrAdmin, async (req, res) => {
     const { rows: [item] } = await safeQuery(
       `INSERT INTO product_feedback
         (title, feedback_type, severity, status, area, description, reported_by_name, reported_by_email, source, related_feature_id, notes, created_by)
-       VALUES ($1,COALESCE($2,'feedback'),COALESCE($3,'medium'),COALESCE($4,'open'),COALESCE($5,'other'),$6,$7,$8,COALESCE($9,'internal'),$10,$11,$12)
+       VALUES ($1,COALESCE($2::product_feedback_type,'feedback'),COALESCE($3::product_feedback_severity,'medium'),COALESCE($4::product_feedback_status,'open'),COALESCE($5::product_area,'other'),$6,$7,$8,COALESCE($9::product_feedback_source,'internal'),$10,$11,$12)
        RETURNING *`,
       [title, feedback_type || null, severity || null, status || null, area || null, description || null,
        reported_by_name || null, reported_by_email || null, source || null, related_feature_id || null,

@@ -11,8 +11,15 @@ router.use(authenticate);
 
 router.get('/summary', async (req, res) => {
   try {
+    // FIXED: the 3 queries below (upcomingContent/recentLeads/upcomingEvents)
+    // used to run as separate sequential `await`s AFTER this Promise.all —
+    // three unnecessary extra network round-trips to Supabase in series,
+    // each adding pure latency for no reason (none of these 11 queries
+    // depend on each other). Merged into one batch — same total DB work,
+    // done concurrently instead of 8-parallel-then-3-serial.
     const [
       social, campaigns, content, leads, events, press, newsletter, seo,
+      upcomingContentRes, recentLeadsRes, upcomingEventsRes,
     ] = await Promise.all([
       safeQuery(`SELECT COUNT(*)::int AS accounts, COALESCE(SUM(followers_count),0)::int AS followers FROM marketing_social_accounts WHERE status = 'active'`),
       safeQuery(`SELECT COUNT(*) FILTER (WHERE status = 'active')::int AS active_count,
@@ -32,21 +39,14 @@ router.get('/summary', async (req, res) => {
       safeQuery(`SELECT COUNT(*)::int AS total FROM marketing_press_mentions WHERE published_date >= CURRENT_DATE - INTERVAL '90 days'`),
       safeQuery(`SELECT subscriber_count, snapshot_date FROM marketing_newsletter_snapshots ORDER BY snapshot_date DESC LIMIT 1`),
       safeQuery(`SELECT organic_traffic, snapshot_date FROM marketing_seo_snapshots ORDER BY snapshot_date DESC LIMIT 1`),
+      safeQuery(`SELECT id, title, platform, scheduled_date, status FROM marketing_content_calendar
+                 WHERE scheduled_date >= CURRENT_DATE AND status IN ('draft','scheduled')
+                 ORDER BY scheduled_date ASC LIMIT 5`),
+      safeQuery(`SELECT id, full_name, company_name, source, status, received_at FROM marketing_leads
+                 ORDER BY received_at DESC NULLS LAST, created_at DESC LIMIT 5`),
+      safeQuery(`SELECT id, name, event_type, start_date, role FROM marketing_events
+                 WHERE start_date >= CURRENT_DATE ORDER BY start_date ASC LIMIT 5`),
     ]);
-
-    const { rows: upcomingContent } = await safeQuery(
-      `SELECT id, title, platform, scheduled_date, status FROM marketing_content_calendar
-       WHERE scheduled_date >= CURRENT_DATE AND status IN ('draft','scheduled')
-       ORDER BY scheduled_date ASC LIMIT 5`
-    );
-    const { rows: recentLeads } = await safeQuery(
-      `SELECT id, full_name, company_name, source, status, received_at FROM marketing_leads
-       ORDER BY received_at DESC NULLS LAST, created_at DESC LIMIT 5`
-    );
-    const { rows: upcomingEvents } = await safeQuery(
-      `SELECT id, name, event_type, start_date, role FROM marketing_events
-       WHERE start_date >= CURRENT_DATE ORDER BY start_date ASC LIMIT 5`
-    );
 
     res.json({
       social: social.rows[0],
@@ -57,9 +57,9 @@ router.get('/summary', async (req, res) => {
       press: press.rows[0],
       newsletter: newsletter.rows[0] || null,
       seo: seo.rows[0] || null,
-      upcomingContent,
-      recentLeads,
-      upcomingEvents,
+      upcomingContent: upcomingContentRes.rows,
+      recentLeads: recentLeadsRes.rows,
+      upcomingEvents: upcomingEventsRes.rows,
     });
   } catch (err) {
     console.error('[marketing-dashboard:summary]', err);

@@ -43,7 +43,7 @@ router.post('/', requireProductOrAdmin, async (req, res) => {
 
     const { rows: [betaUser] } = await safeQuery(
       `INSERT INTO product_beta_users (name, company_name, email, phone, stage, areas_of_interest, joined_date, notes, created_by)
-       VALUES ($1,$2,$3,$4,COALESCE($5,'waitlist'),COALESCE($6,'{}'),$7,$8,$9)
+       VALUES ($1,$2,$3,$4,COALESCE($5::product_beta_stage,'waitlist'),COALESCE($6,'{}'),$7,$8,$9)
        RETURNING *`,
       [name, company_name || null, email || null, phone || null, stage || null,
        areas_of_interest || null, joined_date || null, notes || null, req.staff.id]

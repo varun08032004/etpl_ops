@@ -20,8 +20,33 @@ router.post('/', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'File required (multipart field name: "file")' });
 
-    const { title, doc_type, entity_type, entity_id, expiry_date, tags } = req.body;
+    const { title, doc_type, entity_type, entity_id, expiry_date, tags, allow_duplicate } = req.body;
     if (!title || !doc_type) return res.status(400).json({ error: 'title and doc_type are required' });
+
+    const effectiveEntityType = entity_type || 'company';
+
+    // Duplicate check: same title (case-insensitive), same entity scope,
+    // among currently-active documents. Skipped when allow_duplicate is
+    // explicitly set — used when the person picks "upload as a separate
+    // document" after seeing the duplicate prompt, rather than replacing.
+    if (allow_duplicate !== 'true') {
+      const { rows: [existing] } = await safeQuery(
+        `SELECT d.*, sa.email AS uploaded_by_email FROM documents d
+         LEFT JOIN staff_accounts sa ON sa.id = d.uploaded_by
+         WHERE d.is_current = true AND d.entity_type = $1
+           AND COALESCE(d.entity_id, '') = COALESCE($2, '')
+           AND LOWER(d.title) = LOWER($3)
+         LIMIT 1`,
+        [effectiveEntityType, entity_id || null, title]
+      );
+      if (existing) {
+        return res.status(409).json({
+          duplicate: true,
+          existing,
+          message: `A document titled "${existing.title}" already exists (uploaded ${new Date(existing.created_at).toLocaleDateString()}, v${existing.version}).`,
+        });
+      }
+    }
 
     const timestamp = Date.now();
     const cleanName = safeFileName(req.file.originalname);
@@ -35,7 +60,7 @@ router.post('/', upload.single('file'), async (req, res) => {
     const { rows: [doc] } = await safeQuery(
       `INSERT INTO documents (title, doc_type, entity_type, entity_id, storage_path, file_name, file_size_bytes, mime_type, expiry_date, tags, uploaded_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [title, doc_type, entity_type || 'company', entity_id || null, storagePath, req.file.originalname,
+      [title, doc_type, effectiveEntityType, entity_id || null, storagePath, req.file.originalname,
        req.file.size, req.file.mimetype, expiry_date || null, parsedTags, req.staff.id]
     );
 

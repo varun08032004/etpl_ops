@@ -94,7 +94,7 @@ router.post('/', requireMarketingOrAdmin, async (req, res) => {
       `INSERT INTO marketing_blog_posts
         (title, slug, excerpt, content, category, tags, status, author_employee_id, cover_image_url,
          seo_title, seo_description, published_url, scheduled_date, published_at, view_count, notes, created_by)
-       VALUES ($1,$2,$3,$4,COALESCE($5,'other'),COALESCE($6,'{}'),COALESCE($7,'draft'),$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+       VALUES ($1,$2,$3,$4,COALESCE($5::marketing_blog_category,'other'),COALESCE($6,'{}'),COALESCE($7::marketing_blog_status,'draft'),$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING *`,
       [title, finalSlug, excerpt || null, content || null, category || null, parsedTags, status || null,
        author_employee_id || null, cover_image_url || null, seo_title || null, seo_description || null,

@@ -10,6 +10,8 @@ import PaidOutlinedIcon from '@mui/icons-material/PaidOutlined';
 import AccessTimeOutlinedIcon from '@mui/icons-material/AccessTimeOutlined';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
+import PersonSearchOutlinedIcon from '@mui/icons-material/PersonSearchOutlined';
+import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined';
@@ -78,6 +80,8 @@ const NAV_GROUPS = [
       { to: '/attendance', label: 'Attendance', icon: AccessTimeOutlinedIcon },
       { to: '/org-structure', label: 'Org Structure', icon: AccountTreeOutlinedIcon },
       { to: '/team', label: 'Team logins', icon: GroupOutlinedIcon },
+      { to: '/recruitment', label: 'Recruitment', icon: PersonSearchOutlinedIcon },
+      { to: '/performance', label: 'Performance', icon: AssessmentOutlinedIcon },
     ],
   },
   {
