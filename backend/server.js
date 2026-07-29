@@ -88,6 +88,7 @@ app.use('/api/product/features', require('./routes/productFeatures')); // NEW �
 app.use('/api/product/releases', require('./routes/productReleases')); // NEW — Product module: Releases / changelog page
 app.use('/api/product/feedback', require('./routes/productFeedback')); // NEW — Product module: Feedback & Bugs page
 app.use('/api/product/beta-users', require('./routes/productBetaUsers')); // NEW — Product module: Beta / Pilot Users page
+app.use('/api/product/subscriptions', require('./routes/productSubscriptions')); // NEW — Product module: Subscriptions page (ethertrack.in plan visibility + Corporate renewal)
 
 app.use((err, req, res, next) => {
   console.error('[unhandled]', err);

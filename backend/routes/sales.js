@@ -5,6 +5,7 @@ const router = express.Router();
 const { safeQuery, withTransaction } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { fireEvent } = require('../services/automationEngine');
+const { fetchPlatformCustomers, activateCorporate, updateCorporateRenewal, fetchCorporateActivations } = require('../services/platformClient');
 
 router.use(authenticate);
 
@@ -311,6 +312,157 @@ router.post('/quotations/:id/send', async (req, res) => {
   } catch (err) {
     console.error('[sales:quotations:send]', err);
     res.status(500).json({ error: 'Failed to send quotation' });
+  }
+});
+
+// ── Corporate subscriptions — "Contact Sales" leads on ethertrack.in ──────
+// ethertrack.in's Corporate plan has no self-serve checkout: the deal is
+// closed here, in the ERP pipeline, and the platform account only needs to
+// be told the outcome once it's won. See services/platformClient.js for the
+// write-path plumbing and what still needs adding on the platform side.
+
+// GET /deals/corporate/search-platform-account?q=email-or-name
+// Finds the ethertrack.in account a corporate lead corresponds to, so it
+// can be linked to the deal before activation. Filters client-side over
+// the existing read-only customer roster — there's no server-side search
+// endpoint on the platform yet, so this is capped and best-effort.
+router.get('/deals/corporate/search-platform-account', requireRole('finance', 'manager'), async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim().toLowerCase();
+    if (!q) return res.status(400).json({ error: 'q is required' });
+    const customers = await fetchPlatformCustomers(2000);
+    const matches = customers
+      .filter(c => (c.email || '').toLowerCase().includes(q) || (c.full_name || '').toLowerCase().includes(q))
+      .slice(0, 20);
+    res.json({ matches });
+  } catch (err) {
+    console.error('[sales:corporate:search]', err);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// POST /deals/:id/link-platform-account   body: { platformUserId }
+// Ties a deal to the actual ethertrack.in account and marks it a corporate
+// deal, ahead of activation.
+router.post('/deals/:id/link-platform-account', requireRole('finance', 'manager'), async (req, res) => {
+  try {
+    const { platformUserId } = req.body;
+    if (!platformUserId) return res.status(400).json({ error: 'platformUserId is required' });
+    const { rows } = await safeQuery(
+      `UPDATE deals SET platform_user_id = $1, deal_type = 'corporate', last_activity_at = NOW(), updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [platformUserId, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Deal not found' });
+    res.json({ deal: rows[0] });
+  } catch (err) {
+    console.error('[sales:corporate:link]', err);
+    res.status(500).json({ error: 'Failed to link platform account' });
+  }
+});
+
+// POST /deals/:id/activate-corporate
+// body: { platformUserId?, cycle, seats, customPriceINR, renewalMonths, notes }
+// The close-the-loop action: calls the platform to actually turn on the
+// Corporate plan, logs what was sent/returned, and marks the deal won
+// (reusing the same party-creation behaviour as mark-won) — a corporate
+// activation IS the deal being won, not a separate step after it.
+router.post('/deals/:id/activate-corporate', requireRole('finance'), async (req, res) => {
+  const { id } = req.params;
+  const { platformUserId, cycle, seats, customPriceINR, renewalMonths, notes } = req.body;
+  try {
+    const { rows: [deal] } = await safeQuery(`SELECT * FROM deals WHERE id = $1`, [id]);
+    if (!deal) return res.status(404).json({ error: 'Deal not found' });
+
+    const targetPlatformUserId = platformUserId || deal.platform_user_id;
+    if (!targetPlatformUserId) return res.status(400).json({ error: 'No platform account linked — call link-platform-account first, or pass platformUserId' });
+    if (!['monthly', 'annual'].includes(cycle)) return res.status(400).json({ error: 'cycle must be monthly or annual' });
+
+    let platformResponse, activationError;
+    try {
+      platformResponse = await activateCorporate(targetPlatformUserId, { cycle, seats: seats || null, customPriceINR: customPriceINR || 0, renewalMonths: renewalMonths || null, notes: notes || null });
+    } catch (err) {
+      activationError = err;
+    }
+
+    await safeQuery(
+      `INSERT INTO corporate_activation_log (deal_id, platform_user_id, action, cycle, seats, custom_price_inr, renewal_months, notes, status, platform_response, error_message, triggered_by)
+       VALUES ($1,$2,'activate',$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [id, targetPlatformUserId, cycle, seats || null, customPriceINR || 0, renewalMonths || null, notes || null,
+       activationError ? 'failed' : 'success', platformResponse ? JSON.stringify(platformResponse) : null,
+       activationError ? activationError.message : null, req.staff.id]
+    );
+
+    if (activationError) {
+      return res.status(activationError.status || 502).json({ error: `Platform activation failed: ${activationError.message}` });
+    }
+
+    // Won via corporate activation, same party-linking behaviour as mark-won.
+    let partyId = deal.converted_party_id;
+    if (!partyId) {
+      const { rows: [party] } = await safeQuery(
+        `INSERT INTO parties (name, party_type, email, phone) VALUES ($1,'customer',$2,$3) RETURNING id`,
+        [deal.company_name, deal.contact_email || null, deal.contact_phone || null]
+      );
+      partyId = party.id;
+    }
+    const { rows: [updatedDeal] } = await safeQuery(
+      `UPDATE deals SET stage = 'won', probability_percent = 100, platform_user_id = $1, deal_type = 'corporate', converted_party_id = $2, last_activity_at = NOW(), updated_at = NOW() WHERE id = $3 RETURNING *`,
+      [targetPlatformUserId, partyId, id]
+    );
+    fireEvent('deal.corporate_activated', { company_name: updatedDeal.company_name, platform_user_id: targetPlatformUserId, cycle, link: `/sales` });
+
+    res.json({ deal: updatedDeal, platformResponse, note: 'Corporate plan activated on ethertrack.in and deal marked won.' });
+  } catch (err) {
+    console.error('[sales:corporate:activate]', err);
+    res.status(500).json({ error: 'Failed to activate corporate plan' });
+  }
+});
+
+// PATCH /deals/:id/corporate-renewal   body: { renewalDate, seats, notes }
+// For extending/adjusting an already-active corporate account without
+// re-running the full activation (e.g. after a renewal invoice is signed).
+router.patch('/deals/:id/corporate-renewal', requireRole('finance'), async (req, res) => {
+  const { id } = req.params;
+  const { renewalDate, seats, notes } = req.body;
+  try {
+    const { rows: [deal] } = await safeQuery(`SELECT * FROM deals WHERE id = $1`, [id]);
+    if (!deal) return res.status(404).json({ error: 'Deal not found' });
+    if (!deal.platform_user_id) return res.status(400).json({ error: 'Deal has no linked platform account' });
+    if (!renewalDate) return res.status(400).json({ error: 'renewalDate is required' });
+
+    let platformResponse, renewalError;
+    try {
+      platformResponse = await updateCorporateRenewal(deal.platform_user_id, { renewalDate, seats: seats || null, notes: notes || null });
+    } catch (err) {
+      renewalError = err;
+    }
+
+    await safeQuery(
+      `INSERT INTO corporate_activation_log (deal_id, platform_user_id, action, seats, renewal_date, notes, status, platform_response, error_message, triggered_by)
+       VALUES ($1,$2,'renewal_update',$3,$4,$5,$6,$7,$8,$9)`,
+      [id, deal.platform_user_id, seats || null, renewalDate, notes || null,
+       renewalError ? 'failed' : 'success', platformResponse ? JSON.stringify(platformResponse) : null,
+       renewalError ? renewalError.message : null, req.staff.id]
+    );
+
+    if (renewalError) return res.status(renewalError.status || 502).json({ error: `Platform renewal update failed: ${renewalError.message}` });
+    res.json({ platformResponse });
+  } catch (err) {
+    console.error('[sales:corporate:renewal]', err);
+    res.status(500).json({ error: 'Failed to update corporate renewal' });
+  }
+});
+
+// GET /deals/corporate/activations — read-only roster of active Corporate
+// accounts on the platform, for Sales/Finance to browse renewal dates
+// without leaving the ERP.
+router.get('/deals/corporate/activations', requireRole('finance', 'manager'), async (req, res) => {
+  try {
+    const activations = await fetchCorporateActivations();
+    res.json({ activations });
+  } catch (err) {
+    console.error('[sales:corporate:activations]', err);
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

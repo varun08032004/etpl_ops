@@ -9,7 +9,7 @@ const { logAction } = require('../services/auditLog');
 const ledger = require('../services/ledger');
 const axisPayoutAdapter = require('../services/bankFeeds/axisPayoutAdapter');
 const { generatePayslipPDF } = require('../services/payslipGenerator'); // npm install pdfkit
-const archiver = require('archiver'); // npm install archiver — used only for the bulk zip download
+const { ZipArchive } = require('archiver'); // npm install archiver@^8 — v8 replaced the old archiver('zip', opts) factory with a ZipArchive class; everything else (pipe/append/finalize) is unchanged
 const storage = require('../services/storage'); // your existing Supabase Storage wrapper
 const rateLimit = require('express-rate-limit'); // npm install express-rate-limit (skip if already installed for expenses.js)
 
@@ -533,7 +533,7 @@ router.get('/runs/:runId/payslips.zip', requireRole('finance'), async (req, res)
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="payslips-${run.period_month}-${run.period_year}.zip"`);
 
-    const archive = archiver('zip', { zlib: { level: 9 } });
+    const archive = new ZipArchive({ zlib: { level: 9 } });
     archive.on('error', (err) => { throw err; });
     archive.pipe(res);
 

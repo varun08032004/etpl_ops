@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Grid, Button, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, MenuItem, Alert, Chip, IconButton, Tooltip, Tabs, Tab, Divider,
-  Table, TableHead, TableRow, TableCell, TableBody,
+  Table, TableHead, TableRow, TableCell, TableBody, LinearProgress, CircularProgress,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/EditOutlined';
@@ -117,10 +117,15 @@ export default function MarketingCompetitors() {
   const [viewTab, setViewTab] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   const load = () => {
+    setLoading(true);
     const params = regionFilter ? { region: regionFilter } : {};
-    client.get('/marketing/competitors', { params }).then(({ data }) => setCompetitors(data.competitors)).catch(() => setCompetitors([]));
+    client.get('/marketing/competitors', { params })
+      .then(({ data }) => setCompetitors(data.competitors))
+      .catch(() => setCompetitors([]))
+      .finally(() => setLoading(false));
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [regionFilter]);
 
@@ -199,7 +204,7 @@ export default function MarketingCompetitors() {
           <MenuItem value="global">🌍 Global</MenuItem>
         </TextField>
         <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>
-          {competitors.length} compan{competitors.length === 1 ? 'y' : 'ies'} tracked
+          {loading ? 'Loading…' : `${competitors.length} compan${competitors.length === 1 ? 'y' : 'ies'} tracked`}
         </Typography>
       </Box>
 
@@ -221,6 +226,7 @@ export default function MarketingCompetitors() {
           scrollbarWidth: 'auto',
         }}
       >
+        {loading && <LinearProgress />}
         <Table sx={{ minWidth: 1400, borderCollapse: 'separate', borderSpacing: 0 }}>
           <TableHead>
             <TableRow>
@@ -298,7 +304,14 @@ export default function MarketingCompetitors() {
             {!competitors.length && (
               <TableRow>
                 <TableCell colSpan={VIEW_SECTIONS[viewTab].columns.length + 2} sx={{ textAlign: 'center', py: 6, color: 'text.secondary' }}>
-                  No competitors tracked yet.
+                  {loading ? (
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1.5 }}>
+                      <CircularProgress size={18} />
+                      <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>Loading competitor data…</Typography>
+                    </Box>
+                  ) : (
+                    'No competitors tracked yet.'
+                  )}
                 </TableCell>
               </TableRow>
             )}

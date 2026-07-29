@@ -3,6 +3,8 @@ import { ThemeProvider, CssBaseline } from '@mui/material';
 import theme from './theme';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
+import SecurityGuard from './components/SecurityGuard';
+import TwoFactorSettings from './pages/TwoFactorSettings';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import SignDocument from './pages/SignDocument';
@@ -56,6 +58,7 @@ import ProductRoadmap from './pages/ProductRoadmap';
 import ProductReleases from './pages/ProductReleases';
 import ProductFeedback from './pages/ProductFeedback';
 import ProductBetaUsers from './pages/ProductBetaUsers';
+import ProductSubscriptions from './pages/ProductSubscriptions';
 
 // Widened to include legal_hod/compliance_hod/marketing_hod/sales_hod/
 // product_hod — matches Layout.jsx's PRIVILEGED_ROLES, so those roles get
@@ -66,8 +69,14 @@ function ProtectedRoutes() {
   const { staff, loading } = useAuth();
   if (loading) return null;
   if (!staff) return <Navigate to="/login" replace />;
+  // SecurityGuard reads `staff` itself via useAuth(), so it only ever
+  // renders here — after the auth check above — meaning the watermark,
+  // copy/print/right-click blocking never touches the public /login or
+  // /sign/:token pages, only the authenticated app inside Layout/Outlet.
   return (
-    <Layout />
+    <SecurityGuard>
+      <Layout />
+    </SecurityGuard>
   );
 }
 
@@ -91,6 +100,7 @@ export default function App() {
             <Route element={<ProtectedRoutes />}>
               <Route path="/" element={<Home />} />
               <Route path="/my-profile" element={<MyProfile />} />
+              <Route path="/security" element={<TwoFactorSettings />} />
               <Route path="/employees" element={<EmployeeList />} />
               <Route path="/employees/:id" element={<EmployeeDetail />} />
               <Route path="/invoices" element={<Invoices />} />
@@ -141,6 +151,7 @@ export default function App() {
               <Route path="/product/releases" element={<ProductReleases />} />
               <Route path="/product/feedback" element={<ProductFeedback />} />
               <Route path="/product/beta-users" element={<ProductBetaUsers />} />
+              <Route path="/product/subscriptions" element={<ProductSubscriptions />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

@@ -120,6 +120,7 @@ const NAV_GROUPS = [
       { to: '/product/releases', label: 'Releases', icon: NewReleasesOutlinedIcon },
       { to: '/product/feedback', label: 'Feedback & Bugs', icon: BugReportOutlinedIcon },
       { to: '/product/beta-users', label: 'Beta Users', icon: ScienceOutlinedIcon },
+      { to: '/product/subscriptions', label: 'Subscriptions', icon: PaidOutlinedIcon },
     ],
   },
   {
