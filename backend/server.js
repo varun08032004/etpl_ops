@@ -89,6 +89,9 @@ app.use('/api/product/releases', require('./routes/productReleases')); // NEW �
 app.use('/api/product/feedback', require('./routes/productFeedback')); // NEW — Product module: Feedback & Bugs page
 app.use('/api/product/beta-users', require('./routes/productBetaUsers')); // NEW — Product module: Beta / Pilot Users page
 app.use('/api/product/subscriptions', require('./routes/productSubscriptions')); // NEW — Product module: Subscriptions page (ethertrack.in plan visibility + Corporate renewal)
+app.use('/api/product/pricing', require('./routes/productPricing')); // Product/Sales module: Starter/Growth dynamic pricing
+app.use('/api/product/coupons', require('./routes/productCoupons')); // Product/Sales module: coupon codes (e.g. EARLYBIRD50)
+app.use('/api/product/corporate-deals', require('./routes/corporateDeals')); // Product/Sales module: Corporate deal setup + installment invoicing
 
 app.use((err, req, res, next) => {
   console.error('[unhandled]', err);
@@ -104,4 +107,6 @@ app.listen(PORT, () => {
   // rather than crashing the process.
   require('./services/expenseScheduler');  // daily 06:00 — recurring expense sweep (built earlier, never wired in until now)
   require('./services/financeScheduler');  // daily 07:00 — budget alert check (same gap, same fix)
+  require('./services/corporateDealsScheduler'); // daily 08:00 — Corporate deal installment reminders
+  require('./services/churnAlertScheduler'); // daily 09:00 — paid→free downgrade alerts to Sales/CS
 });

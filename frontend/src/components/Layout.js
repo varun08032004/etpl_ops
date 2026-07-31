@@ -7,6 +7,9 @@ import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
 import AccountBalanceOutlinedIcon from '@mui/icons-material/AccountBalanceOutlined';
 import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import PaidOutlinedIcon from '@mui/icons-material/PaidOutlined';
+import PriceChangeOutlinedIcon from '@mui/icons-material/PriceChangeOutlined';
+import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
+import HandshakeOutlinedIcon from '@mui/icons-material/HandshakeOutlined';
 import AccessTimeOutlinedIcon from '@mui/icons-material/AccessTimeOutlined';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
@@ -39,7 +42,6 @@ import NewspaperOutlinedIcon from '@mui/icons-material/NewspaperOutlined';
 import MailOutlineIcon from '@mui/icons-material/MailOutline';
 import TravelExploreOutlinedIcon from '@mui/icons-material/TravelExploreOutlined';
 import EditNoteOutlinedIcon from '@mui/icons-material/EditNoteOutlined';
-import HandshakeOutlinedIcon from '@mui/icons-material/HandshakeOutlined';
 import PhoneCallbackOutlinedIcon from '@mui/icons-material/PhoneCallbackOutlined';
 import MapOutlinedIcon from '@mui/icons-material/MapOutlined';
 import NewReleasesOutlinedIcon from '@mui/icons-material/NewReleasesOutlined';
@@ -121,6 +123,9 @@ const NAV_GROUPS = [
       { to: '/product/feedback', label: 'Feedback & Bugs', icon: BugReportOutlinedIcon },
       { to: '/product/beta-users', label: 'Beta Users', icon: ScienceOutlinedIcon },
       { to: '/product/subscriptions', label: 'Subscriptions', icon: PaidOutlinedIcon },
+      { to: '/product/pricing', label: 'Pricing', icon: PriceChangeOutlinedIcon },
+      { to: '/product/coupons', label: 'Coupons', icon: LocalOfferOutlinedIcon },
+      { to: '/product/corporate-deals', label: 'Corporate Deals', icon: HandshakeOutlinedIcon },
     ],
   },
   {

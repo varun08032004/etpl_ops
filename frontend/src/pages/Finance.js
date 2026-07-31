@@ -440,6 +440,198 @@ function PurchaseRequestsSection({ canSeeAll }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// EXPENSES (one-off vendor bills — wired straight to the ledger, GST split
+// on the input/ITC side. Distinct from recurring expenses in pages/Expenses.jsx
+// and from reimbursement claims above — this is for a single ad-hoc spend:
+// a one-time vendor invoice, a bank fee, anything that isn't recurring.
+// Backend: routes/bills.js, mounted at /api/finance/bills.)
+// ════════════════════════════════════════════════════════════════════════
+
+function NewExpenseDialog({ open, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    vendor_id: '', category_id: '', bill_date: new Date().toISOString().slice(0, 10),
+    due_date: '', description: '', subtotal: '', gst_rate: '18',
+    pay_immediately: true, bank_account_id: '',
+  });
+  const [vendors, setVendors] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    client.get('/accounting/vendors').then(({ data }) => setVendors(data.vendors || [])).catch(() => setVendors([]));
+    client.get('/accounting/expense-categories').then(({ data }) => setCategories(data.categories || [])).catch(() => setCategories([]));
+    client.get('/bank-accounts').then(({ data }) => setBankAccounts(data.accounts || [])).catch(() => setBankAccounts([]));
+  }, [open]);
+
+  const gstAmount = form.subtotal && form.gst_rate ? (Number(form.subtotal) * Number(form.gst_rate)) / 100 : 0;
+  const total = (Number(form.subtotal) || 0) + gstAmount;
+
+  const handleSubmit = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await client.post('/finance/bills', {
+        ...form,
+        subtotal: Number(form.subtotal),
+        gst_rate: Number(form.gst_rate) || 0,
+        bank_account_id: form.pay_immediately ? form.bank_account_id : undefined,
+      });
+      setForm({ vendor_id: '', category_id: '', bill_date: new Date().toISOString().slice(0, 10), due_date: '', description: '', subtotal: '', gst_rate: '18', pay_immediately: true, bank_account_id: '' });
+      onClose();
+      onSaved();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to save expense');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const canSubmit = form.vendor_id && form.category_id && form.bill_date && form.subtotal && (!form.pay_immediately || form.bank_account_id);
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+      <DialogTitle>New expense</DialogTitle>
+      <DialogContent>
+        <TextField fullWidth select label="Vendor" margin="normal" value={form.vendor_id} onChange={(e) => setForm({ ...form, vendor_id: e.target.value })}>
+          {vendors.map((v) => <MenuItem key={v.id} value={v.id}>{v.name}</MenuItem>)}
+        </TextField>
+        <TextField fullWidth select label="Category" margin="normal" value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
+          {categories.map((c) => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
+        </TextField>
+        <TextField fullWidth label="Description" margin="normal" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <Grid container spacing={1.5}>
+          <Grid item xs={6}><TextField fullWidth type="date" label="Bill date" InputLabelProps={{ shrink: true }} margin="normal" value={form.bill_date} onChange={(e) => setForm({ ...form, bill_date: e.target.value })} /></Grid>
+          <Grid item xs={6}><TextField fullWidth type="date" label="Due date (optional)" InputLabelProps={{ shrink: true }} margin="normal" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} /></Grid>
+          <Grid item xs={6}><TextField fullWidth type="number" label="Subtotal (₹, before GST)" margin="normal" value={form.subtotal} onChange={(e) => setForm({ ...form, subtotal: e.target.value })} /></Grid>
+          <Grid item xs={6}><TextField fullWidth type="number" label="GST rate (%)" margin="normal" value={form.gst_rate} onChange={(e) => setForm({ ...form, gst_rate: e.target.value })} /></Grid>
+        </Grid>
+        {form.subtotal && (
+          <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', mt: 0.5 }}>
+            GST: ₹{gstAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} · Total: ₹{total.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+          </Typography>
+        )}
+        <TextField
+          fullWidth select label="Payment" margin="normal"
+          value={form.pay_immediately ? 'now' : 'later'}
+          onChange={(e) => setForm({ ...form, pay_immediately: e.target.value === 'now' })}
+        >
+          <MenuItem value="now">Paid now</MenuItem>
+          <MenuItem value="later">Not paid yet (goes to Accounts Payable)</MenuItem>
+        </TextField>
+        {form.pay_immediately && (
+          <TextField fullWidth select label="Bank account" margin="normal" value={form.bank_account_id} onChange={(e) => setForm({ ...form, bank_account_id: e.target.value })}>
+            {bankAccounts.map((b) => <MenuItem key={b.id} value={b.id}>{b.account_name}</MenuItem>)}
+          </TextField>
+        )}
+        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" onClick={handleSubmit} disabled={saving || !canSubmit}>{saving ? 'Saving…' : 'Save expense'}</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+function PayBillDialog({ bill, onClose, onSaved }) {
+  const [bankAccountId, setBankAccountId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!bill) return;
+    setBankAccountId(''); setError('');
+    setAmount((Number(bill.total_amount) - Number(bill.amount_paid)).toFixed(2));
+    client.get('/bank-accounts').then(({ data }) => setBankAccounts(data.accounts || [])).catch(() => setBankAccounts([]));
+  }, [bill]);
+
+  const handlePay = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await client.post(`/finance/bills/${bill.id}/pay`, { bank_account_id: bankAccountId, amount: Number(amount) });
+      onClose();
+      onSaved();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to record payment');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!bill} onClose={onClose} maxWidth="xs" fullWidth>
+      <DialogTitle>Pay bill {bill?.bill_number}</DialogTitle>
+      <DialogContent>
+        <TextField fullWidth select label="Bank account" margin="normal" value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)}>
+          {bankAccounts.map((b) => <MenuItem key={b.id} value={b.id}>{b.account_name}</MenuItem>)}
+        </TextField>
+        <TextField fullWidth type="number" label="Amount" margin="normal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" onClick={handlePay} disabled={saving || !bankAccountId || !amount}>{saving ? 'Processing…' : 'Confirm payment'}</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+function ExpensesSection() {
+  const [bills, setBills] = useState([]);
+  const [newOpen, setNewOpen] = useState(false);
+  const [payBill, setPayBill] = useState(null);
+
+  const load = () => client.get('/finance/bills').then(({ data }) => setBills(data.bills)).catch(() => setBills([]));
+  useEffect(() => { load(); }, []);
+
+  return (
+    <Box>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewOpen(true)}>New expense</Button>
+      </Box>
+      <Paper>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Bill #</TableCell><TableCell>Vendor</TableCell><TableCell>Category</TableCell>
+              <TableCell>Date</TableCell><TableCell align="right">Subtotal</TableCell>
+              <TableCell align="right">GST</TableCell><TableCell align="right">Total</TableCell>
+              <TableCell>Status</TableCell><TableCell align="right">Action</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {bills.map((b) => (
+              <TableRow key={b.id}>
+                <TableCell sx={{ fontSize: '0.8rem' }}>{b.bill_number}</TableCell>
+                <TableCell sx={{ fontSize: '0.85rem' }}>{b.vendor_name}</TableCell>
+                <TableCell sx={{ fontSize: '0.85rem' }}>{b.category_name || '—'}</TableCell>
+                <TableCell className="figure" sx={{ fontSize: '0.8rem' }}>{b.bill_date?.slice(0, 10)}</TableCell>
+                <TableCell align="right"><Money amount={b.subtotal} size="0.8rem" /></TableCell>
+                <TableCell align="right"><Money amount={b.gst_amount} size="0.8rem" /></TableCell>
+                <TableCell align="right"><Money amount={b.total_amount} size="0.85rem" /></TableCell>
+                <TableCell><Chip size="small" label={b.status} color={b.status === 'paid' ? 'success' : b.status === 'received' ? 'warning' : 'default'} /></TableCell>
+                <TableCell align="right">
+                  {b.status !== 'paid' && <Button size="small" onClick={() => setPayBill(b)}>Pay</Button>}
+                </TableCell>
+              </TableRow>
+            ))}
+            {!bills.length && <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No expenses recorded yet.</TableCell></TableRow>}
+          </TableBody>
+        </Table>
+      </Paper>
+      <NewExpenseDialog open={newOpen} onClose={() => setNewOpen(false)} onSaved={load} />
+      <PayBillDialog bill={payBill} onClose={() => setPayBill(null)} onSaved={load} />
+    </Box>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // BUDGETS & CASH FLOW (finance/admin/owner only)
 // ════════════════════════════════════════════════════════════════════════
 
@@ -681,10 +873,15 @@ export default function Finance() {
 
   const [section, setSection] = useState(0);
 
+  // 'Expenses' sits alongside Purchase Requests/Budgets — gated the same way
+  // (finance/admin/owner). Render below now looks up by label instead of a
+  // hardcoded index, so adding/removing a section here can't silently shift
+  // which component renders under which tab (that was a latent bug in the
+  // old index-based version — it "worked" only because the array never grew).
   const SECTIONS = [
     'Expense Claims',
     'Purchase Requests',
-    ...(canSeeAll ? ['Budgets & Cash Flow'] : []),
+    ...(canSeeAll ? ['Expenses', 'Budgets & Cash Flow'] : []),
     ...(isAdmin ? ['Thresholds'] : []),
   ];
 
@@ -696,10 +893,11 @@ export default function Finance() {
         {SECTIONS.map((s) => <Tab key={s} label={s} />)}
       </Tabs>
 
-      {section === 0 && <ExpenseClaimsSection canSeeAll={canSeeAll} />}
-      {section === 1 && <PurchaseRequestsSection canSeeAll={canSeeAll} />}
-      {section === 2 && canSeeAll && <BudgetsCashFlowSection />}
-      {((canSeeAll && section === 3) || (!canSeeAll && section === 2)) && isAdmin && <ThresholdsTab />}
+      {SECTIONS[section] === 'Expense Claims' && <ExpenseClaimsSection canSeeAll={canSeeAll} />}
+      {SECTIONS[section] === 'Purchase Requests' && <PurchaseRequestsSection canSeeAll={canSeeAll} />}
+      {SECTIONS[section] === 'Expenses' && <ExpensesSection />}
+      {SECTIONS[section] === 'Budgets & Cash Flow' && <BudgetsCashFlowSection />}
+      {SECTIONS[section] === 'Thresholds' && <ThresholdsTab />}
     </Box>
   );
 }

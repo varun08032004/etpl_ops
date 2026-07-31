@@ -59,6 +59,9 @@ import ProductReleases from './pages/ProductReleases';
 import ProductFeedback from './pages/ProductFeedback';
 import ProductBetaUsers from './pages/ProductBetaUsers';
 import ProductSubscriptions from './pages/ProductSubscriptions';
+import ProductPricing from './pages/ProductPricing';
+import ProductCoupons from './pages/ProductCoupons';
+import CorporateDeals from './pages/CorporateDeals';
 
 // Widened to include legal_hod/compliance_hod/marketing_hod/sales_hod/
 // product_hod — matches Layout.jsx's PRIVILEGED_ROLES, so those roles get
@@ -152,6 +155,9 @@ export default function App() {
               <Route path="/product/feedback" element={<ProductFeedback />} />
               <Route path="/product/beta-users" element={<ProductBetaUsers />} />
               <Route path="/product/subscriptions" element={<ProductSubscriptions />} />
+              <Route path="/product/pricing" element={<ProductPricing />} />
+              <Route path="/product/coupons" element={<ProductCoupons />} />
+              <Route path="/product/corporate-deals" element={<CorporateDeals />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

@@ -26,6 +26,9 @@ export default function PlatformSyncLog() {
   const [voiding, setVoiding] = useState(false);
   const [voidError, setVoidError] = useState('');
 
+  const [refunds, setRefunds] = useState(null);
+  const [refundsError, setRefundsError] = useState(null);
+
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
 
   const load = () => {
@@ -38,9 +41,26 @@ export default function PlatformSyncLog() {
   };
   useEffect(() => { load(); }, [month, year]);
 
+  const loadRefunds = () => {
+    setRefundsError(null);
+    client.get('/platform-sync/refunds')
+      .then(({ data }) => setRefunds(data.refunds))
+      .catch((e) => setRefundsError(e.response?.data?.error || 'Failed to load refunds'));
+  };
+  useEffect(() => { loadRefunds(); }, []);
+
   const openVoid = (record) => {
     setVoidTarget(record);
     setVoidReason('');
+    setVoidError('');
+  };
+
+  // Pre-fills the reason for a refund-driven void, but still requires the
+  // person to confirm via the same dialog/reason field as a manual void —
+  // no direct one-click bypass of the "reason required" safeguard.
+  const openVoidForRefund = (refund) => {
+    setVoidTarget({ id: refund.logId, entry_number: refund.entryNumber });
+    setVoidReason(`Razorpay refund processed on platform (ref: ${refund.refund_ref || 'n/a'}) — ₹${Number(refund.refund_amount_inr).toLocaleString('en-IN')} refunded to ${refund.customer_email || 'customer'}.`);
     setVoidError('');
   };
 
@@ -52,6 +72,7 @@ export default function PlatformSyncLog() {
       await client.post(`/platform-sync/records/${voidTarget.id}/void`, { reason: voidReason.trim() });
       setVoidTarget(null);
       load();
+      loadRefunds();
     } catch (e) {
       setVoidError(e.response?.data?.error || 'Failed to void this record');
     } finally {
@@ -61,6 +82,44 @@ export default function PlatformSyncLog() {
 
   return (
     <Box>
+      {refundsError && <Alert severity="error" sx={{ mb: 2 }}>{refundsError}</Alert>}
+      {refunds && refunds.filter((r) => r.status === 'needs_reversal').length > 0 && (
+        <Paper sx={{ mb: 3, p: 2, borderLeft: '3px solid', borderColor: 'warning.main' }}>
+          <Typography sx={{ fontWeight: 600, mb: 1 }}>
+            ⚠ {refunds.filter((r) => r.status === 'needs_reversal').length} refund(s) need a reversing entry
+          </Typography>
+          <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', mb: 1.5 }}>
+            These subscription payments were refunded on the platform, and the original revenue is
+            still posted in your books. Click Void to reverse each one — same as voiding a mistaken
+            import, just with the reason pre-filled.
+          </Typography>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Customer</TableCell>
+                <TableCell>Plan</TableCell>
+                <TableCell align="right">Refund Amount</TableCell>
+                <TableCell>Refunded On</TableCell>
+                <TableCell align="right">Action</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {refunds.filter((r) => r.status === 'needs_reversal').map((r) => (
+                <TableRow key={r.ref_id}>
+                  <TableCell sx={{ fontSize: '0.8rem' }}>{r.customer_name || '—'}<br /><span style={{ color: '#888', fontSize: '0.72rem' }}>{r.customer_email}</span></TableCell>
+                  <TableCell sx={{ fontSize: '0.8rem', textTransform: 'capitalize' }}>{r.plan} ({r.cycle})</TableCell>
+                  <TableCell align="right"><Money amount={r.refund_amount_inr} size="0.85rem" /></TableCell>
+                  <TableCell sx={{ fontSize: '0.8rem' }}>{new Date(r.refunded_at).toLocaleDateString('en-IN')}</TableCell>
+                  <TableCell align="right">
+                    <Button size="small" color="error" onClick={() => openVoidForRefund(r)}>Void</Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Paper>
+      )}
+
       <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2.5 }}>
         <TextField select size="small" label="Month" value={month} onChange={(e) => setMonth(Number(e.target.value))} sx={{ minWidth: 160 }}>
           {MONTHS.map((m, i) => <MenuItem key={m} value={i + 1}>{m}</MenuItem>)}

@@ -936,22 +936,28 @@ router.post('/occurrences/:id/mark-paid', requireRole('finance'), async (req, re
 
     let billId = null;
     try {
+      if (occ.approval_status !== 'approved') {
+        throw Object.assign(new Error(`This recurring expense is "${occ.approval_status}" and needs owner/admin approval before it can be marked paid. Approve it first.`), { httpStatus: 403 });
+      }
+      // bank_account_id is required in every case now — marking paid always posts a
+      // journal entry, so there's always a bank leg. Previously this was only required
+      // (and journal entry only posted) when auto_create_bill was true, so any recurring
+      // expense with that flag left off (which is common — it's opt-in, not default)
+      // silently never touched the ledger at all: status flipped to 'paid', trial
+      // balance/P&L never moved.
+      if (!bank_account_id) throw Object.assign(new Error('bank_account_id is required'), { httpStatus: 400 });
+
+      let expenseAccountId = occ.expense_account_id;
+      if (!expenseAccountId && occ.category_id) {
+        const { rows: [cat] } = await safeQuery(`SELECT expense_account_id FROM expense_categories WHERE id = $1`, [occ.category_id]);
+        expenseAccountId = cat?.expense_account_id;
+      }
+      if (!expenseAccountId) throw Object.assign(new Error('No expense account configured for this recurring expense — set one on the category or the recurring expense itself'), { httpStatus: 400 });
+
+      const { rows: [bank] } = await safeQuery(`SELECT ledger_account_id FROM bank_accounts WHERE id = $1`, [bank_account_id]);
+      if (!bank) throw Object.assign(new Error('Bank account not found'), { httpStatus: 404 });
+
       if (occ.auto_create_bill) {
-        if (occ.approval_status !== 'approved') {
-          throw Object.assign(new Error(`This recurring expense is "${occ.approval_status}" and needs owner/admin approval before it can auto-create a bill. Approve it first.`), { httpStatus: 403 });
-        }
-        if (!bank_account_id) throw Object.assign(new Error('bank_account_id is required when this recurring expense auto-creates bills'), { httpStatus: 400 });
-
-        let expenseAccountId = occ.expense_account_id;
-        if (!expenseAccountId && occ.category_id) {
-          const { rows: [cat] } = await safeQuery(`SELECT expense_account_id FROM expense_categories WHERE id = $1`, [occ.category_id]);
-          expenseAccountId = cat?.expense_account_id;
-        }
-        if (!expenseAccountId) throw Object.assign(new Error('No expense account configured for this recurring expense — set one on the category or the recurring expense itself'), { httpStatus: 400 });
-
-        const { rows: [bank] } = await safeQuery(`SELECT ledger_account_id FROM bank_accounts WHERE id = $1`, [bank_account_id]);
-        if (!bank) throw Object.assign(new Error('Bank account not found'), { httpStatus: 404 });
-
         const { rows: [{ next_num }] } = await safeQuery(
           `SELECT 'BILL-' || EXTRACT(YEAR FROM CURRENT_DATE) || '-' ||
                   LPAD((COALESCE(MAX(SUBSTRING(bill_number FROM '\\d+$')::int), 0) + 1)::text, 6, '0') AS next_num
@@ -968,7 +974,7 @@ router.post('/occurrences/:id/mark-paid', requireRole('finance'), async (req, re
         });
         billId = bill.id;
 
-        await ledger.postJournalEntry({
+        const je = await ledger.postJournalEntry({
           entryDate: occ.due_date, source: 'bill', sourceType: 'recurring_expense', sourceId: occ.id,
           narration: `${occ.name} (recurring)`, createdBy: req.staff.id,
           lines: [
@@ -976,7 +982,20 @@ router.post('/occurrences/:id/mark-paid', requireRole('finance'), async (req, re
             { accountId: bank.ledger_account_id, credit: occ.amount, description: `Payment for ${occ.name}` },
           ],
         });
-        await safeQuery(`UPDATE bills SET journal_entry_id = (SELECT id FROM journal_entries WHERE source_id = $1 ORDER BY created_at DESC LIMIT 1) WHERE id = $2`, [occ.id, billId]);
+        await safeQuery(`UPDATE bills SET journal_entry_id = $1 WHERE id = $2`, [je.id, billId]);
+      } else {
+        // No formal bills row (no vendor invoice to track — e.g. a bank fee, or
+        // a subscription where the vendor doesn't issue a bill) — but it still
+        // has to hit the ledger, otherwise this occurrence has zero accounting
+        // impact forever. This branch is what was completely missing before.
+        await ledger.postJournalEntry({
+          entryDate: occ.due_date, source: 'manual', sourceType: 'recurring_expense', sourceId: occ.id,
+          narration: `${occ.name} (recurring, no bill)`, createdBy: req.staff.id,
+          lines: [
+            { accountId: expenseAccountId, debit: occ.amount, description: occ.name },
+            { accountId: bank.ledger_account_id, credit: occ.amount, description: `Payment for ${occ.name}` },
+          ],
+        });
       }
 
       const { rows: [updated] } = await safeQuery(

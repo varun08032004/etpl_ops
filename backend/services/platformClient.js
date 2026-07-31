@@ -57,6 +57,63 @@ async function fetchPlatformCustomers(limit = 1000) {
   return data.customers || [];
 }
 
+// fetchChurnEvents: paid→free downgrades recorded on the platform, so Sales/
+// CS can be alerted for win-back outreach same-day instead of only noticing
+// on the next customer-roster pull. `since` is an ISO timestamp; omit to get
+// the platform's own default window (last 30 days).
+async function fetchChurnEvents(since = null) {
+  const base = process.env.PLATFORM_API_URL;
+  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
+  if (!base || !token) {
+    throw new Error(
+      'PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example'
+    );
+  }
+  const qs = since ? `?since=${encodeURIComponent(since)}` : '';
+  const url = `${base.replace(/\/$/, '')}/api/ops-integration/churn-events${qs}`;
+  let resp;
+  try {
+    resp = await fetch(url, { headers: { 'x-service-token': token } });
+  } catch (err) {
+    throw new Error(`Could not reach platform API at ${base}: ${err.message}`);
+  }
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`Platform API returned ${resp.status}: ${body.slice(0, 300)}`);
+  }
+  const data = await resp.json();
+  return data.events || [];
+}
+
+// fetchPlatformRefunds: subscription payments Razorpay has refunded on the
+// platform. Read-only, same token as fetchPlatformCustomers/fetchPlatformIncome
+// — this doesn't process anything, just tells the ERP a refund happened so
+// Finance can check whether that revenue was ever imported and, if so,
+// reverse it (via the existing platform-sync void flow).
+async function fetchPlatformRefunds(since = null) {
+  const base = process.env.PLATFORM_API_URL;
+  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
+  if (!base || !token) {
+    throw new Error(
+      'PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example'
+    );
+  }
+  const qs = since ? `?since=${encodeURIComponent(since)}` : '';
+  const url = `${base.replace(/\/$/, '')}/api/ops-integration/refunds${qs}`;
+  let resp;
+  try {
+    resp = await fetch(url, { headers: { 'x-service-token': token } });
+  } catch (err) {
+    throw new Error(`Could not reach platform API at ${base}: ${err.message}`);
+  }
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`Platform API returned ${resp.status}: ${body.slice(0, 300)}`);
+  }
+  const data = await resp.json();
+  return data.refunds || [];
+}
+
 // fetchInvoicePdf: pulls the real invoice/bill PDF for a single subscription
 // payment or trade, straight from the platform. type must be 'subscription'
 // or 'trade'; id is the same ref_id fetchPlatformIncome() returns for that
@@ -170,6 +227,90 @@ async function fetchCorporateActivations() {
 }
 
 module.exports = {
-  fetchPlatformIncome, fetchPlatformCustomers, fetchInvoicePdf,
+  fetchPlatformIncome, fetchPlatformCustomers, fetchInvoicePdf, fetchChurnEvents, fetchPlatformRefunds,
   activateCorporate, updateCorporateRenewal, fetchCorporateActivations,
+  createCoupon, listCoupons, setCouponActive,
+  updatePlanPrice, fetchPlanPrices,
 };
+
+// ─────────────────────────────────────────────────────────────────────────
+// Coupons — WRITE path, own token/namespace (PLATFORM_SYNC_COUPON_WRITE_TOKEN
+// against /api/ops-integration-coupons/*), same isolation reasoning as
+// Corporate above — see routes/opsIntegrationCoupons.js on the platform side.
+
+async function platformScopedCall(namespace, tokenEnvVar, path, method, body) {
+  const base = process.env.PLATFORM_API_URL;
+  const token = process.env[tokenEnvVar];
+  if (!base || !token) {
+    throw new Error(`PLATFORM_API_URL / ${tokenEnvVar} not configured — see .env.example`);
+  }
+  const url = `${base.replace(/\/$/, '')}/api/${namespace}${path}`;
+  let resp;
+  try {
+    resp = await fetch(url, {
+      method,
+      headers: { 'x-service-token': token, 'Content-Type': 'application/json' },
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    throw new Error(`Could not reach platform API at ${base}: ${err.message}`);
+  }
+  const text = await resp.text().catch(() => '');
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* leave as null */ }
+
+  if (!resp.ok) {
+    throw Object.assign(
+      new Error(`Platform API returned ${resp.status}: ${(text || '').slice(0, 300)}`),
+      { status: resp.status, body: data }
+    );
+  }
+  return data;
+}
+
+// createCoupon — plans is restricted to ['starter','growth'] on the
+// platform side regardless of what's passed; Corporate is never a coupon
+// target (it's manual, per-deal pricing via Corporate Deals instead).
+async function createCoupon({
+  code, discountType = 'percent', discountValue,
+  applicablePlans = ['starter', 'growth'], applicableCycles = ['annual'],
+  firstTimeOnly = true, perUserLimit = 1, maxRedemptions = null,
+  validFrom = null, validUntil = null, createdBy = null,
+}) {
+  const data = await platformScopedCall('ops-integration-coupons', 'PLATFORM_SYNC_COUPON_WRITE_TOKEN', '/', 'POST', {
+    code, discountType, discountValue, applicablePlans, applicableCycles,
+    firstTimeOnly, perUserLimit, maxRedemptions, validFrom, validUntil, createdBy,
+  });
+  return data?.coupon;
+}
+
+async function listCoupons() {
+  const data = await platformScopedCall('ops-integration-coupons', 'PLATFORM_SYNC_COUPON_WRITE_TOKEN', '/', 'GET', null);
+  return data?.coupons || [];
+}
+
+async function setCouponActive(code, active, { validUntil, maxRedemptions } = {}) {
+  const data = await platformScopedCall(
+    'ops-integration-coupons', 'PLATFORM_SYNC_COUPON_WRITE_TOKEN',
+    `/${encodeURIComponent(code)}`, 'PATCH', { active, validUntil, maxRedemptions }
+  );
+  return data?.coupon;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Pricing — WRITE path, own token/namespace (PLATFORM_SYNC_PRICING_WRITE_TOKEN
+// against /api/ops-integration-pricing/*). Starter/Growth only — Corporate
+// pricing is always per-deal via Corporate Deals, never a flat rate here.
+
+async function updatePlanPrice(plan, cycle, priceINR, updatedBy = null) {
+  const data = await platformScopedCall(
+    'ops-integration-pricing', 'PLATFORM_SYNC_PRICING_WRITE_TOKEN',
+    `/${plan}/${cycle}`, 'PATCH', { priceINR, updatedBy }
+  );
+  return data;
+}
+
+async function fetchPlanPrices() {
+  const data = await platformScopedCall('ops-integration-pricing', 'PLATFORM_SYNC_PRICING_WRITE_TOKEN', '/', 'GET', null);
+  return data?.prices || [];
+}

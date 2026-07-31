@@ -32,7 +32,7 @@ const router = express.Router();
 const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const ledger = require('../services/ledger');
-const { fetchPlatformIncome, fetchPlatformCustomers, fetchInvoicePdf } = require('../services/platformClient');
+const { fetchPlatformIncome, fetchPlatformCustomers, fetchInvoicePdf, fetchPlatformRefunds } = require('../services/platformClient');
 
 router.use(authenticate);
 
@@ -386,6 +386,59 @@ router.get('/customers', requireRole('finance', 'manager'), async (req, res) => 
     const customers = await fetchPlatformCustomers(req.query.limit);
     res.json({ customers });
   } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── Refunds ─────────────────────────────────────────────────────────────
+//
+// Doesn't post or reverse anything itself — cross-references what the
+// platform says has been refunded against what's actually in
+// platform_sync_log, and tells Finance exactly which ones need a "Void"
+// click (reusing the EXISTING /records/:logId/void flow above, same
+// ledger.reverseJournalEntry() call, same required-reason safeguard) versus
+// which ones never made it into the books at all (nothing to reverse) or
+// have already been voided (nothing to do).
+//
+// GET /api/platform-sync/refunds?days=90
+router.get('/refunds', requireRole('finance'), async (req, res) => {
+  const days = Math.min(parseInt(req.query.days, 10) || 90, 365);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  try {
+    const refunds = await fetchPlatformRefunds(since);
+    if (!refunds.length) return res.json({ refunds: [] });
+
+    const refIds = refunds.map((r) => String(r.ref_id));
+    const { rows: logRows } = await safeQuery(
+      `SELECT psl.id AS log_id, psl.ref_id, psl.journal_entry_id, je.entry_number, je.reversed_by, rev.entry_number AS reversal_entry_number
+       FROM platform_sync_log psl
+       JOIN journal_entries je ON je.id = psl.journal_entry_id
+       LEFT JOIN journal_entries rev ON rev.id = je.reversed_by
+       WHERE psl.source = 'subscription' AND psl.ref_id = ANY($1)`,
+      [refIds]
+    );
+    const logByRefId = new Map(logRows.map((r) => [r.ref_id, r]));
+
+    const enriched = refunds.map((r) => {
+      const log = logByRefId.get(String(r.ref_id));
+      let status;
+      if (!log) status = 'not_yet_imported';       // revenue was never posted — nothing to reverse
+      else if (log.reversed_by) status = 'already_reversed';
+      else status = 'needs_reversal';               // posted, refunded, NOT yet voided — actionable
+
+      return {
+        ...r,
+        status,
+        logId: log?.log_id || null,
+        entryNumber: log?.entry_number || null,
+        reversalEntryNumber: log?.reversal_entry_number || null,
+      };
+    });
+
+    res.json({ refunds: enriched, needsReversalCount: enriched.filter((r) => r.status === 'needs_reversal').length });
+  } catch (err) {
+    console.error('[platform-sync:refunds]', err);
     res.status(err.status || 500).json({ error: err.message });
   }
 });

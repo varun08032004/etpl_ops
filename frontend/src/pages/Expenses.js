@@ -735,13 +735,13 @@ export default function Expenses() {
     }
   };
 
-  const handleMarkPaid = (occurrence, reload) => setPayDialog({ occurrence, reload });
+  const handleMarkPaid = (occurrence, reload) => { setSelectedBank(''); setPayDialog({ occurrence, reload }); };
 
   const [payError, setPayError] = useState('');
   const confirmMarkPaid = async () => {
     setPayError('');
     try {
-      await client.post(`/expenses/occurrences/${payDialog.occurrence.id}/mark-paid`, selectedBank ? { bank_account_id: selectedBank } : {});
+      await client.post(`/expenses/occurrences/${payDialog.occurrence.id}/mark-paid`, { bank_account_id: selectedBank });
       payDialog.reload();
       setPayDialog(null);
       setSelectedBank('');
@@ -826,16 +826,16 @@ export default function Expenses() {
         <DialogTitle>Mark "{payDialog?.occurrence.name}" as paid</DialogTitle>
         <DialogContent>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mb: 2 }}>
-            If this recurring expense auto-creates bills, pick which bank account it was paid from. If not, this just marks it paid without touching the ledger.
+            Marking paid always posts to the ledger now — pick which bank account it was paid from.
           </Typography>
-          <TextField fullWidth select label="Bank account (if applicable)" value={selectedBank} onChange={(e) => setSelectedBank(e.target.value)}>
+          <TextField fullWidth select required label="Bank account" value={selectedBank} onChange={(e) => setSelectedBank(e.target.value)}>
             {bankAccounts.map((b) => <MenuItem key={b.id} value={b.id}>{b.account_name}</MenuItem>)}
           </TextField>
           {payError && <Alert severity="error" sx={{ mt: 2 }}>{payError}</Alert>}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => { setPayDialog(null); setPayError(''); }}>Cancel</Button>
-          <Button variant="contained" onClick={confirmMarkPaid}>Confirm paid</Button>
+          <Button variant="contained" onClick={confirmMarkPaid} disabled={!selectedBank}>Confirm paid</Button>
         </DialogActions>
       </Dialog>
     </Box>
