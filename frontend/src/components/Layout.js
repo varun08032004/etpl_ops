@@ -10,6 +10,7 @@ import PaidOutlinedIcon from '@mui/icons-material/PaidOutlined';
 import PriceChangeOutlinedIcon from '@mui/icons-material/PriceChangeOutlined';
 import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
 import HandshakeOutlinedIcon from '@mui/icons-material/HandshakeOutlined';
+import SupportAgentOutlinedIcon from '@mui/icons-material/SupportAgentOutlined';
 import AccessTimeOutlinedIcon from '@mui/icons-material/AccessTimeOutlined';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
@@ -94,6 +95,7 @@ const NAV_GROUPS = [
       { to: '/invoices', label: 'Invoices', icon: ReceiptLongOutlinedIcon },
       { to: '/partnerships/follow-ups', label: 'Follow-ups Today', icon: PhoneCallbackOutlinedIcon },
       { to: '/partnerships/firms', label: 'Partner Firms', icon: HandshakeOutlinedIcon },
+      { to: '/support-tickets', label: 'Support Tickets', icon: SupportAgentOutlinedIcon },
     ],
   },
   {
@@ -143,6 +145,7 @@ const NAV_GROUPS = [
       { to: '/marketing/seo', label: 'SEO / Website', icon: TravelExploreOutlinedIcon },
       { to: '/marketing/blog', label: 'Blog', icon: EditNoteOutlinedIcon },
       { to: '/marketing/brand-assets', label: 'Brand Assets', icon: PaletteOutlinedIcon },
+      { to: '/marketing/coupon-performance', label: 'Coupon Performance', icon: LocalOfferOutlinedIcon },
     ],
   },
   {

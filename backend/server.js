@@ -53,7 +53,16 @@ app.use('/api/automation', require('./routes/automation'));
 app.use('/api/ai', require('./routes/ai'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/expenses', require('./routes/expenses'));
-app.use('/api/expense-claims', require('./routes/expenseClaims')); // NEW — employee reimbursement claims, distinct from routes/expenses.js's recurring company bills — NOTE: routes/finance.js ALSO implements /expense-claims/* under /api/finance; Finance.jsx currently calls the /api/finance version exclusively. These two haven't been reconciled yet — see the note at the top of routes/finance.js.
+// routes/expenseClaims.js REMOVED from mounting — Finance.jsx exclusively calls
+// /finance/expense-claims/* (routes/finance.js), which is the hardened,
+// canonical implementation (row-lock on decide, receipt-upload flow,
+// cross-level visibility). expenseClaims.js used a different data model
+// (category_id FK + manager->finance flow vs. finance.js's category free-text
+// + levels_required chain) and was still live and reachable even though
+// nothing in the frontend used it — dead but exploitable duplicate code.
+// The file itself is left in routes/ in case anything is worth porting from
+// it, but do not re-mount it without reconciling the two expense_claims
+// schemas/flows first.
 app.use('/api/settings', require('./routes/settings')); // NEW — real Settings module (SRS §8.23): compliance rates, PT/tax slabs, app settings
 app.use('/api/esignatures', require('./routes/esignatures')); // NEW — lightweight built-in e-signature (internal tracking + public /sign/:token links)
 app.use('/api/admin', require('./routes/admin'));
@@ -63,6 +72,7 @@ app.use('/api/certifications', require('./routes/certifications')); // NEW — c
 app.use('/api/ip-assets', require('./routes/ipAssets')); // NEW — closes SRS §8.14 IP tracking gap
 app.use('/api/data-governance', require('./routes/dataGovernance')); // NEW — closes SRS §8.14 data governance gap
 app.use('/api/finance', require('./routes/finance'));
+app.use('/api/finance/bills', require('./routes/bills')); // NEW — one-off vendor bills/expenses, surfaced as the "Expenses" tab inside Finance.jsx (distinct from routes/expenses.js's recurring flow)
 app.use('/api/purchase-requests', require('./routes/purchaseRequests')); // FIXED — built but never mounted; Finance.jsx's Purchase Requests section 404'd on every call until this line was added
 app.use('/api/bank-accounts', require('./routes/bankAccounts')); // FIXED — built but never mounted; the entire Bank Accounts page 404'd on every call until this line was added
 app.use('/api/accounting', require('./routes/accounting'));
@@ -81,6 +91,7 @@ app.use('/api/marketing/press', require('./routes/marketingPress')); // NEW — 
 app.use('/api/marketing/newsletter', require('./routes/marketingNewsletter')); // NEW — Marketing module: Newsletter/Email tracker page
 app.use('/api/marketing/seo', require('./routes/marketingSeo')); // NEW — Marketing module: SEO/website analytics page
 app.use('/api/marketing/dashboard', require('./routes/marketingDashboard')); // NEW — Marketing module: Dashboard overview page
+app.use('/api/marketing/coupon-performance', require('./routes/marketingCouponPerformance')); // NEW — Marketing module: coupon ROI/attribution
 app.use('/api/marketing/blog', require('./routes/marketingBlog')); // was built but never mounted — no frontend page exists yet either, this just makes the API reachable
 app.use('/api/partnerships/firms', require('./routes/partnershipFirms')); // NEW — Partnerships module: BDE target account tracker (CA/audit/ESG firms)
 app.use('/api/partnerships/activities', require('./routes/partnershipActivities')); // NEW — Partnerships module: call log + follow-ups
@@ -92,6 +103,7 @@ app.use('/api/product/subscriptions', require('./routes/productSubscriptions'));
 app.use('/api/product/pricing', require('./routes/productPricing')); // Product/Sales module: Starter/Growth dynamic pricing
 app.use('/api/product/coupons', require('./routes/productCoupons')); // Product/Sales module: coupon codes (e.g. EARLYBIRD50)
 app.use('/api/product/corporate-deals', require('./routes/corporateDeals')); // Product/Sales module: Corporate deal setup + installment invoicing
+app.use('/api/support-tickets-view', require('./routes/supportTicketsView')); // NEW — Sales/CS module: read-only platform support ticket visibility
 
 app.use((err, req, res, next) => {
   console.error('[unhandled]', err);
@@ -109,4 +121,5 @@ app.listen(PORT, () => {
   require('./services/financeScheduler');  // daily 07:00 — budget alert check (same gap, same fix)
   require('./services/corporateDealsScheduler'); // daily 08:00 — Corporate deal installment reminders
   require('./services/churnAlertScheduler'); // daily 09:00 — paid→free downgrade alerts to Sales/CS
+  require('./services/refundAlertScheduler'); // daily 09:30 — refunds needing a ledger reversal
 });

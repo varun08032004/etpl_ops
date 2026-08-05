@@ -273,7 +273,7 @@ function SubmitPRDialog({ open, onClose, onSubmitted }) {
 }
 
 function ConvertToBillDialog({ request, onClose, onSaved }) {
-  const [form, setForm] = useState({ vendor_id: '', category_id: '', bill_date: '', due_date: '' });
+  const [form, setForm] = useState({ vendor_id: '', category_id: '', bill_date: '', due_date: '', gst_rate: '18' });
   const [vendors, setVendors] = useState([]);
   const [categories, setCategories] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -315,6 +315,7 @@ function ConvertToBillDialog({ request, onClose, onSaved }) {
         </TextField>
         <TextField fullWidth type="date" label="Bill date" InputLabelProps={{ shrink: true }} margin="normal" value={form.bill_date} onChange={(e) => setForm({ ...form, bill_date: e.target.value })} />
         <TextField fullWidth type="date" label="Due date" InputLabelProps={{ shrink: true }} margin="normal" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
+        <TextField fullWidth type="number" label="GST rate (%)" margin="normal" value={form.gst_rate} onChange={(e) => setForm({ ...form, gst_rate: e.target.value })} />
         {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
       </DialogContent>
       <DialogActions>
@@ -451,11 +452,12 @@ function NewExpenseDialog({ open, onClose, onSaved }) {
   const [form, setForm] = useState({
     vendor_id: '', category_id: '', bill_date: new Date().toISOString().slice(0, 10),
     due_date: '', description: '', subtotal: '', gst_rate: '18',
-    pay_immediately: true, bank_account_id: '',
+    payment_method: 'bank', bank_account_id: '', paid_by_name: '',
   });
   const [vendors, setVendors] = useState([]);
   const [categories, setCategories] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
+  const [receiptFile, setReceiptFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -472,24 +474,47 @@ function NewExpenseDialog({ open, onClose, onSaved }) {
   const handleSubmit = async () => {
     setSaving(true);
     setError('');
+    let createdBillId = null;
     try {
-      await client.post('/finance/bills', {
+      const { data } = await client.post('/finance/bills', {
         ...form,
         subtotal: Number(form.subtotal),
         gst_rate: Number(form.gst_rate) || 0,
-        bank_account_id: form.pay_immediately ? form.bank_account_id : undefined,
+        bank_account_id: form.payment_method === 'bank' ? form.bank_account_id : undefined,
+        paid_by_name: form.payment_method === 'director_loan' ? form.paid_by_name : undefined,
       });
-      setForm({ vendor_id: '', category_id: '', bill_date: new Date().toISOString().slice(0, 10), due_date: '', description: '', subtotal: '', gst_rate: '18', pay_immediately: true, bank_account_id: '' });
+      createdBillId = data.bill.id;
+
+      // Proof is mandatory — upload it now and attach it to the bill we just
+      // created. If either step fails, delete the bill (routes/bills.js only
+      // allows this while receipt_document_id is still NULL) so no expense
+      // ever ends up in the books without supporting proof.
+      const fd = new FormData();
+      fd.append('file', receiptFile);
+      fd.append('title', `Receipt — ${form.description || data.bill.bill_number}`);
+      fd.append('doc_type', 'expense_receipt');
+      fd.append('entity_type', 'bill');
+      fd.append('entity_id', createdBillId);
+      const { data: docData } = await client.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await client.patch(`/finance/bills/${createdBillId}/receipt`, { receipt_document_id: docData.document.id });
+
+      setForm({ vendor_id: '', category_id: '', bill_date: new Date().toISOString().slice(0, 10), due_date: '', description: '', subtotal: '', gst_rate: '18', payment_method: 'bank', bank_account_id: '', paid_by_name: '' });
+      setReceiptFile(null);
       onClose();
       onSaved();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to save expense');
+      if (createdBillId) {
+        await client.delete(`/finance/bills/${createdBillId}`).catch(() => {});
+      }
+      setError(err.response?.data?.error || 'Failed to save expense — no record was kept without proof attached');
     } finally {
       setSaving(false);
     }
   };
 
-  const canSubmit = form.vendor_id && form.category_id && form.bill_date && form.subtotal && (!form.pay_immediately || form.bank_account_id);
+  const canSubmit = form.vendor_id && form.category_id && form.bill_date && form.subtotal && !!receiptFile
+    && (form.payment_method !== 'bank' || form.bank_account_id)
+    && (form.payment_method !== 'director_loan' || form.paid_by_name);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
@@ -515,16 +540,34 @@ function NewExpenseDialog({ open, onClose, onSaved }) {
         )}
         <TextField
           fullWidth select label="Payment" margin="normal"
-          value={form.pay_immediately ? 'now' : 'later'}
-          onChange={(e) => setForm({ ...form, pay_immediately: e.target.value === 'now' })}
+          value={form.payment_method}
+          onChange={(e) => setForm({ ...form, payment_method: e.target.value })}
         >
-          <MenuItem value="now">Paid now</MenuItem>
-          <MenuItem value="later">Not paid yet (goes to Accounts Payable)</MenuItem>
+          <MenuItem value="bank">Paid from company bank account</MenuItem>
+          <MenuItem value="director_loan">Paid personally by a director/founder (reimbursable)</MenuItem>
+          <MenuItem value="unpaid">Not yet paid (goes to Accounts Payable)</MenuItem>
         </TextField>
-        {form.pay_immediately && (
+        {form.payment_method === 'bank' && (
           <TextField fullWidth select label="Bank account" margin="normal" value={form.bank_account_id} onChange={(e) => setForm({ ...form, bank_account_id: e.target.value })}>
             {bankAccounts.map((b) => <MenuItem key={b.id} value={b.id}>{b.account_name}</MenuItem>)}
           </TextField>
+        )}
+        {form.payment_method === 'director_loan' && (
+          <>
+            <TextField fullWidth label="Paid by (director/founder name)" margin="normal" value={form.paid_by_name} onChange={(e) => setForm({ ...form, paid_by_name: e.target.value })} />
+            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', mt: -1, mb: 1 }}>
+              Posts to "Due to Director(s)" (2150) — the vendor is fully paid, the company now owes this amount back to them. Reimburse later via a manual journal entry: Dr 2150 / Cr Bank.
+            </Typography>
+          </>
+        )}
+        <Button component="label" variant="outlined" fullWidth sx={{ mt: 2 }} color={receiptFile ? 'primary' : 'error'}>
+          {receiptFile ? receiptFile.name : 'Attach bill / receipt (required)'}
+          <input type="file" hidden accept="image/*,.pdf" onChange={(e) => setReceiptFile(e.target.files[0])} />
+        </Button>
+        {!receiptFile && (
+          <Typography sx={{ fontSize: '0.75rem', color: 'error.main', mt: 0.5 }}>
+            An expense can't be saved without proof — attach the bill, invoice, or payment receipt.
+          </Typography>
         )}
         {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
       </DialogContent>
@@ -602,7 +645,7 @@ function ExpensesSection() {
               <TableCell>Bill #</TableCell><TableCell>Vendor</TableCell><TableCell>Category</TableCell>
               <TableCell>Date</TableCell><TableCell align="right">Subtotal</TableCell>
               <TableCell align="right">GST</TableCell><TableCell align="right">Total</TableCell>
-              <TableCell>Status</TableCell><TableCell align="right">Action</TableCell>
+              <TableCell>Status</TableCell><TableCell>Proof</TableCell><TableCell align="right">Action</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -616,12 +659,17 @@ function ExpensesSection() {
                 <TableCell align="right"><Money amount={b.gst_amount} size="0.8rem" /></TableCell>
                 <TableCell align="right"><Money amount={b.total_amount} size="0.85rem" /></TableCell>
                 <TableCell><Chip size="small" label={b.status} color={b.status === 'paid' ? 'success' : b.status === 'received' ? 'warning' : 'default'} /></TableCell>
+                <TableCell>
+                  {b.receipt_document_id
+                    ? <Button size="small" href={`/api/documents/${b.receipt_document_id}/download`} target="_blank" rel="noopener noreferrer">View</Button>
+                    : <Chip size="small" label="Missing" color="error" variant="outlined" />}
+                </TableCell>
                 <TableCell align="right">
                   {b.status !== 'paid' && <Button size="small" onClick={() => setPayBill(b)}>Pay</Button>}
                 </TableCell>
               </TableRow>
             ))}
-            {!bills.length && <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No expenses recorded yet.</TableCell></TableRow>}
+            {!bills.length && <TableRow><TableCell colSpan={10} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No expenses recorded yet.</TableCell></TableRow>}
           </TableBody>
         </Table>
       </Paper>

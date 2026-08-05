@@ -18,6 +18,16 @@
 // confirm against each state's PT portal, since these can and do change
 // (e.g. Maharashtra's PTRC due date moved from end-of-month to the 15th
 // effective March 2026).
+//
+// 2026-08 update: the old single 'shram_suvidha' one-time-registration row
+// (EPFO + ESIC combined) was split in one_time_registrations into two
+// separate rows — 'epfo_registration' and 'esic_registration' — since EPFO
+// and ESIC are two distinct registrations with two distinct numbers, even
+// though both are done via the same Shram Suvidha portal. The recurring
+// rules below were split the same way: PF ECR sits under epfo_registration,
+// and all ESI filings sit under esic_registration. This means marking EPFO
+// done only spawns the PF filing, and marking ESIC done only spawns the ESI
+// filings — no more double-spawning or missing filings from a single flag.
 
 const { safeQuery } = require('../db/pool');
 
@@ -35,8 +45,10 @@ const RECURRING_RULES = {
     { key: 'gstr1', title: 'GSTR-1', category: 'gst', interval: 'monthly', dueRule: { type: 'day_of_next_month', day: 11 } },
     { key: 'gstr9', title: 'GSTR-9 — Annual Return', category: 'gst', interval: 'annual', dueRule: { type: 'fixed_annual', month: 12, day: 31 }, note: 'Mandatory only above ₹2cr turnover — mark not-applicable if below.' },
   ],
-  shram_suvidha: [
+  epfo_registration: [
     { key: 'epf_ecr', title: 'EPF ECR — Monthly PF Return & Payment', category: 'pf', interval: 'monthly', dueRule: { type: 'day_of_next_month', day: 15 } },
+  ],
+  esic_registration: [
     { key: 'esi_contribution', title: 'ESI Monthly Contribution', category: 'esic', interval: 'monthly', dueRule: { type: 'day_of_next_month', day: 15 } },
     { key: 'esi_half_yearly_1', title: 'ESI Half-Yearly Return (Apr–Sep)', category: 'esic', interval: 'half_yearly', dueRule: { type: 'fixed_annual', month: 11, day: 11 } },
     { key: 'esi_half_yearly_2', title: 'ESI Half-Yearly Return (Oct–Mar)', category: 'esic', interval: 'half_yearly', dueRule: { type: 'fixed_annual', month: 5, day: 12 } },

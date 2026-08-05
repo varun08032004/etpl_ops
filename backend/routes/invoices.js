@@ -14,10 +14,6 @@ const HOME_STATE = process.env.COMPANY_STATE || 'Maharashtra'; // set to your re
 // ── create invoice ──────────────────────────────────────────────────────────
 // GST logic: if the customer's state matches HOME_STATE -> CGST + SGST (split rate).
 // Otherwise -> IGST (full rate). This is the standard India intra-state vs inter-state rule.
-// [REFACTOR] The actual GST computation + ledger posting now lives in
-// services/invoicing.js — extracted so services/corporateDeals.js can
-// generate one invoice per billing period without duplicating this logic.
-// Behavior here is unchanged.
 router.post('/', requireRole('finance'), async (req, res) => {
   try {
     const { party_id, invoice_date, due_date, items, notes } = req.body;
@@ -97,7 +93,23 @@ router.post('/:id/payments', requireRole('finance'), async (req, res) => {
     const newStatus = newPaid >= Number(invoice.total_amount) ? 'paid' : 'partially_paid';
     await safeQuery(`UPDATE invoices SET amount_paid = $1, status = $2 WHERE id = $3`, [newPaid, newStatus, invoice.id]);
 
-    res.status(201).json({ payment, invoiceStatus: newStatus });
+    // [AUTO-SUSPEND] If this invoice is a Corporate deal installment and is
+    // now fully paid, extend the platform account's access to cover the next
+    // period + grace. No-ops for regular (non-deal) invoices and for
+    // one_time deals — see services/corporateDeals.js's
+    // extendAccessForPaidInstallment() header comment for the full picture.
+    // Non-fatal: a failure here shouldn't undo an already-recorded payment.
+    let corporateAccessExtension = null;
+    if (newStatus === 'paid') {
+      try {
+        const { extendAccessForPaidInstallment } = require('../services/corporateDeals');
+        corporateAccessExtension = await extendAccessForPaidInstallment(invoice.id);
+      } catch (e) {
+        console.warn('[invoices:payment] corporate deal access extension failed (payment still recorded):', e.message);
+      }
+    }
+
+    res.status(201).json({ payment, invoiceStatus: newStatus, corporateAccessExtension });
   } catch (err) {
     console.error('[invoices:payment]', err);
     res.status(500).json({ error: 'Failed to record payment' });

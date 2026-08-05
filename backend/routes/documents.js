@@ -29,12 +29,20 @@ router.post('/', upload.single('file'), async (req, res) => {
     // among currently-active documents. Skipped when allow_duplicate is
     // explicitly set — used when the person picks "upload as a separate
     // document" after seeing the duplicate prompt, rather than replacing.
+    //
+    // FIXED: entity_id is UUID-typed, but this used to compare
+    // COALESCE(d.entity_id, '') = COALESCE($2, '') — Postgres has to resolve
+    // both COALESCE branches to the same type as the column (uuid), and ''
+    // is not a valid uuid literal, so this threw "invalid input syntax for
+    // type uuid: ''" on every single call, unconditionally — not something
+    // that only broke on edge-case data. Rewritten as an explicit NULL-safe
+    // comparison that never tries to cast '' to uuid.
     if (allow_duplicate !== 'true') {
       const { rows: [existing] } = await safeQuery(
         `SELECT d.*, sa.email AS uploaded_by_email FROM documents d
          LEFT JOIN staff_accounts sa ON sa.id = d.uploaded_by
          WHERE d.is_current = true AND d.entity_type = $1
-           AND COALESCE(d.entity_id, '') = COALESCE($2, '')
+           AND (d.entity_id = $2 OR (d.entity_id IS NULL AND $2::uuid IS NULL))
            AND LOWER(d.title) = LOWER($3)
          LIMIT 1`,
         [effectiveEntityType, entity_id || null, title]

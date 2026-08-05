@@ -13,25 +13,36 @@
 // no separate/parallel payment tracker. Corporate deals just adds the
 // header (deal terms) and links each period to its invoice.
 //
-// Platform access (subscription_plan/renewal_date) is set for the WHOLE
-// term up front via activateCorporate() regardless of billing_frequency —
-// i.e. a late installment doesn't automatically cut the customer's access
-// mid-term. That's a deliberate simplification: Corporate has always been
-// a relationship sold by Sales, not a metered/auto-suspend product, so
-// non-payment is a human follow-up (see sendInstallmentReminders below —
-// it cc's the internal ADMIN_EMAIL/finance inbox specifically so that
-// follow-up happens), not something this code enforces automatically. If
-// you want automatic suspension on missed payment later, that's a
-// deliberate follow-up change, not something to infer silently here.
+// [AUTO-SUSPEND] Platform access now tracks payment for multi-period deals:
+// - billing_frequency 'one_time' — full term granted up front, as before
+//   (nothing to enforce mid-term, there's only one payment).
+// - billing_frequency 'monthly'/'annual' — access is granted ONLY through
+//   the end of the current paid period, plus `grace_days` of buffer. When
+//   Finance records a payment against an installment invoice in the normal
+//   Invoices page (routes/invoices.js POST /:id/payments), that route calls
+//   extendAccessForPaidInstallment() below, which pushes the platform's
+//   subscription_renewal_date out to cover the next period. If a payment
+//   never lands, nothing extends it — the platform's OWN existing expiry
+//   enforcement (real-time check in planGate.js + the daily downgrade cron)
+//   takes care of the rest automatically. No suspend logic lives here; this
+//   just stops artificially extending access past what's actually been paid.
+// sendInstallmentReminders() below still fires reminder emails on the same
+// schedule regardless — the grace period exists so a customer who pays
+// slightly late doesn't get cut off before the reminder even lands.
 
 const { safeQuery: query } = require('../db/pool');
 const { createInvoice } = require('./invoicing');
 const { sendEmail } = require('./email');
-const { activateCorporate } = require('./platformClient');
+const { activateCorporate, updateCorporateRenewal } = require('./platformClient');
 
 function addMonths(date, n) {
   const d = new Date(date);
   d.setMonth(d.getMonth() + n);
+  return d;
+}
+function addDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
   return d;
 }
 function isoDate(d) { return d.toISOString().slice(0, 10); }
@@ -43,7 +54,7 @@ async function createCorporateDeal({
   partyId, platformUserId, platformEmail,
   termMonths, billingFrequency, seats = null,
   totalValueINR, discountPercent = 0,
-  notes = '', createdBy = null,
+  notes = '', createdBy = null, graceDays = 3,
 }) {
   if (!partyId) throw Object.assign(new Error('partyId is required'), { status: 400 });
   if (!platformUserId || !platformEmail) throw Object.assign(new Error('platformUserId and platformEmail are required'), { status: 400 });
@@ -53,6 +64,7 @@ async function createCorporateDeal({
   const discount = Number(discountPercent) || 0;
   if (discount < 0 || discount > 100) throw Object.assign(new Error('discountPercent must be between 0 and 100'), { status: 400 });
   if (billingFrequency === 'annual' && termMonths < 12) throw Object.assign(new Error("billingFrequency 'annual' requires termMonths >= 12"), { status: 400 });
+  const grace = Number.isInteger(graceDays) && graceDays >= 0 ? graceDays : 3;
 
   const totalValuePaise = Math.round(Number(totalValueINR) * 100);
   const netValuePaise   = Math.round(totalValuePaise * (1 - discount / 100));
@@ -71,11 +83,11 @@ async function createCorporateDeal({
   const { rows: [deal] } = await query(
     `INSERT INTO corporate_deals
        (party_id, platform_user_id, platform_email, term_months, billing_frequency, seats,
-        total_value_paise, discount_percent, net_value_paise, started_at, notes, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        total_value_paise, discount_percent, net_value_paise, started_at, notes, created_by, grace_days)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      RETURNING *`,
     [partyId, platformUserId, platformEmail, termMonths, billingFrequency, seats,
-     totalValuePaise, discount, netValuePaise, isoDate(startedAt), notes || null, createdBy]
+     totalValuePaise, discount, netValuePaise, isoDate(startedAt), notes || null, createdBy, grace]
   );
 
   // Generate one invoice per period
@@ -108,12 +120,25 @@ async function createCorporateDeal({
     installments.push({ ...installment, invoice });
   }
 
-  // Set platform access for the whole term, regardless of billing_frequency
+  // [AUTO-SUSPEND] One-time deals still get the whole term up front — there's
+  // only one payment, nothing to enforce mid-term. Multi-period deals only
+  // get access through the END OF PERIOD 1 + grace_days — access for later
+  // periods is granted as each installment is actually paid (see
+  // extendAccessForPaidInstallment below), not up front.
+  const firstPeriodEnd = numPeriods > 1 ? addMonths(startedAt, monthsPerPeriod) : addMonths(startedAt, termMonths);
+  const initialRenewalDate = billingFrequency === 'one_time'
+    ? firstPeriodEnd
+    : addDays(firstPeriodEnd, grace);
+
   try {
     await activateCorporate(platformUserId, {
       cycle: billingFrequency === 'monthly' ? 'monthly' : 'annual',
       seats, customPriceINR: round2(netValuePaise / 100),
-      renewalMonths: termMonths, notes,
+      renewalMonths: 1, notes, // placeholder — overwritten by the exact-date call below
+    });
+    await updateCorporateRenewal(platformUserId, {
+      renewalDate: initialRenewalDate.toISOString(), seats,
+      notes: numPeriods > 1 ? `Corporate deal created — access covers period 1 of ${numPeriods} + ${grace}-day grace` : 'Corporate deal created',
     });
   } catch (e) {
     // Deal + invoices are already committed at this point — surface the
@@ -125,6 +150,52 @@ async function createCorporateDeal({
   }
 
   return { deal, installments, platformActivationError: null };
+}
+
+// extendAccessForPaidInstallment — called from routes/invoices.js right after
+// an invoice flips to status='paid', if that invoice is a corporate deal
+// installment. Extends the platform account's access to cover through the
+// END of the period that was just paid, plus the deal's grace_days (buffer
+// for the NEXT installment to come in before access actually lapses). If
+// this was the LAST installment, extends to exactly the period end (no more
+// grace needed — the term is genuinely over) and marks the deal completed.
+// No-ops for 'one_time' deals (already covered the whole term) and for
+// invoices that aren't a corporate deal installment at all.
+async function extendAccessForPaidInstallment(invoiceId) {
+  const { rows: [row] } = await query(
+    `SELECT ci.deal_id, ci.period_number, ci.period_end,
+            d.platform_user_id, d.billing_frequency, d.term_months, d.grace_days, d.status AS deal_status, d.seats
+     FROM corporate_deal_installments ci
+     JOIN corporate_deals d ON d.id = ci.deal_id
+     WHERE ci.invoice_id = $1`,
+    [invoiceId]
+  );
+  if (!row || row.billing_frequency === 'one_time' || row.deal_status !== 'active') return { extended: false };
+
+  const numPeriods = row.billing_frequency === 'monthly' ? row.term_months : Math.ceil(row.term_months / 12);
+  const isLastPeriod = row.period_number >= numPeriods;
+
+  const newRenewalDate = isLastPeriod
+    ? new Date(row.period_end)
+    : addDays(new Date(row.period_end), row.grace_days);
+
+  try {
+    await updateCorporateRenewal(row.platform_user_id, {
+      renewalDate: newRenewalDate.toISOString(), seats: row.seats,
+      notes: isLastPeriod
+        ? `Final installment (${row.period_number}/${numPeriods}) paid — term complete`
+        : `Installment ${row.period_number}/${numPeriods} paid — access extended`,
+    });
+  } catch (e) {
+    console.error('[corporateDeals:extendAccess] updateCorporateRenewal failed:', e.message);
+    return { extended: false, error: e.message };
+  }
+
+  if (isLastPeriod) {
+    await query(`UPDATE corporate_deals SET status = 'completed' WHERE id = $1`, [row.deal_id]).catch(() => {});
+  }
+
+  return { extended: true, newRenewalDate, isLastPeriod };
 }
 
 async function listCorporateDeals() {
@@ -236,4 +307,4 @@ async function sendInstallmentReminders() {
   return { sent };
 }
 
-module.exports = { createCorporateDeal, listCorporateDeals, getCorporateDeal, sendInstallmentReminders };
+module.exports = { createCorporateDeal, listCorporateDeals, getCorporateDeal, sendInstallmentReminders, extendAccessForPaidInstallment };

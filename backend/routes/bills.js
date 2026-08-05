@@ -18,20 +18,26 @@ const round2 = (n) => Math.round(n * 100) / 100;
 // vendor invoice, a reimbursable purchase, a bank-fee, etc.) and have it
 // actually hit the ledger. GST logic mirrors routes/invoices.js exactly, just
 // on the input/ITC side: intra-state -> split Input CGST + Input SGST,
-// inter-state -> Input IGST, credited... no, DEBITED, since ITC is a
-// recoverable asset (1410/1420/1430) rather than a liability.
+// inter-state -> Input IGST, debited (ITC is a recoverable asset — 1410/1420/1430
+// — not a liability).
 router.post('/', requireRole('finance'), async (req, res) => {
   try {
     const {
       vendor_id, category_id, bill_date, due_date, description,
-      subtotal, gst_rate, expense_account_id, pay_immediately, bank_account_id,
+      subtotal, gst_rate, expense_account_id,
+      payment_method, // 'bank' | 'director_loan' | 'unpaid'
+      bank_account_id, paid_by_name,
     } = req.body;
 
     if (!vendor_id || !bill_date || !subtotal) {
       return res.status(400).json({ error: 'vendor_id, bill_date, subtotal are required' });
     }
-    if (pay_immediately && !bank_account_id) {
-      return res.status(400).json({ error: 'bank_account_id is required when pay_immediately is true' });
+    const method = payment_method || 'unpaid';
+    if (!['bank', 'director_loan', 'unpaid'].includes(method)) {
+      return res.status(400).json({ error: "payment_method must be 'bank', 'director_loan', or 'unpaid'" });
+    }
+    if (method === 'bank' && !bank_account_id) {
+      return res.status(400).json({ error: 'bank_account_id is required when payment_method is "bank"' });
     }
 
     const { rows: [vendor] } = await safeQuery(`SELECT * FROM parties WHERE id = $1`, [vendor_id]);
@@ -54,23 +60,28 @@ router.post('/', requireRole('finance'), async (req, res) => {
     const igst = isInterState ? gstAmount : 0;
     const totalAmount = round2(sub + cgst + sgst + igst);
 
-    const [{ rows: [expenseAcct] }, { rows: [apAcct] }, { rows: [cgstAcct] }, { rows: [sgstAcct] }, { rows: [igstAcct] }, { rows: [bank] }] =
+    const [{ rows: [expenseAcct] }, { rows: [apAcct] }, { rows: [directorAcct] }, { rows: [cgstAcct] }, { rows: [sgstAcct] }, { rows: [igstAcct] }, { rows: [bank] }] =
       await Promise.all([
         safeQuery(`SELECT id FROM chart_of_accounts WHERE id = $1`, [expenseAcctId]),
         safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '2100'`),   // Accounts Payable
+        safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '2150'`),  // Due to Director(s)
         safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '1410'`),  // Input CGST
         safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '1420'`),  // Input SGST
         safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '1430'`),  // Input IGST
         bank_account_id ? safeQuery(`SELECT ledger_account_id FROM bank_accounts WHERE id = $1`, [bank_account_id]) : Promise.resolve({ rows: [null] }),
       ]);
     if (!expenseAcct) return res.status(400).json({ error: 'expense_account_id does not match a chart_of_accounts row' });
-    if (pay_immediately && !bank) return res.status(404).json({ error: 'Bank account not found' });
+    if (method === 'bank' && !bank) return res.status(404).json({ error: 'Bank account not found' });
+    if (method === 'director_loan' && !directorAcct) {
+      return res.status(400).json({ error: '"Due to Director(s)" account (code 2150) not found — run migration 004_director_loan_account.sql first' });
+    }
 
     const resolvedDueDate = due_date || bill_date;
-    // bill_status enum has no 'pending' — 'received' is the correct not-yet-paid state
-    // (purchaseRequests.js's convert-to-bill route uses 'pending' too, which is the
-    // same bug — that insert will fail if it's ever hit; worth fixing there as well)
-    const status = pay_immediately ? 'paid' : 'received';
+    // bill_status enum has no 'pending' — 'received' is the correct not-yet-paid state.
+    // director_loan settles the VENDOR relationship immediately (they've been paid in
+    // full, just not by the company's own bank account), so it's 'paid' too — the
+    // outstanding liability just sits against the director instead of a bank account.
+    const status = method === 'unpaid' ? 'received' : 'paid';
 
     const bill = await withTransaction(async (client) => {
       const { rows: [{ next_num }] } = await client.query(
@@ -78,27 +89,30 @@ router.post('/', requireRole('finance'), async (req, res) => {
                 LPAD((COALESCE(MAX(SUBSTRING(bill_number FROM '\\d+$')::int), 0) + 1)::text, 6, '0') AS next_num
          FROM bills WHERE bill_number LIKE 'BILL-' || EXTRACT(YEAR FROM CURRENT_DATE) || '-%'`
       );
+      const noteSuffix = method === 'director_loan' && paid_by_name ? ` (paid personally by ${paid_by_name} — reimbursable)` : '';
       const { rows: [b] } = await client.query(
         `INSERT INTO bills (bill_number, vendor_id, bill_date, due_date, status, category_id,
            subtotal, gst_amount, total_amount, amount_paid, notes, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
         [next_num, vendor_id, bill_date, resolvedDueDate, status, category_id || null,
-         sub, round2(cgst + sgst + igst), totalAmount, pay_immediately ? totalAmount : 0,
-         description || null, req.staff.id]
+         sub, round2(cgst + sgst + igst), totalAmount, method === 'unpaid' ? 0 : totalAmount,
+         (description || '') + noteSuffix, req.staff.id]
       );
       return b;
     });
 
-    // Dr Expense, Dr Input GST (ITC) | Cr Bank (if paid now) or Cr Accounts Payable (if not)
+    // Dr Expense, Dr Input GST (ITC) | Cr Bank / Cr Due to Director(s) / Cr Accounts Payable
     const lines = [{ accountId: expenseAcct.id, debit: sub, description: description || `Bill ${bill.bill_number}` }];
     if (cgst > 0) lines.push({ accountId: cgstAcct.id, debit: cgst, description: 'Input CGST (ITC)' });
     if (sgst > 0) lines.push({ accountId: sgstAcct.id, debit: sgst, description: 'Input SGST (ITC)' });
     if (igst > 0) lines.push({ accountId: igstAcct.id, debit: igst, description: 'Input IGST (ITC)' });
-    lines.push(
-      pay_immediately
-        ? { accountId: bank.ledger_account_id, credit: totalAmount, description: `Payment for ${bill.bill_number}` }
-        : { accountId: apAcct.id, credit: totalAmount, partyId: vendor_id, description: `Payable — ${bill.bill_number}` }
-    );
+    if (method === 'bank') {
+      lines.push({ accountId: bank.ledger_account_id, credit: totalAmount, description: `Payment for ${bill.bill_number}` });
+    } else if (method === 'director_loan') {
+      lines.push({ accountId: directorAcct.id, credit: totalAmount, description: `Paid by ${paid_by_name || 'director'} — ${bill.bill_number}` });
+    } else {
+      lines.push({ accountId: apAcct.id, credit: totalAmount, partyId: vendor_id, description: `Payable — ${bill.bill_number}` });
+    }
 
     const je = await ledger.postJournalEntry({
       entryDate: bill_date, source: 'bill', sourceType: 'bill', sourceId: bill.id,
@@ -111,6 +125,68 @@ router.post('/', requireRole('finance'), async (req, res) => {
   } catch (err) {
     console.error('[bills:create]', err);
     res.status(500).json({ error: 'Failed to create bill' });
+  }
+});
+
+// ── attach proof of expense (receipt/invoice) to a bill ─────────────────────
+// Call this AFTER uploading the file via POST /documents with
+// entity_type='bill' and entity_id=<this bill's real id> — same two-step
+// pattern already used for expense_claims receipts (routes/finance.js).
+// Validates the document actually belongs to THIS bill and was uploaded by
+// the same person who's attaching it, so nobody can attach an arbitrary
+// document (including someone else's file) by guessing an id.
+router.patch('/:id/receipt', requireRole('finance'), async (req, res) => {
+  try {
+    const { receipt_document_id } = req.body;
+    if (!receipt_document_id) return res.status(400).json({ error: 'receipt_document_id is required' });
+
+    const { rows: [bill] } = await safeQuery(`SELECT * FROM bills WHERE id = $1`, [req.params.id]);
+    if (!bill) return res.status(404).json({ error: 'Bill not found' });
+
+    const { rows: [doc] } = await safeQuery(`SELECT * FROM documents WHERE id = $1`, [receipt_document_id]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (doc.entity_type !== 'bill' || doc.entity_id !== bill.id) {
+      return res.status(400).json({ error: 'This document was not uploaded against this bill' });
+    }
+    if (doc.uploaded_by !== req.staff.id) {
+      return res.status(403).json({ error: 'You did not upload this document' });
+    }
+
+    const { rows: [updated] } = await safeQuery(
+      `UPDATE bills SET receipt_document_id = $1 WHERE id = $2 RETURNING *`,
+      [receipt_document_id, req.params.id]
+    );
+    res.json({ bill: updated });
+  } catch (err) {
+    console.error('[bills:attach-receipt]', err);
+    res.status(500).json({ error: 'Failed to attach receipt' });
+  }
+});
+
+// ── delete a bill that was created without proof ever being attached ───────
+// Backstop for the "no expense without a bill" rule: if proof upload fails
+// client-side right after creation, the frontend calls this to undo the bill
+// AND reverse its journal entry, rather than leaving a proof-less expense
+// sitting in the books. Only allowed while receipt_document_id is still NULL —
+// once proof is attached, deleting requires the normal accounting trail
+// (a reversing entry), not a raw delete.
+router.delete('/:id', requireRole('finance'), async (req, res) => {
+  try {
+    const { rows: [bill] } = await safeQuery(`SELECT * FROM bills WHERE id = $1`, [req.params.id]);
+    if (!bill) return res.status(404).json({ error: 'Bill not found' });
+    if (bill.receipt_document_id) {
+      return res.status(400).json({ error: 'This bill already has proof attached — use a reversing entry instead of deleting it, to keep the accounting trail intact.' });
+    }
+
+    if (bill.journal_entry_id) {
+      await ledger.reverseJournalEntry(bill.journal_entry_id, { reason: 'Bill deleted — no proof attached', createdBy: req.staff.id });
+    }
+    await safeQuery(`DELETE FROM bills WHERE id = $1`, [req.params.id]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[bills:delete]', err);
+    res.status(500).json({ error: 'Failed to delete bill' });
   }
 });
 

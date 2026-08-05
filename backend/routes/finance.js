@@ -8,13 +8,17 @@
 //      Controller) -> L3 (CFO/Founder) chain, with how many levels required
 //      determined by amount at submission time (snapshotted).
 //
-// NOTE: server.js also mounts a separate routes/expenseClaims.js at
-// /api/expense-claims. As of this file, the frontend (Finance.jsx) still
-// calls /finance/expense-claims/* exclusively — this file's implementation
-// is the hardened, currently-live one (row-lock on decide, receipt-upload
-// flow, cross-level visibility). Reconcile which one is canonical before
-// treating both as active — don't run two parallel expense-claim systems
-// without a decision on which owns the data.
+// NOTE: server.js also mounted a separate routes/expenseClaims.js at
+// /api/expense-claims. That mount has been removed — Finance.jsx only ever
+// called this file's /finance/expense-claims/* endpoints, so the other
+// implementation was live, duplicate, unused code. This file is the
+// canonical, hardened one (row-lock on decide, receipt-upload flow,
+// cross-level visibility). routes/expenseClaims.js itself is left in the
+// repo in case anything else needs porting from it, but it's no longer
+// reachable — don't re-mount it without reconciling the two data models
+// first (this one uses `category` as free text + a levels_required/
+// current_level chain; the old one used `category_id` FK + a simpler
+// manager->finance flow).
 
 const express = require('express');
 const router = express.Router();
@@ -241,7 +245,7 @@ router.get('/expense-claims/mine', async (req, res) => {
   }
 });
 
-// ── claims pending the current user's decision at their level ──────────────
+// ── claims waiting on me — manager/dept-head sign-off, or finance reimbursement ──
 router.get('/expense-claims/pending-my-approval', async (req, res) => {
   try {
     const { rows: pending } = await safeQuery(
@@ -497,11 +501,16 @@ router.get('/cash-flow', requireRole('finance'), async (req, res) => {
 });
 
 // ── forward-looking cash flow forecast ──────────────────────────────────────
-// Combines three sources of KNOWN future outflow: recurring expenses (current
-// environment pricing), average of the last 3 paid payroll runs, and pending/
-// approved purchase requests bucketed by needed_by_date. This is deliberately
-// NOT a full P&L forecast — it doesn't know about one-off Accounting bills or
-// invoices outside these three sources. It answers "given what I already know
+// Combines FOUR sources of KNOWN future outflow: recurring expenses (current
+// environment pricing), average of the last 3 paid payroll runs, pending/
+// approved purchase requests bucketed by needed_by_date, and now unpaid bills
+// (routes/bills.js one-off expenses + purchase-request conversions) bucketed
+// by due_date. Previously bills were missing entirely — an approved PR
+// converted to a bill, or a one-off expense marked "pay later", posted a real
+// Accounts Payable liability to the ledger but never showed up in this
+// forecast, so runway projections silently understated near-term outflow.
+// This is still deliberately NOT a full P&L forecast — it doesn't know about
+// anything outside these four sources. It answers "given what I already know
 // is committed, when do I run low" — not "predict everything."
 router.get('/cash-flow/forecast', requireRole('finance'), async (req, res) => {
   try {
@@ -554,6 +563,14 @@ router.get('/cash-flow/forecast', requireRole('finance'), async (req, res) => {
       `SELECT estimated_amount, needed_by_date FROM purchase_requests WHERE status IN ('pending', 'approved')`
     );
 
+    // Unpaid bills — anything still carrying an Accounts Payable balance.
+    // Covers both routes/bills.js one-off expenses and purchase-request
+    // conversions, since both write to the same `bills` table.
+    const { rows: unpaidBills } = await safeQuery(
+      `SELECT (total_amount - amount_paid) AS remaining, due_date
+       FROM bills WHERE status IN ('received', 'partially_paid', 'overdue')`
+    );
+
     const forecast = [];
     let runningCash = startingCashInr;
     const now = new Date();
@@ -574,7 +591,17 @@ router.get('/cash-flow/forecast', requireRole('finance'), async (req, res) => {
         if (belongsHere || isPastDue) purchaseRequestOutflow += Number(pr.estimated_amount);
       }
 
-      const totalOutflow = monthlyRecurringInr + avgMonthlyPayrollInr + purchaseRequestOutflow;
+      let billsOutflow = 0;
+      for (const b of unpaidBills) {
+        const billDate = b.due_date ? new Date(b.due_date) : null;
+        const belongsHere = billDate
+          ? (billDate.getFullYear() === monthDate.getFullYear() && billDate.getMonth() === monthDate.getMonth())
+          : i === 0;
+        const isPastDue = billDate && billDate < now && i === 0;
+        if (belongsHere || isPastDue) billsOutflow += Number(b.remaining);
+      }
+
+      const totalOutflow = monthlyRecurringInr + avgMonthlyPayrollInr + purchaseRequestOutflow + billsOutflow;
       runningCash -= totalOutflow;
 
       forecast.push({
@@ -582,6 +609,7 @@ router.get('/cash-flow/forecast', requireRole('finance'), async (req, res) => {
         recurringExpensesInr: monthlyRecurringInr,
         payrollInr: avgMonthlyPayrollInr,
         purchaseRequestsInr: purchaseRequestOutflow,
+        billsInr: billsOutflow,
         totalOutflowInr: totalOutflow,
         projectedCashInr: runningCash,
       });
@@ -594,9 +622,10 @@ router.get('/cash-flow/forecast', requireRole('finance'), async (req, res) => {
       monthlyRecurringExpensesInr: monthlyRecurringInr,
       avgMonthlyPayrollInr,
       pendingPurchaseRequestsCount: pendingPRs.length,
+      unpaidBillsCount: unpaidBills.length,
       forecast,
       monthsUntilNegative: monthGoingNegative === -1 ? null : monthGoingNegative + 1,
-      note: 'Combines known recurring expenses, the average of your last 3 paid payroll runs, and pending/approved purchase requests. Does NOT include one-off Accounting bills or invoices outside these three sources — treat this as a floor estimate of known commitments, not a complete forecast.',
+      note: 'Combines known recurring expenses, the average of your last 3 paid payroll runs, pending/approved purchase requests, and unpaid bills (Accounts Payable). Does NOT include anything outside these four sources — treat this as a floor estimate of known commitments, not a complete forecast.',
     });
   } catch (err) {
     console.error('[finance:cash-flow:forecast]', err);

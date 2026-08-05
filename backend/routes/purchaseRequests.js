@@ -16,6 +16,7 @@ const { safeQuery, withTransaction } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { fireEvent } = require('../services/automationEngine');
 const { getLevelsRequired, canActAtLevel } = require('../services/spendApprovalChain');
+const ledger = require('../services/ledger');
 
 router.use(authenticate);
 
@@ -33,6 +34,10 @@ router.use((req, res, next) => {
   if (['POST', 'PUT', 'DELETE'].includes(req.method)) return writeLimiter(req, res, next);
   next();
 });
+
+// Same constant/convention as routes/invoices.js and routes/bills.js — keep in sync.
+const HOME_STATE = process.env.COMPANY_STATE || 'Maharashtra';
+const round2 = (n) => Math.round(n * 100) / 100;
 
 function paginationParams(req) {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
@@ -249,47 +254,111 @@ router.post('/:id/cancel', async (req, res) => {
 });
 
 // ── convert an approved purchase request into an actual vendor bill ────────
-// Closes the loop: right now an approved PR just sits there with nothing
-// tracking that the actual purchase/bill ever happened. Deliberately requires
-// an explicit vendor_id + category_id at conversion time rather than trying
-// to auto-match purchase_requests.vendor_name (free text) against your real
-// parties/vendor records — a human confirms the real vendor at the moment a
-// financial record is actually created, rather than the system guessing.
+// Closes the loop: an approved PR now creates a REAL liability — a bill row
+// AND a journal entry (Dr Expense + Input GST/ITC, Cr Accounts Payable),
+// using the same GST-split logic as routes/bills.js. Previously this route
+// created a `bills` row and stopped there: no journal entry, no GST, so an
+// approved-and-converted purchase request had zero effect on trial balance,
+// P&L, or accounts payable — the approval chain worked, the accounting didn't.
+//
+// Deliberately still requires an explicit vendor_id + category_id at
+// conversion time rather than auto-matching purchase_requests.vendor_name
+// (free text) against real parties/vendor records — a human confirms the
+// real vendor and expense account at the moment a financial record is
+// actually created, rather than the system guessing.
+//
+// This creates the LIABILITY only (status 'received', credited to Accounts
+// Payable) — it does not mark the bill paid. Use POST /api/finance/bills/:id/pay
+// (routes/bills.js) for the actual payment step, so there's one payment code
+// path for every bill regardless of how it was created.
 router.post('/:id/convert-to-bill', requireRole('finance'), async (req, res) => {
   try {
-    const { vendor_id, category_id, bill_date, due_date } = req.body;
+    const { vendor_id, category_id, expense_account_id, bill_date, due_date, gst_rate } = req.body;
     if (!vendor_id) return res.status(400).json({ error: 'vendor_id is required — select which vendor record this bill belongs to' });
 
-    const { rows: [pr] } = await safeQuery(`SELECT * FROM purchase_requests WHERE id = $1`, [req.params.id]);
-    if (!pr) return res.status(404).json({ error: 'Purchase request not found' });
-    if (pr.status !== 'approved') return res.status(400).json({ error: `Only approved purchase requests can be converted to a bill (this one is ${pr.status})` });
-    if (pr.converted_bill_id) return res.status(400).json({ error: 'This purchase request has already been converted to a bill' });
+    const { rows: [vendor] } = await safeQuery(`SELECT * FROM parties WHERE id = $1`, [vendor_id]);
+    if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
 
-    const resolvedBillDate = bill_date || new Date().toISOString().slice(0, 10);
-    const resolvedDueDate = due_date || resolvedBillDate;
+    // Resolve the expense (debit) account: explicit override > category default > error.
+    let expenseAcctId = expense_account_id || null;
+    if (!expenseAcctId && category_id) {
+      const { rows: [cat] } = await safeQuery(`SELECT expense_account_id FROM expense_categories WHERE id = $1`, [category_id]);
+      expenseAcctId = cat?.expense_account_id || null;
+    }
+    if (!expenseAcctId) return res.status(400).json({ error: 'expense_account_id is required (or pick a category with a default expense account)' });
 
-    const { rows: [{ next_num }] } = await safeQuery(
-      `SELECT 'BILL-' || EXTRACT(YEAR FROM CURRENT_DATE) || '-' ||
-              LPAD((COALESCE(MAX(SUBSTRING(bill_number FROM '\\d+$')::int), 0) + 1)::text, 6, '0') AS next_num
-       FROM bills WHERE bill_number LIKE 'BILL-' || EXTRACT(YEAR FROM CURRENT_DATE) || '-%'`
-    );
+    const [{ rows: [expenseAcct] }, { rows: [apAcct] }, { rows: [cgstAcct] }, { rows: [sgstAcct] }, { rows: [igstAcct] }] = await Promise.all([
+      safeQuery(`SELECT id FROM chart_of_accounts WHERE id = $1`, [expenseAcctId]),
+      safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '2100'`),   // Accounts Payable
+      safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '1410'`),  // Input CGST
+      safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '1420'`),  // Input SGST
+      safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '1430'`),  // Input IGST
+    ]);
+    if (!expenseAcct) return res.status(400).json({ error: 'expense_account_id does not match a chart_of_accounts row' });
 
-    const { rows: [bill] } = await safeQuery(
-      `INSERT INTO bills (bill_number, vendor_id, bill_date, due_date, status, category_id, subtotal, total_amount, amount_paid, notes, created_by)
-       VALUES ($1,$2,$3,$4,'pending',$5,$6,$6,0,$7,$8) RETURNING *`,
-      [next_num, vendor_id, resolvedBillDate, resolvedDueDate, category_id || null, pr.estimated_amount,
-       `From purchase request: ${pr.item_description} (${pr.vendor_name})`, req.staff.id]
-    );
+    const isInterState = vendor.state && vendor.state.trim().toLowerCase() !== HOME_STATE.trim().toLowerCase();
 
-    const { rows: [updatedPr] } = await safeQuery(
-      `UPDATE purchase_requests SET status = 'converted_to_bill', converted_bill_id = $1, converted_at = NOW(), updated_at = NOW() WHERE id = $2 RETURNING *`,
-      [bill.id, req.params.id]
-    );
+    const result = await withTransaction(async (client) => {
+      // Row lock closes the same race decide() guards against — two concurrent
+      // convert-to-bill calls on the same PR can no longer both pass the
+      // status/converted_bill_id check and create two separate bills.
+      const { rows: [pr] } = await client.query(`SELECT * FROM purchase_requests WHERE id = $1 FOR UPDATE`, [req.params.id]);
+      if (!pr) { const e = new Error('Purchase request not found'); e.httpStatus = 404; throw e; }
+      if (pr.status !== 'approved') { const e = new Error(`Only approved purchase requests can be converted to a bill (this one is ${pr.status})`); e.httpStatus = 400; throw e; }
+      if (pr.converted_bill_id) { const e = new Error('This purchase request has already been converted to a bill'); e.httpStatus = 400; throw e; }
 
-    res.status(201).json({ purchaseRequest: updatedPr, bill });
+      const resolvedBillDate = bill_date || new Date().toISOString().slice(0, 10);
+      const resolvedDueDate = due_date || resolvedBillDate;
+
+      const sub = round2(Number(pr.estimated_amount));
+      const rate = Number(gst_rate ?? 0);
+      const gstAmount = round2((sub * rate) / 100);
+      const cgst = isInterState ? 0 : round2(gstAmount / 2);
+      const sgst = isInterState ? 0 : round2(gstAmount / 2);
+      const igst = isInterState ? gstAmount : 0;
+      const totalAmount = round2(sub + cgst + sgst + igst);
+
+      const { rows: [{ next_num }] } = await client.query(
+        `SELECT 'BILL-' || EXTRACT(YEAR FROM CURRENT_DATE) || '-' ||
+                LPAD((COALESCE(MAX(SUBSTRING(bill_number FROM '\\d+$')::int), 0) + 1)::text, 6, '0') AS next_num
+         FROM bills WHERE bill_number LIKE 'BILL-' || EXTRACT(YEAR FROM CURRENT_DATE) || '-%'`
+      );
+
+      // bill_status enum has no 'pending' — 'received' is the correct
+      // not-yet-paid state (this was the bug that made every conversion throw).
+      const { rows: [bill] } = await client.query(
+        `INSERT INTO bills (bill_number, vendor_id, bill_date, due_date, status, category_id, subtotal, gst_amount, total_amount, amount_paid, notes, created_by)
+         VALUES ($1,$2,$3,$4,'received',$5,$6,$7,$8,0,$9,$10) RETURNING *`,
+        [next_num, vendor_id, resolvedBillDate, resolvedDueDate, category_id || null, sub, round2(cgst + sgst + igst), totalAmount,
+         `From purchase request: ${pr.item_description} (${pr.vendor_name})`, req.staff.id]
+      );
+
+      const { rows: [updatedPr] } = await client.query(
+        `UPDATE purchase_requests SET status = 'converted_to_bill', converted_bill_id = $1, converted_at = NOW(), updated_at = NOW() WHERE id = $2 RETURNING *`,
+        [bill.id, req.params.id]
+      );
+
+      return { bill, updatedPr, sub, cgst, sgst, igst, totalAmount, resolvedBillDate };
+    });
+
+    // Dr Expense, Dr Input GST (ITC) | Cr Accounts Payable — not paid yet.
+    const lines = [{ accountId: expenseAcct.id, debit: result.sub, description: result.updatedPr.item_description }];
+    if (result.cgst > 0) lines.push({ accountId: cgstAcct.id, debit: result.cgst, description: 'Input CGST (ITC)' });
+    if (result.sgst > 0) lines.push({ accountId: sgstAcct.id, debit: result.sgst, description: 'Input SGST (ITC)' });
+    if (result.igst > 0) lines.push({ accountId: igstAcct.id, debit: result.igst, description: 'Input IGST (ITC)' });
+    lines.push({ accountId: apAcct.id, credit: result.totalAmount, partyId: vendor_id, description: `Payable — ${result.bill.bill_number}` });
+
+    const je = await ledger.postJournalEntry({
+      entryDate: result.resolvedBillDate, source: 'bill', sourceType: 'purchase_request', sourceId: result.updatedPr.id,
+      narration: `Bill ${result.bill.bill_number} from PR — ${vendor.name}`, createdBy: req.staff.id, lines,
+    });
+
+    await safeQuery(`UPDATE bills SET journal_entry_id = $1 WHERE id = $2`, [je.id, result.bill.id]);
+
+    res.status(201).json({ purchaseRequest: result.updatedPr, bill: { ...result.bill, journal_entry_id: je.id } });
   } catch (err) {
     console.error('[purchase-requests:convert-to-bill]', err);
-    res.status(500).json({ error: 'Failed to convert purchase request to bill' });
+    res.status(err.httpStatus || 500).json({ error: err.httpStatus ? err.message : 'Failed to convert purchase request to bill' });
   }
 });
 

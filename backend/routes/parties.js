@@ -86,17 +86,18 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', requireRole('finance'), async (req, res) => {
   try {
-    const { name, party_type, email, phone, gstin, pan, cin, industry, employee_band, turnover_band, lead_source } = req.body;
+    const { name, party_type, email, phone, gstin, pan, cin, industry, employee_band, turnover_band, lead_source, state, billing_address } = req.body;
     if (!name || !party_type) return res.status(400).json({ error: 'name and party_type are required' });
 
     const gstinError = validateGstin(gstin);
     if (gstinError) return res.status(400).json({ error: gstinError });
 
     const { rows: [party] } = await safeQuery(
-      `INSERT INTO parties (name, party_type, email, phone, gstin, pan, cin, industry, employee_band, turnover_band, lead_source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      `INSERT INTO parties (name, party_type, email, phone, gstin, pan, cin, industry, employee_band, turnover_band, lead_source, state, billing_address)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [name, party_type, email || null, phone || null, gstin || null, pan || null, cin || null,
-       industry || null, employee_band || null, turnover_band || null, lead_source || null]
+       industry || null, employee_band || null, turnover_band || null, lead_source || null,
+       state || null, billing_address || null]
     );
 
     await logAction({ staffId: req.staff.id, action: 'party.created', entity: 'parties', entityId: party.id, newValue: { name: party.name, party_type } });
@@ -116,7 +117,7 @@ router.put('/:id', requireRole('finance'), async (req, res) => {
     const allowed = [
       'name', 'party_type', 'email', 'phone', 'gstin', 'pan', 'cin', 'industry',
       'employee_band', 'turnover_band', 'lead_source', 'health_score', 'renewal_date',
-      'esg_status', 'crm_notes', 'is_active',
+      'esg_status', 'crm_notes', 'is_active', 'state', 'billing_address',
     ];
     const sets = [];
     const params = [];

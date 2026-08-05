@@ -90,6 +90,23 @@ router.get('/bank-accounts', async (req, res) => {
   }
 });
 
+// MISSING ROUTE — Finance.jsx's ConvertToBillDialog and NewExpenseDialog both
+// call GET /accounting/vendors, but nothing in the backend ever implemented
+// it. The vendor dropdown in both dialogs has been silently empty (the .catch
+// swallows the 404) since before this fix — you could never actually pick a
+// vendor to convert a PR or log a one-off expense through the UI.
+router.get('/vendors', async (req, res) => {
+  try {
+    const { rows } = await safeQuery(
+      `SELECT * FROM parties WHERE party_type IN ('vendor', 'both') AND is_active = true ORDER BY name`
+    );
+    res.json({ vendors: rows });
+  } catch (err) {
+    console.error('[accounting:vendors]', err);
+    res.status(500).json({ error: 'Failed to fetch vendors' });
+  }
+});
+
 router.get('/expense-categories', async (req, res) => {
   try {
     const { rows } = await safeQuery(`SELECT * FROM expense_categories ORDER BY name`);

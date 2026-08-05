@@ -114,6 +114,62 @@ async function fetchPlatformRefunds(since = null) {
   return data.refunds || [];
 }
 
+// fetchCouponRedemptions: every coupon redemption joined with the payment it
+// applied to, so Marketing can see real revenue driven per code, not just a
+// usage count. Read-only, same token as the other fetch* functions above.
+async function fetchCouponRedemptions(since = null) {
+  const base = process.env.PLATFORM_API_URL;
+  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
+  if (!base || !token) {
+    throw new Error(
+      'PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example'
+    );
+  }
+  const qs = since ? `?since=${encodeURIComponent(since)}` : '';
+  const url = `${base.replace(/\/$/, '')}/api/ops-integration/coupon-redemptions${qs}`;
+  let resp;
+  try {
+    resp = await fetch(url, { headers: { 'x-service-token': token } });
+  } catch (err) {
+    throw new Error(`Could not reach platform API at ${base}: ${err.message}`);
+  }
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`Platform API returned ${resp.status}: ${body.slice(0, 300)}`);
+  }
+  const data = await resp.json();
+  return data.redemptions || [];
+}
+
+// fetchSupportTickets: platform support tickets, optionally filtered by
+// status. Read-only, same token as the other fetch* functions above.
+async function fetchSupportTickets({ since = null, status = null } = {}) {
+  const base = process.env.PLATFORM_API_URL;
+  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
+  if (!base || !token) {
+    throw new Error(
+      'PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example'
+    );
+  }
+  const params = new URLSearchParams();
+  if (since) params.set('since', since);
+  if (status) params.set('status', status);
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  const url = `${base.replace(/\/$/, '')}/api/ops-integration/support-tickets${qs}`;
+  let resp;
+  try {
+    resp = await fetch(url, { headers: { 'x-service-token': token } });
+  } catch (err) {
+    throw new Error(`Could not reach platform API at ${base}: ${err.message}`);
+  }
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`Platform API returned ${resp.status}: ${body.slice(0, 300)}`);
+  }
+  const data = await resp.json();
+  return data.tickets || [];
+}
+
 // fetchInvoicePdf: pulls the real invoice/bill PDF for a single subscription
 // payment or trade, straight from the platform. type must be 'subscription'
 // or 'trade'; id is the same ref_id fetchPlatformIncome() returns for that
@@ -227,7 +283,7 @@ async function fetchCorporateActivations() {
 }
 
 module.exports = {
-  fetchPlatformIncome, fetchPlatformCustomers, fetchInvoicePdf, fetchChurnEvents, fetchPlatformRefunds,
+  fetchPlatformIncome, fetchPlatformCustomers, fetchInvoicePdf, fetchChurnEvents, fetchPlatformRefunds, fetchCouponRedemptions, fetchSupportTickets,
   activateCorporate, updateCorporateRenewal, fetchCorporateActivations,
   createCoupon, listCoupons, setCouponActive,
   updatePlanPrice, fetchPlanPrices,

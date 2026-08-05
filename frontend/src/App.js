@@ -62,6 +62,8 @@ import ProductSubscriptions from './pages/ProductSubscriptions';
 import ProductPricing from './pages/ProductPricing';
 import ProductCoupons from './pages/ProductCoupons';
 import CorporateDeals from './pages/CorporateDeals';
+import MarketingCouponPerformance from './pages/MarketingCouponPerformance';
+import SupportTicketsView from './pages/SupportTicketsView';
 
 // Widened to include legal_hod/compliance_hod/marketing_hod/sales_hod/
 // product_hod — matches Layout.jsx's PRIVILEGED_ROLES, so those roles get
@@ -148,6 +150,7 @@ export default function App() {
               <Route path="/marketing/newsletter" element={<MarketingNewsletter />} />
               <Route path="/marketing/seo" element={<MarketingSeo />} />
               <Route path="/marketing/blog" element={<MarketingBlog />} />
+              <Route path="/marketing/coupon-performance" element={<MarketingCouponPerformance />} />
               <Route path="/partnerships/firms" element={<PartnershipFirms />} />
               <Route path="/partnerships/follow-ups" element={<PartnershipFollowUps />} />
               <Route path="/product/roadmap" element={<ProductRoadmap />} />
@@ -158,6 +161,7 @@ export default function App() {
               <Route path="/product/pricing" element={<ProductPricing />} />
               <Route path="/product/coupons" element={<ProductCoupons />} />
               <Route path="/product/corporate-deals" element={<CorporateDeals />} />
+              <Route path="/support-tickets" element={<SupportTicketsView />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

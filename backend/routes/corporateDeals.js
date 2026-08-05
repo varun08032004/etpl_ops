@@ -43,12 +43,12 @@ router.get('/:id', async (req, res) => {
 
 // POST /api/product/corporate-deals
 // body: { partyId, platformUserId, platformEmail, termMonths, billingFrequency,
-//         seats, totalValueINR, discountPercent, notes }
+//         seats, totalValueINR, discountPercent, notes, graceDays }
 router.post('/', async (req, res) => {
   const {
     partyId, platformUserId, platformEmail,
     termMonths, billingFrequency, seats,
-    totalValueINR, discountPercent, notes,
+    totalValueINR, discountPercent, notes, graceDays,
   } = req.body;
   try {
     const result = await createCorporateDeal({
@@ -57,13 +57,14 @@ router.post('/', async (req, res) => {
       seats: seats != null && seats !== '' ? parseInt(seats) : null,
       totalValueINR: Number(totalValueINR), discountPercent: Number(discountPercent) || 0,
       notes, createdBy: req.staff.id,
+      graceDays: graceDays != null && graceDays !== '' ? parseInt(graceDays) : 3,
     });
     await logAction({
       staffId: req.staff.id,
       action: 'corporate_deal.created',
       entity: 'corporate_deal',
       entityId: result.deal.id,
-      newValue: { termMonths, billingFrequency, totalValueINR, discountPercent, seats },
+      newValue: { termMonths, billingFrequency, totalValueINR, discountPercent, seats, graceDays },
     }).catch(() => {});
     res.status(201).json({
       ok: true, deal: result.deal, installments: result.installments,

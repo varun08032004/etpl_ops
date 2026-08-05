@@ -16,7 +16,7 @@ const STATUS_COLOR = { draft: 'default', sent: 'info', partially_paid: 'warning'
 const emptyForm = {
   party: null, platformCustomer: null,
   termMonths: '12', billingFrequency: 'one_time',
-  seats: '', totalValueINR: '', discountPercent: '0', notes: '',
+  seats: '', totalValueINR: '', discountPercent: '0', notes: '', graceDays: '3',
 };
 
 function DealRow({ deal, onReload }) {
@@ -156,6 +156,7 @@ export default function CorporateDeals() {
         totalValueINR: Number(form.totalValueINR),
         discountPercent: Number(form.discountPercent) || 0,
         notes: form.notes,
+        graceDays: form.billingFrequency !== 'one_time' ? parseInt(form.graceDays) || 3 : undefined,
       });
       if (data.warning) {
         setFormWarning(data.warning);
@@ -177,7 +178,10 @@ export default function CorporateDeals() {
           <Typography variant="h5">Corporate Deals</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Set up a Corporate subscription term — pay once, or split into monthly/annual installments.
-            Each period generates a real GST invoice; payment status is read from Accounting.
+            Each period generates a real GST invoice; payment status is read from Accounting. For
+            monthly/annual installments, platform access now auto-suspends to Free if a payment
+            isn't recorded within the grace period after its due date — one-time deals still get
+            the full term up front.
           </Typography>
         </Box>
         <Button variant="contained" onClick={openCreate}>New corporate deal</Button>
@@ -241,6 +245,13 @@ export default function CorporateDeals() {
           <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', mb: 1 }}>
             {numPeriodsPreview > 0 && `Will generate ${numPeriodsPreview} invoice${numPeriodsPreview !== 1 ? 's' : ''}${form.totalValueINR ? `, ₹${(Number(form.totalValueINR) * (1 - (Number(form.discountPercent) || 0) / 100) / numPeriodsPreview).toLocaleString('en-IN', { maximumFractionDigits: 0 })} each` : ''}.`}
           </Typography>
+          {form.billingFrequency !== 'one_time' && (
+            <>
+              <TextField margin="normal" type="number" fullWidth label="Grace period after each due date (days)"
+                helperText="Access auto-suspends to Free if a payment isn't recorded within this many days of the installment's due date."
+                value={form.graceDays} onChange={(e) => setForm({ ...form, graceDays: e.target.value })} />
+            </>
+          )}
           <Box sx={{ display: 'flex', gap: 1 }}>
             <TextField margin="normal" type="number" label="Total value for the term (₹, before discount)" sx={{ flex: 1 }}
               value={form.totalValueINR} onChange={(e) => setForm({ ...form, totalValueINR: e.target.value })} />
