@@ -1,6 +1,14 @@
 'use strict';
 
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// DATE (oid 1082) has no timezone component, but pg's default parser turns
+// it into a JS Date at local midnight. Serializing that to JSON later calls
+// .toISOString(), which converts to UTC and shifts the date back a day for
+// any timezone ahead of UTC (e.g. IST) — a user picking 13 Jul 2026 in the
+// UI would see 12 Jul come back from the API. Returning the raw
+// 'YYYY-MM-DD' string sidesteps the conversion entirely.
+types.setTypeParser(1082, (val) => val);
 
 const pool = new Pool({
   connectionString: process.env.INTERNAL_OPS_DATABASE_URL,

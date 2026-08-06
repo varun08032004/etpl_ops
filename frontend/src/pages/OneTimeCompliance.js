@@ -194,7 +194,9 @@ export default function OneTimeCompliance() {
                       <Button size="small" onClick={() => openEdit(item)}>Edit</Button>
                     )}
                     {canEdit && item.is_done && !pendingDeletion && (
-                      <Button size="small" color="warning" onClick={() => requestDeletion(item)}>Request removal</Button>
+                      <Button size="small" color="warning" onClick={() => requestDeletion(item)}>
+                        {staff?.role === 'owner' ? 'Remove' : 'Request removal'}
+                      </Button>
                     )}
                     {canEdit && pendingDeletion && (
                       <Button size="small" onClick={() => cancelDeletionRequest(item)}>Cancel request</Button>
