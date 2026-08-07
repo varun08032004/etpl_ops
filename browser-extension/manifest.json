@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "EtherTrack Tab Reporter",
+  "version": "0.1.0",
+  "description": "Reports the active tab's website to the EtherTrack desktop agent running on this computer, as part of company activity monitoring. Only works while EtherTrack Agent is running and paired.",
+  "permissions": ["tabs", "storage"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_popup": "options.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -10,13 +10,31 @@ if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
 }
 
 async function authenticate(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : req.cookies?.internal_ops_token;
+  if (!token) return res.status(401).json({ error: 'Not authenticated' });
+
+  // [FIX-AUTO-LOGOUT] JWT verification and the DB lookup used to share one
+  // try/catch that returned 401 "Invalid or expired token" for ANY error —
+  // including a DB connection-pool timeout that has nothing to do with the
+  // token being invalid. The frontend interceptor (api/client.js) force-logs-
+  // out on every 401, so a transient DB hiccup was getting misreported as an
+  // expired session and kicking people out mid-work. Split into two blocks:
+  // an actual jwt.verify() failure (bad signature, expired, malformed) is a
+  // real 401 — the token IS invalid, logging out is correct. Everything
+  // after that (the DB query, department-access lookup) is infrastructure
+  // that can transiently fail without the token itself being wrong at all,
+  // so those failures return 503 instead — the frontend interceptor only
+  // acts on 401, so a 503 leaves the session alone and the request can
+  // simply be retried.
+  let decoded;
   try {
-    const header = req.headers.authorization || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : req.cookies?.internal_ops_token;
-    if (!token) return res.status(401).json({ error: 'Not authenticated' });
+    decoded = jwt.verify(token, JWT_SECRET || 'dev-only-insecure-secret');
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
 
-    const decoded = jwt.verify(token, JWT_SECRET || 'dev-only-insecure-secret');
-
+  try {
     const { rows } = await safeQuery(
       `SELECT id, email, role, employee_id, is_active FROM staff_accounts WHERE id = $1`,
       [decoded.sub]
@@ -36,7 +54,8 @@ async function authenticate(req, res, next) {
     req.staff = staff; // { id, email, role, employee_id, effectiveRoles, deptAccess }
     next();
   } catch (err) {
-    return res.status(401).json({ error: 'Invalid or expired token' });
+    console.error('[auth] DB/downstream error during authenticate (token was valid):', err.message);
+    return res.status(503).json({ error: 'Temporarily unavailable — please retry.' });
   }
 }
 

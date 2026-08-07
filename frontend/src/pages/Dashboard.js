@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Box, Paper, Typography, Grid, Skeleton, Alert, Chip } from '@mui/material';
+import { Box, Paper, Typography, Grid, Skeleton, Alert, Chip, MenuItem, TextField, Table, TableHead, TableRow, TableCell, TableBody } from '@mui/material';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as ChartTooltip, CartesianGrid } from 'recharts';
 import client from '../api/client';
 import Money from '../components/Money';
@@ -17,9 +17,25 @@ function StatCard({ label, value, hint }) {
   );
 }
 
+const currentYear = new Date().getFullYear();
+const YEAR_OPTIONS = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2, currentYear - 3];
+const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
 export default function Dashboard() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+
+  const [breakdownYear, setBreakdownYear] = useState(currentYear);
+  const [breakdown, setBreakdown] = useState(null);
+  const [selectedMonthIndex, setSelectedMonthIndex] = useState(null); // null = whole-year chart, no drill-down table
+
+  const loadBreakdown = (year) => {
+    client.get('/accounting/reports/monthly-breakdown', { params: { year } })
+      .then(({ data }) => setBreakdown(data))
+      .catch(() => setBreakdown(null));
+  };
+
+  useEffect(() => { loadBreakdown(breakdownYear); setSelectedMonthIndex(null); }, [breakdownYear]);
 
   useEffect(() => {
     (async () => {
@@ -53,7 +69,6 @@ export default function Dashboard() {
           pnl: pnlRes.data,
           outstandingAR,
           unpaidCount: unpaidInvoices.length,
-          runway: runwayRes.data.months,
           avgMonthlyBurn: runwayRes.data.avgMonthlyBurnLast3Mo,
           cashOnHand: runwayRes.data.cashOnHand,
           runwayMonths: runwayRes.data.runwayMonths,
@@ -76,6 +91,9 @@ export default function Dashboard() {
       </Grid>
     );
   }
+
+  const chartData = breakdown?.months.map((m) => ({ month: m.month, income: m.totalIncome, expense: m.totalExpense })) || [];
+  const selectedMonth = selectedMonthIndex != null ? breakdown?.months[selectedMonthIndex] : null;
 
   return (
     <Box>
@@ -120,18 +138,66 @@ export default function Dashboard() {
 
       <Grid container spacing={2.5}>
         <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 2.5, height: 320 }}>
-            <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mb: 2 }}>Income vs expense — last 6 months</Typography>
-            <ResponsiveContainer width="100%" height="88%">
-              <BarChart data={data.runway}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#232c26" />
-                <XAxis dataKey="month" stroke="#8fa398" fontSize={12} />
-                <YAxis stroke="#8fa398" fontSize={12} />
-                <ChartTooltip contentStyle={{ background: '#121815', border: '1px solid #232c26', fontSize: 12 }} />
-                <Bar dataKey="income" fill="#2fbf71" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="expense" fill="#e5484d" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          <Paper sx={{ p: 2.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>
+                Income vs expense — {breakdownYear}{breakdown ? ` (₹${breakdown.yearTotalIncome.toLocaleString('en-IN')} in, ₹${breakdown.yearTotalExpense.toLocaleString('en-IN')} out)` : ''}
+              </Typography>
+              <TextField select size="small" value={breakdownYear} onChange={(e) => setBreakdownYear(Number(e.target.value))} sx={{ minWidth: 110 }}>
+                {YEAR_OPTIONS.map((y) => <MenuItem key={y} value={y}>{y}</MenuItem>)}
+              </TextField>
+            </Box>
+            <Box sx={{ height: 260 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} onClick={(e) => { if (e?.activeTooltipIndex != null) setSelectedMonthIndex(e.activeTooltipIndex); }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#232c26" />
+                  <XAxis dataKey="month" stroke="#8fa398" fontSize={12} />
+                  <YAxis stroke="#8fa398" fontSize={12} />
+                  <ChartTooltip contentStyle={{ background: '#121815', border: '1px solid #232c26', fontSize: 12 }} />
+                  <Bar dataKey="income" fill="#2fbf71" radius={[4, 4, 0, 0]} cursor="pointer" />
+                  <Bar dataKey="expense" fill="#e5484d" radius={[4, 4, 0, 0]} cursor="pointer" />
+                </BarChart>
+              </ResponsiveContainer>
+            </Box>
+            <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', mt: 1 }}>Click a month's bars to see the account-by-account breakdown below.</Typography>
+
+            {selectedMonth && (
+              <Box sx={{ mt: 3 }}>
+                <Typography sx={{ fontWeight: 600, mb: 1.5 }}>
+                  {MONTH_LABELS[selectedMonthIndex]} {breakdownYear} — breakdown
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={6}>
+                    <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary', mb: 0.5 }}>Income</Typography>
+                    <Table size="small">
+                      <TableBody>
+                        {selectedMonth.income.map((a) => (
+                          <TableRow key={a.code}>
+                            <TableCell sx={{ fontSize: '0.8rem' }}>{a.name}</TableCell>
+                            <TableCell align="right" className="figure" sx={{ fontSize: '0.8rem' }}>₹{Number(a.amount).toLocaleString('en-IN')}</TableCell>
+                          </TableRow>
+                        ))}
+                        {!selectedMonth.income.length && <TableRow><TableCell sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>No income this month.</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary', mb: 0.5 }}>Expense</Typography>
+                    <Table size="small">
+                      <TableBody>
+                        {selectedMonth.expenses.map((a) => (
+                          <TableRow key={a.code}>
+                            <TableCell sx={{ fontSize: '0.8rem' }}>{a.name}</TableCell>
+                            <TableCell align="right" className="figure" sx={{ fontSize: '0.8rem' }}>₹{Number(a.amount).toLocaleString('en-IN')}</TableCell>
+                          </TableRow>
+                        ))}
+                        {!selectedMonth.expenses.length && <TableRow><TableCell sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>No expense this month.</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </Grid>
+                </Grid>
+              </Box>
+            )}
           </Paper>
         </Grid>
         <Grid item xs={12} md={4}>

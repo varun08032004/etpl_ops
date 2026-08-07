@@ -50,6 +50,8 @@ import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import PersonOutlinedIcon from '@mui/icons-material/PersonOutlined';
+import MonitorHeartOutlinedIcon from '@mui/icons-material/MonitorHeartOutlined';
+import TimelineOutlinedIcon from '@mui/icons-material/TimelineOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useAuth } from '../context/AuthContext';
@@ -74,6 +76,7 @@ const NAV_GROUPS = [
       // their own payslips/leave/assets without disturbing '/' staying on
       // Dashboard as the shared home screen for this whole role set.
       { to: '/my-profile', label: 'My Profile', icon: PersonOutlinedIcon },
+      { to: '/my-activity', label: 'My Activity', icon: TimelineOutlinedIcon },
     ],
   },
   {
@@ -81,6 +84,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/employees', label: 'People', icon: PeopleOutlinedIcon },
       { to: '/attendance', label: 'Attendance', icon: AccessTimeOutlinedIcon },
+      { to: '/monitoring', label: 'Monitoring', icon: MonitorHeartOutlinedIcon },
       { to: '/org-structure', label: 'Org Structure', icon: AccountTreeOutlinedIcon },
       { to: '/team', label: 'Team logins', icon: GroupOutlinedIcon },
       { to: '/recruitment', label: 'Recruitment', icon: PersonSearchOutlinedIcon },
@@ -95,7 +99,7 @@ const NAV_GROUPS = [
       { to: '/invoices', label: 'Invoices', icon: ReceiptLongOutlinedIcon },
       { to: '/partnerships/follow-ups', label: 'Follow-ups Today', icon: PhoneCallbackOutlinedIcon },
       { to: '/partnerships/firms', label: 'Partner Firms', icon: HandshakeOutlinedIcon },
-      { to: '/support-tickets', label: 'Support Tickets', icon: SupportAgentOutlinedIcon },
+      { to: '/support-tickets', label: 'Account Health', icon: SupportAgentOutlinedIcon },
     ],
   },
   {
@@ -200,6 +204,7 @@ const ADMIN_NAV_GROUP = {
 
 const SELF_SERVICE_NAV = [
   { to: '/', label: 'My Profile', icon: PersonOutlinedIcon, end: true },
+  { to: '/my-activity', label: 'My Activity', icon: TimelineOutlinedIcon },
 ];
 
 // Groups open by default so nothing is hidden on first load.

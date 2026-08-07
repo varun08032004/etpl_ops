@@ -12,7 +12,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, requireRole } = require('../middleware/auth');
 const { fetchPlatformCustomers } = require('../services/platformClient');
-const { createCorporateDeal, listCorporateDeals, getCorporateDeal, sendInstallmentReminders } = require('../services/corporateDeals');
+const { createCorporateDeal, listCorporateDeals, getCorporateDeal, sendInstallmentReminders, cancelCorporateDeal } = require('../services/corporateDeals');
 const { logAction } = require('../services/auditLog');
 
 router.use(authenticate);
@@ -104,6 +104,31 @@ router.post('/send-reminders', async (req, res) => {
   } catch (err) {
     console.error('[corporate-deals:send-reminders]', err);
     res.status(500).json({ error: 'Failed to send reminders' });
+  }
+});
+
+// POST /api/product/corporate-deals/:id/cancel
+// body: { reason }
+router.post('/:id/cancel', async (req, res) => {
+  const { reason } = req.body;
+  try {
+    const result = await cancelCorporateDeal(req.params.id, reason, req.staff.id);
+    await logAction({
+      staffId: req.staff.id,
+      action: 'corporate_deal.cancelled',
+      entity: 'corporate_deal',
+      entityId: req.params.id,
+      newValue: { reason },
+    }).catch(() => {});
+    res.json({
+      ok: true,
+      ...(result.platformAccessError
+        ? { warning: `Deal marked cancelled, but cutting off platform access failed: ${result.platformAccessError}. Retry manually if needed.` }
+        : {}),
+    });
+  } catch (err) {
+    console.error('[corporate-deals:cancel]', err);
+    res.status(err.status || 500).json({ error: err.message || 'Failed to cancel deal' });
   }
 });
 

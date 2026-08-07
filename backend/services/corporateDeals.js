@@ -307,4 +307,41 @@ async function sendInstallmentReminders() {
   return { sent };
 }
 
-module.exports = { createCorporateDeal, listCorporateDeals, getCorporateDeal, sendInstallmentReminders, extendAccessForPaidInstallment };
+// cancelCorporateDeal — manual early termination, for when a customer
+// requests cancellation rather than just missing a payment. Marks the deal
+// 'cancelled' and cuts platform access immediately (sets renewal_date to
+// now, so the platform's own real-time expiry check + downgrade cron take
+// it from here — same mechanism as a missed installment, just triggered by
+// a human action instead of a payment deadline passing). Does NOT touch
+// already-issued invoices — any unpaid ones stay in Accounting as-is for
+// Finance to write off or chase separately; this only stops future access
+// and future reminder emails (sendInstallmentReminders already filters on
+// deal.status = 'active', so a cancelled deal's remaining installments stop
+// generating reminders automatically).
+async function cancelCorporateDeal(dealId, reason, staffId) {
+  const { rows: [deal] } = await query(
+    `SELECT * FROM corporate_deals WHERE id = $1`, [dealId]
+  );
+  if (!deal) throw Object.assign(new Error('Deal not found'), { status: 404 });
+  if (deal.status !== 'active') throw Object.assign(new Error(`Deal is already ${deal.status}`), { status: 400 });
+  if (!reason || !reason.trim()) throw Object.assign(new Error('A cancellation reason is required'), { status: 400 });
+
+  await query(
+    `UPDATE corporate_deals SET status = 'cancelled', notes = COALESCE(notes,'') || $1 WHERE id = $2`,
+    [`\n[CANCELLED ${new Date().toISOString()} by staff ${staffId}]: ${reason.trim()}`, dealId]
+  );
+
+  try {
+    await updateCorporateRenewal(deal.platform_user_id, {
+      renewalDate: new Date().toISOString(),
+      notes: `Corporate deal cancelled: ${reason.trim()}`,
+    });
+  } catch (e) {
+    console.error('[corporateDeals:cancel] platform access cutoff failed (deal already marked cancelled):', e.message);
+    return { cancelled: true, platformAccessError: e.message };
+  }
+
+  return { cancelled: true, platformAccessError: null };
+}
+
+module.exports = { createCorporateDeal, listCorporateDeals, getCorporateDeal, sendInstallmentReminders, extendAccessForPaidInstallment, cancelCorporateDeal };

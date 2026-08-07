@@ -6,10 +6,20 @@ import DownloadIcon from '@mui/icons-material/Download';
 import client from '../api/client';
 import StatusChip from '../components/StatusChip';
 import Money from '../components/Money';
+import { useAuth } from '../context/AuthContext';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+// Fixed list, matching routes/finance.js's ALLOWED_CLAIM_CATEGORIES exactly —
+// expense_claims.category is free text (not a category_id FK), so this is a
+// static list rather than a fetched dropdown. Also matches Finance.jsx's
+// SubmitClaimDialog for consistency.
+const CLAIM_CATEGORIES = ['travel', 'meals', 'software', 'office_supplies', 'client_entertainment', 'training', 'other'];
+
 export default function MyProfile() {
+  const { staff } = useAuth();
+  const canSeeReimbursements = ['owner', 'admin', 'finance'].includes(staff?.role);
+
   const [employee, setEmployee] = useState(null);
   const [tab, setTab] = useState(0);
   const [payslips, setPayslips] = useState([]);
@@ -19,10 +29,10 @@ export default function MyProfile() {
   const [assets, setAssets] = useState([]);
   const [pendingLeave, setPendingLeave] = useState([]);
   const [myExpenseClaims, setMyExpenseClaims] = useState([]);
-  const [expenseCategories, setExpenseCategories] = useState([]);
-  const [pendingExpenseClaims, setPendingExpenseClaims] = useState({ pendingManagerDecision: [], pendingReimbursement: [] });
+  const [pendingApprovalClaims, setPendingApprovalClaims] = useState([]);
+  const [pendingReimbursementClaims, setPendingReimbursementClaims] = useState([]);
   const [claimOpen, setClaimOpen] = useState(false);
-  const [claimForm, setClaimForm] = useState({ category_id: '', description: '', amount: '', expense_date: '' });
+  const [claimForm, setClaimForm] = useState({ category: 'travel', description: '', amount: '', expense_date: '' });
   const [claimSaving, setClaimSaving] = useState(false);
   const [bankAccounts, setBankAccounts] = useState([]);
   const [reimburseBankSelections, setReimburseBankSelections] = useState({});
@@ -31,6 +41,12 @@ export default function MyProfile() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [notLinked, setNotLinked] = useState(false);
+
+  const loadMyClaims = () => client.get('/finance/expense-claims/mine').then(({ data }) => setMyExpenseClaims(data.claims)).catch(() => setMyExpenseClaims([]));
+  const loadPendingApproval = () => client.get('/finance/expense-claims/pending-my-approval').then(({ data }) => setPendingApprovalClaims(data.claims)).catch(() => setPendingApprovalClaims([]));
+  const loadPendingReimbursement = () => canSeeReimbursements
+    ? client.get('/finance/expense-claims', { params: { status: 'approved' } }).then(({ data }) => setPendingReimbursementClaims(data.claims)).catch(() => setPendingReimbursementClaims([]))
+    : Promise.resolve();
 
   const loadAll = async () => {
     try {
@@ -50,10 +66,10 @@ export default function MyProfile() {
       setAssets(assetsRes.data.assets);
       // Best-effort — empty array if this login doesn't manage anyone or isn't HR.
       client.get('/employees/leave/pending').then(({ data }) => setPendingLeave(data.leaveRequests)).catch(() => setPendingLeave([]));
-      client.get('/expense-claims/me').then(({ data }) => setMyExpenseClaims(data.claims)).catch(() => setMyExpenseClaims([]));
-      client.get('/expense-claims/pending').then(({ data }) => setPendingExpenseClaims(data)).catch(() => {});
-      client.get('/expense-claims/categories').then(({ data }) => setExpenseCategories(data.categories || [])).catch(() => setExpenseCategories([]));
-      client.get('/expense-claims/bank-accounts').then(({ data }) => setBankAccounts(data.bankAccounts || [])).catch(() => setBankAccounts([]));
+      loadMyClaims();
+      loadPendingApproval();
+      loadPendingReimbursement();
+      client.get('/bank-accounts').then(({ data }) => setBankAccounts(data.accounts || [])).catch(() => setBankAccounts([]));
     } catch (err) {
       if (err.response?.status === 404) setNotLinked(true);
     }
@@ -66,26 +82,26 @@ export default function MyProfile() {
     client.get('/employees/leave/pending').then(({ data }) => setPendingLeave(data.leaveRequests)).catch(() => {});
   };
 
-  const refreshPendingClaims = () => client.get('/expense-claims/pending').then(({ data }) => setPendingExpenseClaims(data)).catch(() => {});
-
   const decideExpenseClaim = async (claimId, decision) => {
-    await client.post(`/expense-claims/${claimId}/manager-decision`, { decision });
-    refreshPendingClaims();
+    await client.post(`/finance/expense-claims/${claimId}/decide`, { decision });
+    loadPendingApproval();
+    loadPendingReimbursement();
   };
 
   const reimburseClaim = async (claimId, bankAccountId) => {
     if (!bankAccountId) { alert('Pick a bank account first'); return; }
-    await client.post(`/expense-claims/${claimId}/reimburse`, { bank_account_id: bankAccountId });
-    refreshPendingClaims();
+    await client.post(`/finance/expense-claims/${claimId}/reimburse`, { bank_account_id: bankAccountId });
+    loadPendingReimbursement();
+    loadMyClaims();
   };
 
   const submitExpenseClaim = async () => {
     setClaimSaving(true);
     try {
-      await client.post('/expense-claims', claimForm);
+      await client.post('/finance/expense-claims', claimForm);
       setClaimOpen(false);
-      setClaimForm({ category_id: '', description: '', amount: '', expense_date: '' });
-      client.get('/expense-claims/me').then(({ data }) => setMyExpenseClaims(data.claims)).catch(() => {});
+      setClaimForm({ category: 'travel', description: '', amount: '', expense_date: '' });
+      loadMyClaims();
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to submit claim');
     } finally {
@@ -136,10 +152,27 @@ export default function MyProfile() {
 
   if (!employee) return null;
 
+  // What the company currently owes this person — claims that have cleared
+  // final approval (so the liability is already sitting in Employee
+  // Reimbursements Payable, code 2160) but haven't been paid out yet.
+  const amountsOwedToMe = myExpenseClaims
+    .filter((c) => c.status === 'approved')
+    .reduce((sum, c) => sum + Number(c.amount), 0);
+
   return (
     <Box>
       <Typography variant="h5">My Profile</Typography>
       <Typography sx={{ color: 'text.secondary', mb: 3 }}>{employee.employee_code} · {employee.designation || 'No designation set'} · {employee.department || 'No department set'}</Typography>
+
+      {amountsOwedToMe > 0 && (
+        <Paper sx={{ p: 2.5, mb: 3, bgcolor: 'rgba(47,191,113,0.06)' }}>
+          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Approved, awaiting reimbursement</Typography>
+          <Money amount={amountsOwedToMe} size="1.4rem" />
+          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', mt: 0.5 }}>
+            Company owes you this back — it's already reflected in the books, just waiting for Finance to pay it out.
+          </Typography>
+        </Paper>
+      )}
 
       {pendingLeave.length > 0 && (
         <Paper sx={{ p: 2.5, mb: 3 }}>
@@ -162,15 +195,15 @@ export default function MyProfile() {
         </Paper>
       )}
 
-      {pendingExpenseClaims.pendingManagerDecision?.length > 0 && (
+      {pendingApprovalClaims.length > 0 && (
         <Paper sx={{ p: 2.5, mb: 3 }}>
-          <Typography sx={{ fontWeight: 600, mb: 1.5 }}>Expense claims waiting on you ({pendingExpenseClaims.pendingManagerDecision.length})</Typography>
-          {pendingExpenseClaims.pendingManagerDecision.map((c) => (
+          <Typography sx={{ fontWeight: 600, mb: 1.5 }}>Expense claims waiting on you ({pendingApprovalClaims.length})</Typography>
+          {pendingApprovalClaims.map((c) => (
             <Box key={c.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
               <Box>
-                <Typography sx={{ fontSize: '0.875rem' }}>{c.employee_name} — {c.description}</Typography>
+                <Typography sx={{ fontSize: '0.875rem' }}>{c.employee_name} — {c.description || c.category}</Typography>
                 <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }} className="figure">
-                  ₹{Number(c.amount).toLocaleString('en-IN')} · {c.expense_date?.slice(0, 10)}{c.category_name ? ` · ${c.category_name}` : ''}
+                  ₹{Number(c.amount).toLocaleString('en-IN')} · {c.expense_date?.slice(0, 10)} · <span style={{ textTransform: 'capitalize' }}>{c.category.replace('_', ' ')}</span> · level {c.next_level}/{c.levels_required}
                 </Typography>
               </Box>
               <Box sx={{ display: 'flex', gap: 1 }}>
@@ -182,13 +215,13 @@ export default function MyProfile() {
         </Paper>
       )}
 
-      {pendingExpenseClaims.pendingReimbursement?.length > 0 && (
+      {canSeeReimbursements && pendingReimbursementClaims.length > 0 && (
         <Paper sx={{ p: 2.5, mb: 3 }}>
-          <Typography sx={{ fontWeight: 600, mb: 1.5 }}>Approved claims awaiting reimbursement ({pendingExpenseClaims.pendingReimbursement.length})</Typography>
-          {pendingExpenseClaims.pendingReimbursement.map((c) => (
+          <Typography sx={{ fontWeight: 600, mb: 1.5 }}>Approved claims awaiting reimbursement ({pendingReimbursementClaims.length})</Typography>
+          {pendingReimbursementClaims.map((c) => (
             <Box key={c.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
               <Box>
-                <Typography sx={{ fontSize: '0.875rem' }}>{c.employee_name} — {c.description}</Typography>
+                <Typography sx={{ fontSize: '0.875rem' }}>{c.employee_name} — {c.description || c.category}</Typography>
                 <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }} className="figure">
                   ₹{Number(c.amount).toLocaleString('en-IN')} · {c.expense_date?.slice(0, 10)}
                 </Typography>
@@ -368,12 +401,12 @@ export default function MyProfile() {
               <TableBody>
                 {myExpenseClaims.map((c) => (
                   <TableRow key={c.id}>
-                    <TableCell>{c.description}</TableCell>
-                    <TableCell>{c.category_name || '—'}</TableCell>
+                    <TableCell>{c.description || '—'}</TableCell>
+                    <TableCell sx={{ textTransform: 'capitalize' }}>{c.category.replace('_', ' ')}</TableCell>
                     <TableCell align="right" className="figure">₹{Number(c.amount).toLocaleString('en-IN')}</TableCell>
                     <TableCell className="figure">{c.expense_date?.slice(0, 10)}</TableCell>
                     <TableCell>
-                      <Chip size="small" label={c.status.replace('_', ' ')} color={c.status === 'reimbursed' ? 'success' : c.status === 'rejected' ? 'error' : 'default'} />
+                      <Chip size="small" label={c.status.replace('_', ' ')} color={c.status === 'reimbursed' ? 'success' : c.status === 'rejected' ? 'error' : c.status === 'approved' ? 'info' : 'default'} />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -387,17 +420,16 @@ export default function MyProfile() {
       <Dialog open={claimOpen} onClose={() => setClaimOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Submit expense claim</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="What was it for" margin="normal" value={claimForm.description} onChange={(e) => setClaimForm({ ...claimForm, description: e.target.value })} />
-          <TextField fullWidth select label="Category" margin="normal" value={claimForm.category_id} onChange={(e) => setClaimForm({ ...claimForm, category_id: e.target.value })}>
-            <MenuItem value="">Uncategorized</MenuItem>
-            {expenseCategories.map((c) => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
+          <TextField fullWidth select label="Category" margin="normal" value={claimForm.category} onChange={(e) => setClaimForm({ ...claimForm, category: e.target.value })}>
+            {CLAIM_CATEGORIES.map((c) => <MenuItem key={c} value={c} sx={{ textTransform: 'capitalize' }}>{c.replace('_', ' ')}</MenuItem>)}
           </TextField>
+          <TextField fullWidth label="What was it for" margin="normal" value={claimForm.description} onChange={(e) => setClaimForm({ ...claimForm, description: e.target.value })} />
           <TextField fullWidth type="number" label="Amount (₹)" margin="normal" value={claimForm.amount} onChange={(e) => setClaimForm({ ...claimForm, amount: e.target.value })} />
           <TextField fullWidth type="date" label="Expense date" InputLabelProps={{ shrink: true }} margin="normal" value={claimForm.expense_date} onChange={(e) => setClaimForm({ ...claimForm, expense_date: e.target.value })} />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setClaimOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={submitExpenseClaim} disabled={claimSaving || !claimForm.description || !claimForm.amount || !claimForm.expense_date}>
+          <Button variant="contained" onClick={submitExpenseClaim} disabled={claimSaving || !claimForm.amount || !claimForm.expense_date}>
             {claimSaving ? 'Submitting…' : 'Submit'}
           </Button>
         </DialogActions>

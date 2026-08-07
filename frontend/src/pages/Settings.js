@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Tabs, Tab, Table, TableHead, TableRow, TableCell, TableBody,
-  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, IconButton,
+  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, IconButton, Chip, Tooltip,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddIcon from '@mui/icons-material/Add';
+import VerifiedIcon from '@mui/icons-material/Verified';
 import client from '../api/client';
 
 function ComplianceRatesTab() {
@@ -28,22 +29,53 @@ function ComplianceRatesTab() {
     }
   };
 
+  const markVerified = async (key) => {
+    if (!window.confirm('Confirm you have checked this figure against the actual Act/notification cited, and it is correct as of today?')) return;
+    await client.post(`/settings/compliance/${key}/verify`);
+    load();
+  };
+
   return (
     <Box>
       <Alert severity="warning" sx={{ mb: 2.5 }}>
-        These drive real statutory payroll calculations (EPF/ESIC thresholds, disbursal deadlines, F&F windows).
-        Changing one changes every payroll run from this point forward — verify with your CA before editing.
+        These drive real statutory payroll and compliance-threshold calculations (EPF/ESIC thresholds, disbursal deadlines, F&F windows, GST registration triggers).
+        Changing one changes every downstream calculation from this point forward — verify with your CA before editing, and use "Mark verified" once confirmed against the cited source.
+        Editing a value clears its verified status; it needs re-confirming.
       </Alert>
       <Paper>
         <Table>
-          <TableHead><TableRow><TableCell>Setting</TableCell><TableCell>Value</TableCell><TableCell>Note</TableCell><TableCell align="right"></TableCell></TableRow></TableHead>
+          <TableHead>
+            <TableRow>
+              <TableCell>Setting</TableCell><TableCell>Value</TableCell><TableCell>Note / source</TableCell>
+              <TableCell>Status</TableCell><TableCell align="right"></TableCell>
+            </TableRow>
+          </TableHead>
           <TableBody>
             {settings.map((s) => (
               <TableRow key={s.key}>
                 <TableCell className="figure">{s.key}</TableCell>
                 <TableCell className="figure" sx={{ fontWeight: 600 }}>{s.value}</TableCell>
-                <TableCell sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>{s.note}</TableCell>
+                <TableCell sx={{ fontSize: '0.8rem', color: 'text.secondary', maxWidth: 420 }}>
+                  {s.note}
+                  {s.source_reference && (
+                    <Typography sx={{ fontSize: '0.75rem', color: 'text.disabled', mt: 0.5, fontStyle: 'italic' }}>
+                      Source to check: {s.source_reference}
+                    </Typography>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {s.verified_by ? (
+                    <Tooltip title={`Verified by ${s.verified_by_email || 'a staff member'} on ${new Date(s.verified_at).toLocaleDateString('en-IN')}`}>
+                      <Chip size="small" color="success" icon={<VerifiedIcon />} label="Verified" />
+                    </Tooltip>
+                  ) : (
+                    <Chip size="small" color="warning" variant="outlined" label="Unverified — confirm with CA" />
+                  )}
+                </TableCell>
                 <TableCell align="right">
+                  {!s.verified_by && (
+                    <Button size="small" onClick={() => markVerified(s.key)} sx={{ mr: 1 }}>Mark verified</Button>
+                  )}
                   <IconButton size="small" onClick={() => { setEditing(s); setValue(s.value); setError(''); }}><EditIcon fontSize="small" /></IconButton>
                 </TableCell>
               </TableRow>
@@ -52,10 +84,13 @@ function ComplianceRatesTab() {
         </Table>
       </Paper>
 
-      <Dialog open={Boolean(editing)} onClose={() => setEditing(null)} maxWidth="xs" fullWidth>
+      <Dialog open={!!editing} onClose={() => setEditing(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Edit {editing?.key}</DialogTitle>
         <DialogContent>
           <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', mb: 1 }}>{editing?.note}</Typography>
+          {editing?.source_reference && (
+            <Alert severity="info" sx={{ mb: 2, fontSize: '0.8rem' }}>{editing.source_reference}</Alert>
+          )}
           <TextField fullWidth label="Value" value={value} onChange={(e) => setValue(e.target.value)} margin="normal" autoFocus />
           {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
         </DialogContent>

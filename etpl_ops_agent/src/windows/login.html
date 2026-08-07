@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>EtherTrack Agent — Sign in</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; background: #14171c; color: #eaecef;
+    display: flex; align-items: center; justify-content: center; height: 100vh;
+  }
+  .card { width: 300px; padding: 28px 26px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { font-size: 12px; color: #9aa1ac; margin: 0 0 22px; }
+  label { display: block; font-size: 12px; color: #9aa1ac; margin: 14px 0 5px; }
+  input {
+    width: 100%; padding: 9px 10px; border-radius: 6px; border: 1px solid #2c313a;
+    background: #1b1f26; color: #eaecef; font-size: 13px;
+  }
+  input:focus { outline: none; border-color: #4c8dff; }
+  button {
+    width: 100%; margin-top: 22px; padding: 10px; border: none; border-radius: 6px;
+    background: #4c8dff; color: white; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { background: #35547f; cursor: default; }
+  .error { color: #ff6b6b; font-size: 12px; margin-top: 12px; min-height: 14px; }
+  .notice { font-size: 10.5px; color: #6d7480; margin-top: 18px; line-height: 1.5; }
+  .hidden { display: none; }
+  .back { background: transparent; color: #6d7480; font-weight: 400; font-size: 11.5px; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>EtherTrack Agent</h1>
+    <p class="sub" id="subtitle">Sign in with your work account to begin.</p>
+
+    <div id="credentialsStep">
+      <label for="email">Work email</label>
+      <input id="email" type="email" autocomplete="username" />
+
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" />
+    </div>
+
+    <div id="totpStep" class="hidden">
+      <label for="totp">6-digit authenticator code</label>
+      <input id="totp" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456" />
+    </div>
+
+    <button id="submit">Sign in</button>
+    <button id="back" class="back hidden">Use a different account</button>
+    <div class="error" id="error"></div>
+
+    <div class="notice">
+      Once signed in, this device will report attendance, active application,
+      website domain, and idle time during work hours to your employer. If
+      screenshots are enabled company-wide, this will also be noted before
+      you start work.
+    </div>
+  </div>
+  <script src="login.js"></script>
+</body>
+</html>

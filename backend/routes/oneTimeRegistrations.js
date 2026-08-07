@@ -29,9 +29,11 @@
 const express = require('express');
 const router = express.Router();
 const { safeQuery } = require('../db/pool');
-const { authenticate, requireDepartmentHead } = require('../middleware/auth');
+const { authenticate, requireDepartmentHead, requireRole } = require('../middleware/auth');
 const { getRulesForSlug, computeFirstDueDate, toISODate } = require('../services/complianceRules');
+const { refreshAllApplicability, evaluateAllApplicability, THRESHOLD_EVALUATORS } = require('../services/complianceThresholds');
 const { logAction } = require('../services/auditLog');
+const { notifyMany } = require('../services/notifications');
 
 router.use(authenticate);
 
@@ -71,6 +73,69 @@ router.get('/:slug', async (req, res) => {
   } catch (err) {
     console.error('[one-time-registrations:get]', err);
     res.status(500).json({ error: 'Failed to fetch registration' });
+  }
+});
+
+// ── PREVIEW ONLY — no writes, no alerts. Lets whoever's reviewing this
+// (finance/compliance head) see exactly what today's data would produce
+// before trusting /check-thresholds to persist it and fire emails. Safe to
+// call as many times as needed while verifying against real data.
+router.get('/check-thresholds/preview', requireRole('finance'), async (req, res) => {
+  try {
+    const results = await evaluateAllApplicability();
+    res.json({ results });
+  } catch (err) {
+    console.error('[one-time-registrations:check-thresholds:preview]', err);
+    res.status(500).json({ error: 'Failed to preview compliance thresholds' });
+  }
+});
+
+// ── threshold check — call daily from the same external scheduler that hits
+// /compliance/run-reminders (see routes/compliance.js's comment block). Not
+// wired to any in-process cron itself.
+//
+// Re-evaluates every slug with a statutory threshold (EPFO, ESIC, GST,
+// professional_tax — see services/complianceThresholds.js), persists the
+// result, and for anything that JUST became legally required (and isn't
+// done yet) emails+notifies owner, admin, and the Legal & Compliance head
+// so it doesn't sit silently in the checklist as just another unchecked row.
+router.post('/check-thresholds', requireRole('finance'), async (req, res) => {
+  try {
+    const newlyRequired = await refreshAllApplicability();
+
+    if (newlyRequired.length) {
+      const { rows: recipients } = await safeQuery(
+        `SELECT sa.id FROM staff_accounts sa WHERE sa.role IN ('owner','admin') AND sa.is_active = true
+         UNION
+         SELECT sa.id FROM staff_accounts sa
+         JOIN departments d ON d.head_employee_id = sa.employee_id
+         WHERE d.name = $1 AND sa.is_active = true`,
+        [COMPLIANCE_DEPARTMENT_NAME]
+      );
+
+      for (const item of newlyRequired) {
+        const confidenceNote = item.confidence === 'unverified'
+          ? ' ⚠ Based on figures not yet confirmed by your CA — check Settings > Compliance rates before acting.'
+          : '';
+        await notifyMany(recipients.map((r) => r.id), {
+          type: 'compliance.threshold_crossed',
+          title: `${item.title} is now required`,
+          body: item.note + confidenceNote,
+          link: '/compliance/one-time',
+        });
+        await logAction({
+          staffId: req.staff.id,
+          action: 'one_time_registration.threshold_crossed',
+          entity: 'one_time_registrations',
+          newValue: { slug: item.slug, note: item.note, confidence: item.confidence },
+        });
+      }
+    }
+
+    res.json({ checked: Object.keys(THRESHOLD_EVALUATORS).length, newlyRequired });
+  } catch (err) {
+    console.error('[one-time-registrations:check-thresholds]', err);
+    res.status(500).json({ error: 'Failed to check compliance thresholds' });
   }
 });
 

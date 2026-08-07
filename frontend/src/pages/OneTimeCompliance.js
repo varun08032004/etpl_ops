@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
-  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Alert, Chip, Link,
+  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Alert, Chip, Link, Tooltip,
 } from '@mui/material';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
@@ -173,6 +173,22 @@ export default function OneTimeCompliance() {
                   </TableCell>
                   <TableCell sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
                     {item.title}
+                    {!item.is_done && item.applicability_status === 'not_applicable_yet' && (
+                      <Tooltip title={item.applicability_note || ''}>
+                        <Chip
+                          size="small" variant="outlined" sx={{ ml: 1 }}
+                          label={`Not required yet${item.applicability_confidence === 'unverified' ? ' (unverified)' : ''}`}
+                        />
+                      </Tooltip>
+                    )}
+                    {!item.is_done && item.applicability_status === 'active' && (
+                      <Tooltip title={item.applicability_note || ''}>
+                        <Chip
+                          size="small" color="error" sx={{ ml: 1 }}
+                          label={`Required — register now${item.applicability_confidence === 'unverified' ? ' (unverified)' : ''}`}
+                        />
+                      </Tooltip>
+                    )}
                     {pendingDeletion && (
                       <Chip
                         size="small" color="warning" sx={{ ml: 1 }}

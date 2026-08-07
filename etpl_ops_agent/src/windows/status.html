@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>EtherTrack Agent</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; background: #14171c; color: #eaecef;
+    padding: 20px;
+  }
+  .row { display: flex; justify-content: space-between; align-items: center; }
+  h1 { font-size: 15px; margin: 0; }
+  .badge {
+    font-size: 11px; padding: 3px 9px; border-radius: 999px; font-weight: 600;
+  }
+  .badge.online { background: #16351f; color: #4ade80; }
+  .badge.offline { background: #2a2d33; color: #9aa1ac; }
+  .clock-in { font-size: 11px; color: #6d7480; margin-top: 3px; }
+
+  .stats { display: flex; gap: 10px; margin: 18px 0; }
+  .stat { flex: 1; background: #1b1f26; border-radius: 8px; padding: 10px; }
+  .stat .label { font-size: 10px; color: #9aa1ac; }
+  .stat .value { font-size: 16px; font-weight: 600; margin-top: 2px; }
+
+  .current { background: #1b1f26; border-radius: 8px; padding: 12px; margin-bottom: 18px; }
+  .current .label { font-size: 10px; color: #9aa1ac; margin-bottom: 4px; }
+  .current .app { font-size: 13px; font-weight: 600; }
+  .current .site { font-size: 11.5px; color: #9aa1ac; margin-top: 2px; }
+
+  button {
+    width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600;
+    cursor: pointer; margin-top: 8px;
+  }
+  .start { background: #4c8dff; color: white; }
+  .stop { background: #ff5b5b; color: white; }
+  .signout { background: transparent; color: #6d7480; font-weight: 400; font-size: 11.5px; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <h1>EtherTrack</h1>
+    <span class="badge offline" id="badge">Offline</span>
+  </div>
+  <div class="clock-in" id="clockIn"></div>
+
+  <div class="stats">
+    <div class="stat"><div class="label">WORKED</div><div class="value" id="worked">0h 0m</div></div>
+    <div class="stat"><div class="label">IDLE</div><div class="value" id="idle">0h 0m</div></div>
+  </div>
+
+  <div class="current">
+    <div class="label">CURRENT APP</div>
+    <div class="app" id="currentApp">—</div>
+    <div class="site" id="currentSite"></div>
+  </div>
+
+  <button class="start" id="startBtn">Start Work</button>
+  <button class="stop" id="stopBtn" style="display:none;">Stop Work</button>
+  <button class="signout" id="signOutBtn">Sign out of this device</button>
+
+  <script src="status.js"></script>
+</body>
+</html>

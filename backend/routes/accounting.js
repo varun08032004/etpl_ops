@@ -369,4 +369,51 @@ router.get('/reports/gst-summary', requireRole('finance', 'accounting_hod'), asy
   }
 });
 
+// GET /api/accounting/reports/monthly-breakdown?year=2026
+//
+// Every income/expense account's actual amount for each month of the given
+// calendar year, plus totals. Powers the Dashboard's dynamic Income vs
+// Expense chart (year selectable, drill into any month) and the month-wise/
+// year-wise expense tally. Genuinely different from cashflow-runway, which
+// is always "last N months from today" and only returns totals, not the
+// per-account breakdown needed to see what a given month's expense actually
+// was made of.
+router.get('/reports/monthly-breakdown', requireRole('finance', 'accounting_hod'), async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ error: 'A valid year query param is required, e.g. ?year=2026' });
+    }
+
+    const months = [];
+    for (let m = 0; m < 12; m++) {
+      const from = new Date(year, m, 1).toISOString().slice(0, 10);
+      const to = new Date(year, m + 1, 0).toISOString().slice(0, 10);
+      const pnl = await ledger.getProfitAndLoss(from, to);
+      months.push({
+        month: from.slice(0, 7),
+        totalIncome: pnl.totalIncome,
+        totalExpense: pnl.totalExpense,
+        netProfit: pnl.netProfit,
+        income: pnl.income,     // per-account breakdown: [{code, name, amount}]
+        expenses: pnl.expenses, // per-account breakdown: [{code, name, amount}]
+      });
+    }
+
+    const yearTotalIncome = round2(months.reduce((s, m) => s + m.totalIncome, 0));
+    const yearTotalExpense = round2(months.reduce((s, m) => s + m.totalExpense, 0));
+
+    res.json({
+      year,
+      months,
+      yearTotalIncome,
+      yearTotalExpense,
+      yearNetProfit: round2(yearTotalIncome - yearTotalExpense),
+    });
+  } catch (err) {
+    console.error('[accounting:monthly-breakdown]', err);
+    res.status(500).json({ error: 'Failed to compute monthly breakdown' });
+  }
+});
+
 module.exports = router;

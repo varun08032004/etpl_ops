@@ -19,6 +19,15 @@
 // first (this one uses `category` as free text + a levels_required/
 // current_level chain; the old one used `category_id` FK + a simpler
 // manager->finance flow).
+//
+// ACCRUAL: as of 005_employee_reimbursement_liability.sql, final approval
+// (decide() below) posts Dr Expense / Cr Employee Reimbursements Payable
+// (2160) — the SAME two-step accrual-then-settle pattern already used for
+// director-funded bills (routes/bills.js's director_loan path, 2150).
+// Previously an approved-but-unpaid claim had zero presence in the ledger;
+// now it shows up in trial balance/balance sheet the moment it's approved,
+// and reimburse() settles that liability (Dr 2160 / Cr Bank) instead of
+// re-expensing the same amount a second time.
 
 const express = require('express');
 const router = express.Router();
@@ -389,6 +398,39 @@ router.post('/expense-claims/:id/decide', async (req, res) => {
         .catch((err) => console.error(`[finance:fireEvent] ${result.event.name} failed:`, err));
     }
 
+    // Accrue the liability the moment a claim reaches final approval — Dr
+    // Expense / Cr Employee Reimbursements Payable (2160). This is posted
+    // after the transaction commits (same pattern as the fireEvent call
+    // above): the approval decision itself must not be blocked or rolled
+    // back by a ledger-posting hiccup. If this fails, the claim is still
+    // correctly approved — just logged loudly so it can be reconciled — and
+    // reimburse() below falls back to expensing directly if no accrual ever
+    // landed, so nothing is silently lost either way.
+    if (result.updated.status === 'approved') {
+      try {
+        const accountCode = CLAIM_CATEGORY_TO_ACCOUNT_CODE[result.updated.category] || '5990';
+        const { rows: [expenseAccount] } = await safeQuery(`SELECT id FROM chart_of_accounts WHERE code = $1`, [accountCode]);
+        const { rows: [liabilityAccount] } = await safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '2160'`);
+        if (expenseAccount && liabilityAccount) {
+          const { rows: [emp] } = await safeQuery(`SELECT full_name FROM employees WHERE id = $1`, [result.updated.employee_id]);
+          const accrualJe = await ledger.postJournalEntry({
+            entryDate: result.updated.expense_date, source: 'expense_claim', sourceType: 'expense_claim', sourceId: result.updated.id,
+            narration: `Approved: ${result.updated.description || result.updated.category} (${emp?.full_name || result.updated.employee_id})`,
+            createdBy: req.staff.id,
+            lines: [
+              { accountId: expenseAccount.id, debit: result.updated.amount, description: result.updated.description || result.updated.category },
+              { accountId: liabilityAccount.id, credit: result.updated.amount, description: `Owed to ${emp?.full_name || result.updated.employee_id}` },
+            ],
+          });
+          await safeQuery(`UPDATE expense_claims SET accrual_journal_entry_id = $1 WHERE id = $2`, [accrualJe.id, result.updated.id]);
+        } else {
+          console.error('[finance:expense-claims:decide] Could not post accrual — missing expense account or the 2160 liability account. Run 005_employee_reimbursement_liability.sql.');
+        }
+      } catch (accrualErr) {
+        console.error('[finance:expense-claims:decide] Accrual posting failed after approval — claim is approved but not yet reflected in the ledger:', accrualErr);
+      }
+    }
+
     res.json({ claim: result.updated });
   } catch (err) {
     console.error('[finance:expense-claims:decide]', err);
@@ -503,13 +545,9 @@ router.get('/cash-flow', requireRole('finance'), async (req, res) => {
 // ── forward-looking cash flow forecast ──────────────────────────────────────
 // Combines FOUR sources of KNOWN future outflow: recurring expenses (current
 // environment pricing), average of the last 3 paid payroll runs, pending/
-// approved purchase requests bucketed by needed_by_date, and now unpaid bills
+// approved purchase requests bucketed by needed_by_date, and unpaid bills
 // (routes/bills.js one-off expenses + purchase-request conversions) bucketed
-// by due_date. Previously bills were missing entirely — an approved PR
-// converted to a bill, or a one-off expense marked "pay later", posted a real
-// Accounts Payable liability to the ledger but never showed up in this
-// forecast, so runway projections silently understated near-term outflow.
-// This is still deliberately NOT a full P&L forecast — it doesn't know about
+// by due_date. Deliberately NOT a full P&L forecast — it doesn't know about
 // anything outside these four sources. It answers "given what I already know
 // is committed, when do I run low" — not "predict everything."
 router.get('/cash-flow/forecast', requireRole('finance'), async (req, res) => {
@@ -633,12 +671,14 @@ router.get('/cash-flow/forecast', requireRole('finance'), async (req, res) => {
   }
 });
 
-// ── reimburse a fully-approved claim — pays out and posts the ledger entry ──
-// This is the step that was missing entirely: claims could reach 'approved'
-// status but nothing ever actually paid the employee back or recorded it in
-// Accounting. journal_entry_id already existed on the expense_claims table
-// (confirmed via schema check) waiting for exactly this — it was just never
-// populated by anything until now.
+// ── reimburse a fully-approved claim — pays out and settles the accrued liability ──
+// Settles Dr 2160 (Employee Reimbursements Payable) / Cr Bank — the expense
+// itself was already recognized at approval time in decide() above, so this
+// step is purely a cash settlement, not a second expensing. Falls back to
+// expensing directly (the old behavior) only if a claim somehow reached
+// 'approved' without an accrual ever posting — e.g. approved before this
+// migration existed — so nothing from before this change silently loses its
+// expense recognition.
 router.post('/expense-claims/:id/reimburse', requireRole('finance'), async (req, res) => {
   try {
     const { bank_account_id } = req.body;
@@ -659,10 +699,19 @@ router.post('/expense-claims/:id/reimburse', requireRole('finance'), async (req,
     }
 
     try {
-      const accountCode = CLAIM_CATEGORY_TO_ACCOUNT_CODE[claim.category] || '5990';
-      const { rows: [expenseAccount] } = await safeQuery(`SELECT id FROM chart_of_accounts WHERE code = $1`, [accountCode]);
-      if (!expenseAccount) {
-        throw Object.assign(new Error(`No chart-of-accounts entry found for code "${accountCode}" (mapped from category "${claim.category}") — set this account up before reimbursing.`), { httpStatus: 500 });
+      const { rows: [liabilityAccount] } = await safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '2160'`);
+      let debitAccountId = liabilityAccount?.id;
+      let debitDescription = 'Settling reimbursement owed';
+      if (!claim.accrual_journal_entry_id || !liabilityAccount) {
+        // No accrual on file (or the 2160 account is missing) — fall back to
+        // expensing directly, same as this endpoint always did before.
+        const accountCode = CLAIM_CATEGORY_TO_ACCOUNT_CODE[claim.category] || '5990';
+        const { rows: [expenseAccount] } = await safeQuery(`SELECT id FROM chart_of_accounts WHERE code = $1`, [accountCode]);
+        if (!expenseAccount) {
+          throw Object.assign(new Error(`No chart-of-accounts entry found for code "${accountCode}" (mapped from category "${claim.category}") — set this account up before reimbursing.`), { httpStatus: 500 });
+        }
+        debitAccountId = expenseAccount.id;
+        debitDescription = claim.description || claim.category;
       }
 
       const { rows: [bank] } = await safeQuery(`SELECT ledger_account_id FROM bank_accounts WHERE id = $1`, [bank_account_id]);
@@ -673,11 +722,11 @@ router.post('/expense-claims/:id/reimburse', requireRole('finance'), async (req,
 
       const je = await ledger.postJournalEntry({
         entryDate: new Date().toISOString().slice(0, 10),
-        source: 'expense_claim', sourceType: 'expense_claim', sourceId: claim.id,
+        source: 'payment', sourceType: 'expense_claim', sourceId: claim.id,
         narration: `Reimbursement: ${claim.description || claim.category} (${emp?.full_name || claim.employee_id})`,
         createdBy: req.staff.id,
         lines: [
-          { accountId: expenseAccount.id, debit: claim.amount, description: claim.description || claim.category },
+          { accountId: debitAccountId, debit: claim.amount, description: debitDescription },
           { accountId: bank.ledger_account_id, credit: claim.amount, description: `Reimbursed to ${emp?.full_name || claim.employee_id}` },
         ],
       });

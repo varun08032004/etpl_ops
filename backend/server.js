@@ -80,6 +80,8 @@ app.use('/api/platform-sync', require('./routes/platform-sync'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/attendance', require('./routes/attendance'));
+app.use('/api/agent', require('./routes/agent'));           // NEW — desktop agent: login, session start/heartbeat/stop, screenshots
+app.use('/api/monitoring', require('./routes/monitoring'));  // NEW — dashboard side of the above: live view, day drilldown, productivity rules, settings
 app.use('/api/marketing/social-accounts', require('./routes/marketingSocial')); // NEW — Marketing module: Socials portfolio page
 app.use('/api/marketing/campaigns', require('./routes/marketingCampaigns')); // NEW — Marketing module: Campaigns page
 app.use('/api/marketing/content-calendar', require('./routes/marketingContent')); // NEW — Marketing module: Content Calendar page

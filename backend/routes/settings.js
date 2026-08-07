@@ -19,7 +19,12 @@ router.use(authenticate);
 
 router.get('/compliance', requireRole('finance'), async (req, res) => {
   try {
-    const { rows } = await safeQuery(`SELECT * FROM compliance_settings ORDER BY key`);
+    const { rows } = await safeQuery(
+      `SELECT cs.*, sa.email AS verified_by_email
+       FROM compliance_settings cs
+       LEFT JOIN staff_accounts sa ON sa.id = cs.verified_by
+       ORDER BY cs.key`
+    );
     res.json({ settings: rows });
   } catch (err) {
     console.error('[settings:compliance:list]', err);
@@ -38,20 +43,44 @@ router.put('/compliance/:key', requireRole(), async (req, res) => {
     const { rows: [before] } = await safeQuery(`SELECT * FROM compliance_settings WHERE key = $1`, [req.params.key]);
     if (!before) return res.status(404).json({ error: `No compliance setting with key "${req.params.key}"` });
 
+    // Changing the value invalidates any prior CA sign-off — a new number
+    // needs a new confirmation, it doesn't inherit trust from the old one.
     const { rows: [updated] } = await safeQuery(
-      `UPDATE compliance_settings SET value = $1 WHERE key = $2 RETURNING *`,
+      `UPDATE compliance_settings SET value = $1, verified_by = NULL, verified_at = NULL WHERE key = $2 RETURNING *`,
       [String(value), req.params.key]
     );
 
     await logAction({
       staffId: req.staff.id, action: 'compliance_setting.updated', entity: 'compliance_settings', entityId: req.params.key,
-      oldValue: { value: before.value }, newValue: { value: updated.value },
+      oldValue: { value: before.value, was_verified: !!before.verified_by }, newValue: { value: updated.value },
     });
 
     res.json({ setting: updated });
   } catch (err) {
     console.error('[settings:compliance:update]', err);
     res.status(500).json({ error: 'Failed to update compliance setting' });
+  }
+});
+
+// Sign-off — separate from editing the value. Lets whoever heads Legal &
+// Compliance (or owner/admin, via requireRole's bypass) attest "I checked
+// this against the actual Act/notification and it's correct" without
+// double-counting an edit as a confirmation.
+router.post('/compliance/:key/verify', requireRole('finance'), async (req, res) => {
+  try {
+    const { rows: [updated] } = await safeQuery(
+      `UPDATE compliance_settings SET verified_by = $1, verified_at = NOW() WHERE key = $2 RETURNING *`,
+      [req.staff.id, req.params.key]
+    );
+    if (!updated) return res.status(404).json({ error: `No compliance setting with key "${req.params.key}"` });
+    await logAction({
+      staffId: req.staff.id, action: 'compliance_setting.verified', entity: 'compliance_settings', entityId: req.params.key,
+      newValue: { value: updated.value, verified_at: updated.verified_at },
+    });
+    res.json({ setting: updated });
+  } catch (err) {
+    console.error('[settings:compliance:verify]', err);
+    res.status(500).json({ error: 'Failed to verify compliance setting' });
   }
 });
 

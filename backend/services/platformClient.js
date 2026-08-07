@@ -170,6 +170,56 @@ async function fetchSupportTickets({ since = null, status = null } = {}) {
   return data.tickets || [];
 }
 
+// fetchDisputes: platform trade/credit disputes. Read-only, same token.
+async function fetchDisputes({ since = null, status = null } = {}) {
+  const base = process.env.PLATFORM_API_URL;
+  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
+  if (!base || !token) {
+    throw new Error('PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example');
+  }
+  const params = new URLSearchParams();
+  if (since) params.set('since', since);
+  if (status) params.set('status', status);
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  const url = `${base.replace(/\/$/, '')}/api/ops-integration/disputes${qs}`;
+  let resp;
+  try {
+    resp = await fetch(url, { headers: { 'x-service-token': token } });
+  } catch (err) {
+    throw new Error(`Could not reach platform API at ${base}: ${err.message}`);
+  }
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`Platform API returned ${resp.status}: ${body.slice(0, 300)}`);
+  }
+  const data = await resp.json();
+  return data.disputes || [];
+}
+
+// fetchKycStatus: recent KYC submissions with status/rejection reasons.
+// Read-only, same token.
+async function fetchKycStatus(since = null) {
+  const base = process.env.PLATFORM_API_URL;
+  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
+  if (!base || !token) {
+    throw new Error('PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example');
+  }
+  const qs = since ? `?since=${encodeURIComponent(since)}` : '';
+  const url = `${base.replace(/\/$/, '')}/api/ops-integration/kyc-status${qs}`;
+  let resp;
+  try {
+    resp = await fetch(url, { headers: { 'x-service-token': token } });
+  } catch (err) {
+    throw new Error(`Could not reach platform API at ${base}: ${err.message}`);
+  }
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`Platform API returned ${resp.status}: ${body.slice(0, 300)}`);
+  }
+  const data = await resp.json();
+  return data.submissions || [];
+}
+
 // fetchInvoicePdf: pulls the real invoice/bill PDF for a single subscription
 // payment or trade, straight from the platform. type must be 'subscription'
 // or 'trade'; id is the same ref_id fetchPlatformIncome() returns for that
@@ -283,7 +333,7 @@ async function fetchCorporateActivations() {
 }
 
 module.exports = {
-  fetchPlatformIncome, fetchPlatformCustomers, fetchInvoicePdf, fetchChurnEvents, fetchPlatformRefunds, fetchCouponRedemptions, fetchSupportTickets,
+  fetchPlatformIncome, fetchPlatformCustomers, fetchInvoicePdf, fetchChurnEvents, fetchPlatformRefunds, fetchCouponRedemptions, fetchSupportTickets, fetchDisputes, fetchKycStatus,
   activateCorporate, updateCorporateRenewal, fetchCorporateActivations,
   createCoupon, listCoupons, setCouponActive,
   updatePlanPrice, fetchPlanPrices,

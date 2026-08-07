@@ -21,8 +21,29 @@ const emptyForm = {
 
 function DealRow({ deal, onReload }) {
   const [open, setOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState('');
   const paidCount = deal.installments.filter((i) => i.invoice_status === 'paid').length;
   const total = deal.installments.length;
+
+  const DEAL_STATUS_COLOR = { active: 'success', completed: 'default', cancelled: 'error' };
+
+  const confirmCancel = async () => {
+    if (!cancelReason.trim()) { setCancelError('A reason is required.'); return; }
+    setCancelling(true);
+    setCancelError('');
+    try {
+      await client.post(`/product/corporate-deals/${deal.id}/cancel`, { reason: cancelReason.trim() });
+      setCancelOpen(false);
+      onReload();
+    } catch (e) {
+      setCancelError(e.response?.data?.error || 'Failed to cancel deal');
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   return (
     <>
@@ -43,9 +64,19 @@ function DealRow({ deal, onReload }) {
           <Chip size="small" label={`${paidCount}/${total} paid`} color={paidCount === total ? 'success' : paidCount > 0 ? 'warning' : 'default'} />
         </TableCell>
         <TableCell sx={{ fontSize: '0.8rem' }}>{fmtDate(deal.started_at)}</TableCell>
+        <TableCell>
+          <Chip size="small" label={deal.status} color={DEAL_STATUS_COLOR[deal.status] || 'default'} sx={{ textTransform: 'capitalize' }} />
+        </TableCell>
+        <TableCell align="right">
+          {deal.status === 'active' && (
+            <Button size="small" color="error" onClick={() => { setCancelReason(''); setCancelError(''); setCancelOpen(true); }}>
+              Cancel
+            </Button>
+          )}
+        </TableCell>
       </TableRow>
       <TableRow>
-        <TableCell colSpan={7} sx={{ py: 0, borderBottom: open ? undefined : 'none' }}>
+        <TableCell colSpan={9} sx={{ py: 0, borderBottom: open ? undefined : 'none' }}>
           <Collapse in={open} timeout="auto" unmountOnExit>
             <Box sx={{ my: 1.5, ml: 4 }}>
               <Table size="small">
@@ -81,6 +112,25 @@ function DealRow({ deal, onReload }) {
           </Collapse>
         </TableCell>
       </TableRow>
+
+      <Dialog open={cancelOpen} onClose={() => !cancelling && setCancelOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Cancel corporate deal</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ fontSize: '0.82rem', color: 'text.secondary', mb: 1.5 }}>
+            This immediately cuts platform access for {deal.party_name} — the same way a missed installment
+            would. Unpaid invoices already issued are left as-is in Accounting for Finance to handle separately.
+          </Typography>
+          <TextField fullWidth margin="normal" multiline rows={2} label="Reason (required)"
+            value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} />
+          {cancelError && <Alert severity="error" sx={{ mt: 1 }}>{cancelError}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCancelOpen(false)} disabled={cancelling}>Back</Button>
+          <Button color="error" variant="contained" onClick={confirmCancel} disabled={cancelling}>
+            {cancelling ? 'Cancelling…' : 'Confirm cancellation'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 }
@@ -200,14 +250,16 @@ export default function CorporateDeals() {
               <TableCell>Value</TableCell>
               <TableCell>Payment status</TableCell>
               <TableCell>Started</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading && (
-              <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>Loading…</TableCell></TableRow>
             )}
             {!loading && !deals.length && (
-              <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>No corporate deals yet</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>No corporate deals yet</TableCell></TableRow>
             )}
             {deals.map((d) => <DealRow key={d.id} deal={d} onReload={load} />)}
           </TableBody>

@@ -15,6 +15,8 @@ import Invoices from './pages/Invoices';
 import Accounting from './pages/Accounting';
 import Payroll from './pages/Payroll';
 import Attendance from './pages/Attendance';
+import Monitoring from './pages/Monitoring';
+import MyActivity from './pages/MyActivity';
 import Recruitment from './pages/Recruitment';
 import Performance from './pages/Performance';
 import OrgStructure from './pages/OrgStructure';
@@ -112,6 +114,8 @@ export default function App() {
               <Route path="/accounting" element={<Accounting />} />
               <Route path="/payroll" element={<Payroll />} />
               <Route path="/attendance" element={<Attendance />} />
+              <Route path="/monitoring" element={<Monitoring />} />
+              <Route path="/my-activity" element={<MyActivity />} />
               <Route path="/recruitment" element={<Recruitment />} />
               <Route path="/performance" element={<Performance />} />
               <Route path="/org-structure" element={<OrgStructure />} />
