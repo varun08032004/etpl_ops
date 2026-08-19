@@ -22,6 +22,7 @@
 html, body, #root {
   height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
@@ -29,6 +30,9 @@ body {
   background: var(--bg-void);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 .figure {
@@ -46,4 +50,518 @@ a { color: inherit; text-decoration: none; }
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Mobile viewport protection */
+@media (max-width: 599px) {
+  * {
+    max-width: 100vw;
+  }
+  
+  .MuiContainer-root {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+    max-width: 100vw !important;
+  }
+  
+  .MuiPaper-root {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  
+  .MuiBox-root {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  
+  /* Prevent table overflow */
+  .MuiTableContainer-root {
+    overflow-x: auto !important;
+    max-width: 100% !important;
+  }
+  
+  .MuiTable-root {
+    min-width: 100% !important;
+  }
+  
+  /* Prevent flex overflow */
+  .MuiGrid-container {
+    max-width: 100% !important;
+  }
+  
+  /* Prevent dialog overflow */
+  .MuiDialog-paper {
+    max-width: calc(100vw - 16px) !important;
+    margin: 8px !important;
+  }
+  
+  /* Prevent chip overflow */
+  .MuiChip-root {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  /* Prevent typography overflow */
+  .MuiTypography-root {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  
+  /* Ensure buttons don't overflow */
+  .MuiButton-root {
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  /* Prevent icon button overflow */
+  .MuiIconButton-root {
+    flex-shrink: 0;
+  }
+  
+  /* Ensure inputs don't overflow */
+  .MuiTextField-root {
+    max-width: 100% !important;
+  }
+  
+  .MuiInputBase-root {
+    max-width: 100% !important;
+  }
+}
+
+@media (max-width: 599px) {
+  .MuiTableCell-root {
+    padding: 8px 12px !important;
+    font-size: 0.8125rem !important;
+  }
+  .MuiTableCell-head {
+    font-size: 0.7rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .MuiPaper-root {
+    border-radius: 8px !important;
+  }
+  .MuiDialog-paperWidthSm,
+  .MuiDialog-paperWidthMd {
+    max-width: calc(100vw - 16px) !important;
+    margin: 8px !important;
+  }
+  .MuiButton-root {
+    min-height: 44px !important;
+    font-size: 0.875rem !important;
+  }
+  .MuiIconButton-root {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+  .MuiTextField-root {
+    margin-bottom: 8px !important;
+  }
+  .MuiFormControl-root {
+    margin-bottom: 8px !important;
+  }
+  .MuiGrid-item {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+  .MuiContainer-root {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+  .MuiTypography-h5 {
+    font-size: 1.25rem !important;
+  }
+  .MuiTypography-h6 {
+    font-size: 1rem !important;
+  }
+  .MuiChip-root {
+    font-size: 0.7rem !important;
+    height: 26px !important;
+  }
+  .MuiChip-label {
+    padding: 0 8px !important;
+  }
+  .MuiTab-root {
+    min-height: 44px !important;
+    padding: 0 12px !important;
+    font-size: 0.8125rem !important;
+  }
+  .MuiTablePagination-root {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+  .MuiTablePagination-select {
+    padding: 4px 8px !important;
+  }
+  .MuiDialogContent-root {
+    padding: 16px !important;
+  }
+  .MuiDialogActions-root {
+    padding: 8px 16px !important;
+    flex-direction: column-reverse !important;
+    gap: 8px !important;
+  }
+  .MuiDialogActions-root .MuiButton-root {
+    width: 100% !important;
+  }
+  .MuiStepper-root {
+    padding: 8px 0 !important;
+  }
+  .MuiStepLabel-label {
+    font-size: 0.7rem !important;
+  }
+  .MuiStepIcon-root {
+    width: 20px !important;
+    height: 20px !important;
+  }
+  .MuiAutocomplete-root {
+    width: 100% !important;
+  }
+  .MuiAutocomplete-popper {
+    max-width: calc(100vw - 16px) !important;
+  }
+  .MuiMenu-paper {
+    max-width: calc(100vw - 16px) !important;
+  }
+  .MuiSelect-select {
+    padding: 8px 12px !important;
+    min-height: 44px !important;
+  }
+  .MuiInputBase-input {
+    padding: 8px 12px !important;
+    font-size: 16px !important;
+  }
+  .MuiInputAdornment-root {
+    margin-right: 8px !important;
+  }
+  .MuiCardContent-root:last-child {
+    padding-bottom: 16px !important;
+  }
+  .MuiCardActions-root {
+    padding: 8px 16px !important;
+    flex-direction: column-reverse !important;
+    gap: 8px !important;
+  }
+  .MuiCardActions-root > * {
+    width: 100% !important;
+  }
+  .MuiListItem-root {
+    min-height: 44px !important;
+  }
+  .MuiListItemIcon-root {
+    min-width: 40px !important;
+  }
+  .MuiAvatar-root {
+    min-width: 40px !important;
+    min-height: 40px !important;
+  }
+  .MuiTableRow-root {
+    min-height: 44px !important;
+  }
+  .MuiTab-scrollable {
+    overflow-x: auto !important;
+  }
+}
+
+@media (min-width: 600px) and (max-width: 959px) {
+  .MuiTableCell-root {
+    padding: 10px 16px !important;
+  }
+  .MuiDialog-paperWidthSm,
+  .MuiDialog-paperWidthMd {
+    max-width: calc(100vw - 32px) !important;
+    margin: 16px !important;
+  }
+  .MuiContainer-root {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+  .MuiButton-root {
+    min-height: 44px !important;
+  }
+  .MuiIconButton-root {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+}
+
+.MuiTableContainer-root {
+  overflow-x: auto !important;
+  width: 100% !important;
+}
+
+.MuiTable-root {
+  min-width: 100% !important;
+}
+
+@media (max-width: 599px) {
+  .mobile-stack > * {
+    width: 100% !important;
+    margin-bottom: 8px !important;
+  }
+  .mobile-stack > *:last-child {
+    margin-bottom: 0 !important;
+  }
+  .mobile-full-width {
+    width: 100% !important;
+  }
+  .mobile-hide {
+    display: none !important;
+  }
+  .mobile-show {
+    display: block !important;
+  }
+  .mobile-flex-column {
+    flex-direction: column !important;
+  }
+  .mobile-text-center {
+    text-align: center !important;
+  }
+  .mobile-p-2 {
+    padding: 8px !important;
+  }
+  .mobile-mt-2 {
+    margin-top: 8px !important;
+  }
+  .mobile-mb-2 {
+    margin-bottom: 8px !important;
+  }
+}
+
+@media print {
+  .MuiAppBar-root,
+  .MuiDrawer-root,
+  .MuiIconButton-root,
+  .MuiButton-root,
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* Login page mobile fixes */
+@media (max-width: 599px) {
+  /* Login page container */
+  .login-page-container {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    height: auto !important;
+    min-height: 100vh !important;
+  }
+  
+  /* Login page main flex container */
+  .login-main-flex {
+    flex-direction: column !important;
+    height: auto !important;
+    min-height: 100vh !important;
+    padding: 16px !important;
+  }
+  
+  /* Left panel (branding/globe) - hide or minimize on mobile */
+  .login-left-panel {
+    display: none !important;
+  }
+  
+  /* Right panel (login form) - full width on mobile */
+  .login-right-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 24px !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  
+  /* Login form container */
+  .login-form-container {
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+  
+  /* Input fields - ensure 48px height for touch */
+  .login-input {
+    height: 48px !important;
+    font-size: 16px !important;
+    padding-left: 56px !important;
+    padding-right: 56px !important;
+  }
+  
+  /* Buttons - 48px height for touch */
+  .login-button {
+    height: 48px !important;
+    font-size: 16px !important;
+    padding: 12px 24px !important;
+  }
+  
+  /* Input with icon - adjust padding */
+  .login-input-with-icon {
+    padding-left: 44px !important;
+  }
+  
+  /* Globe visual - hide on mobile */
+  .login-globe-visual {
+    display: none !important;
+  }
+  
+  /* Left panel - hide on mobile */
+  .login-left-panel {
+    display: none !important;
+  }
+  
+  /* Right panel adjustments */
+  .login-right-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    padding: 24px !important;
+  }
+  
+  /* Form elements */
+  .login-form {
+    width: 100% !important;
+  }
+  
+  .login-field {
+    margin-bottom: 16px !important;
+  }
+  
+  .login-field-label {
+    font-size: 13px !important;
+    margin-bottom: 8px !important;
+  }
+  
+  .login-input-wrapper {
+    position: relative !important;
+  }
+  
+  .login-input-icon {
+    position: absolute !important;
+    left: 12px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    width: 20px !important;
+    height: 20px !important;
+  }
+  
+  .login-input-field {
+    width: 100% !important;
+    height: 48px !important;
+    padding: 12px 16px !important;
+    padding-left: 44px !important;
+    font-size: 16px !important;
+    border-radius: 12px !important;
+  }
+  
+  /* Buttons */
+  .login-primary-button {
+    height: 48px !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    padding: 12px 24px !important;
+  }
+  
+  .login-secondary-button {
+    height: 44px !important;
+    font-size: 14px !important;
+    padding: 10px 16px !important;
+  }
+  
+  /* Secure badge */
+  .login-secure-badge {
+    position: static !important;
+    margin-bottom: 16px !important;
+    width: fit-content !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+  
+  /* Error banner */
+  .login-error-banner {
+    padding: 12px 16px !important;
+    font-size: 13px !important;
+    border-radius: 8px !important;
+  }
+  
+  /* Forgot password link */
+  .login-forgot-link {
+    font-size: 13px !important;
+    padding: 8px 0 !important;
+  }
+  
+  /* Divider */
+  .login-divider {
+    margin: 20px 0 !important;
+  }
+  
+  /* Trust line */
+  .login-trust-line {
+    font-size: 12px !important;
+  }
+  
+  /* Shield icon */
+  .login-shield-icon {
+    width: 40px !important;
+    height: 40px !important;
+  }
+  
+  /* Footer */
+  .login-footer {
+    padding: 16px !important;
+    font-size: 12px !important;
+  }
+}
+
+/* Tablet styles */
+@media (min-width: 600px) and (max-width: 959px) {
+  .login-left-panel {
+    display: none !important;
+  }
+  
+  .login-right-panel {
+    width: 100% !important;
+    max-width: 480px !important;
+    margin: 0 auto !important;
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.mobile-animate-in {
+  animation: slideInUp 0.3s ease-out;
+}
+
+.mobile-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+@media (max-width: 599px) {
+  .MuiDrawer-paper {
+    border-top-left-radius: 16px !important;
+    border-top-right-radius: 16px !important;
+  }
+  .MuiAppBar-root {
+    border-bottom: 1px solid var(--border) !important;
+  }
+  .MuiBackdrop-root {
+    backdrop-filter: blur(4px);
+    background-color: rgba(0, 0, 0, 0.5) !important;
+  }
 }

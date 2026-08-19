@@ -36,21 +36,20 @@ export function AuthProvider({ children }) {
     if (status === 202) {
       return { deviceApprovalRequired: !!data.deviceApprovalRequired, twoFactorRequired: !!data.twoFactorRequired, message: data.message };
     }
-    localStorage.setItem('etpl_token', data.token);
+    // Token is in HttpOnly cookie; no localStorage needed
     setStaff(data.staff);
     return { staff: data.staff };
   };
 
   const verifyDevice = async (email, otp, label) => {
     const { data } = await client.post('/auth/verify-device', { email, otp, label });
-    localStorage.setItem('etpl_token', data.token);
+    // Token is in HttpOnly cookie; no localStorage needed
     setStaff(data.staff);
     return data.staff;
   };
 
   const logout = async () => {
     await client.post('/auth/logout').catch(() => {});
-    localStorage.removeItem('etpl_token');
     setStaff(null);
   };
 

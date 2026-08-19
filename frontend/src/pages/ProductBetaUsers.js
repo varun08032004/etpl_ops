@@ -6,6 +6,19 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  MobileCardGrid,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const STAGE_COLOR = { waitlist: 'default', onboarded: 'info', active: 'success', churned: 'error', inactive: 'default' };
 const STAGES = ['waitlist', 'onboarded', 'active', 'churned', 'inactive'];
@@ -15,6 +28,7 @@ const AREA_LABEL = { portfolio_management: 'Portfolio Mgmt', marketplace: 'Marke
 const emptyForm = { name: '', company_name: '', email: '', phone: '', stage: 'waitlist', areas_of_interest: [], joined_date: '', notes: '' };
 
 export default function ProductBetaUsers() {
+  const isMobile = useMobile();
   const { staff } = useAuth();
   const [isProductHead, setIsProductHead] = useState(false);
   const canEdit = ['owner', 'admin'].includes(staff?.role) || isProductHead;
@@ -96,102 +110,121 @@ export default function ProductBetaUsers() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">Beta / Pilot Users</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>Beta / Pilot Users</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Early testers and design partners on ethertrack.in — separate from paying customers until they convert.
           </Typography>
         </Box>
-        {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add tester</Button>}
-      </Box>
+        {canEdit && <MobileButton variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add tester</MobileButton>}
+      </MobilePageHeader>
 
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
-        <Paper sx={{ p: 2, minWidth: 140 }}>
-          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Total testers</Typography>
-          <Typography sx={{ fontSize: '1.3rem', fontWeight: 700 }} className="figure">{totals.total}</Typography>
-        </Paper>
-        <Paper sx={{ p: 2, minWidth: 140 }}>
-          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Active</Typography>
-          <Typography sx={{ fontSize: '1.3rem', fontWeight: 700 }} className="figure">{totals.active}</Typography>
-        </Paper>
-      </Box>
+      <MobileCardGrid sx={{ mb: 3 }}>
+        <MobilePaper>
+          <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>Total testers</Typography>
+          <Typography sx={{ fontSize: isMobile ? '1rem' : '1.3rem', fontWeight: 700 }} className="figure">{totals.total}</Typography>
+        </MobilePaper>
+        <MobilePaper>
+          <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>Active</Typography>
+          <Typography sx={{ fontSize: isMobile ? '1rem' : '1.3rem', fontWeight: 700 }} className="figure">{totals.active}</Typography>
+        </MobilePaper>
+      </MobileCardGrid>
 
-      <TextField select size="small" label="Filter stage" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} sx={{ mb: 2, minWidth: 180 }}>
-        <MenuItem value="">All stages</MenuItem>
-        {STAGES.map((s) => <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s}</MenuItem>)}
-      </TextField>
+      <MobilePaper sx={{ mb: 2 }}>
+        <MobileTextField
+          select
+          size="small"
+          label="Filter stage"
+          value={stageFilter}
+          onChange={(e) => setStageFilter(e.target.value)}
+          options={[{ value: '', label: 'All stages' }, ...STAGES.map((s) => ({ value: s, label: s }))]}
+        />
+      </MobilePaper>
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Name / company</TableCell>
-              <TableCell>Contact</TableCell>
-              <TableCell>Interested in</TableCell>
-              <TableCell>Stage</TableCell>
-              <TableCell>Joined</TableCell>
-              <TableCell align="right">Action</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {betaUsers.map((b) => (
-              <TableRow key={b.id}>
-                <TableCell>
-                  <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{b.name}</Typography>
-                  {b.company_name && <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{b.company_name}</Typography>}
-                </TableCell>
-                <TableCell sx={{ fontSize: '0.8rem' }}>
-                  {b.email && <div>{b.email}</div>}
-                  {b.phone && <div>{b.phone}</div>}
-                </TableCell>
-                <TableCell>
-                  {(b.areas_of_interest || []).map((a) => <Chip key={a} size="small" label={AREA_LABEL[a] || a} sx={{ mr: 0.5, mb: 0.5, fontSize: '0.68rem' }} />)}
-                </TableCell>
-                <TableCell>
-                  <Chip size="small" label={b.stage} color={STAGE_COLOR[b.stage]} sx={{ textTransform: 'capitalize' }} />
-                  {b.converted_party_id && <Typography sx={{ fontSize: '0.68rem', color: 'text.secondary', mt: 0.5 }}>→ Converted to CRM</Typography>}
-                </TableCell>
-                <TableCell className="figure" sx={{ fontSize: '0.8rem' }}>{b.joined_date?.slice(0, 10) || '—'}</TableCell>
-                <TableCell align="right">
-                  {canConvert && !b.converted_party_id && <Button size="small" onClick={() => handleConvert(b)}>Convert</Button>}
-                  {canEdit && <Button size="small" onClick={() => openEdit(b)}>Edit</Button>}
-                  {canDelete && <Button size="small" color="error" onClick={() => handleDelete(b)}>Delete</Button>}
-                </TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Name / company</TableCell>
+                <TableCell>Contact</TableCell>
+                <TableCell>Interested in</TableCell>
+                <TableCell>Stage</TableCell>
+                <TableCell>Joined</TableCell>
+                <TableCell align="right">Action</TableCell>
               </TableRow>
-            ))}
-            {!betaUsers.length && (
-              <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No beta users yet.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {betaUsers.map((b) => (
+                <TableRow key={b.id}>
+                  <TableCell>
+                    <Typography sx={{ fontWeight: 600, fontSize: isMobile ? '0.75rem' : '0.875rem' }}>{b.name}</Typography>
+                    {b.company_name && <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>{b.company_name}</Typography>}
+                  </TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem' }}>
+                    {b.email && <div>{b.email}</div>}
+                    {b.phone && <div>{b.phone}</div>}
+                  </TableCell>
+                  <TableCell>
+                    {(b.areas_of_interest || []).map((a) => <Chip key={a} size="small" label={AREA_LABEL[a] || a} sx={{ mr: 0.5, mb: 0.5, fontSize: isMobile ? '0.62rem' : '0.68rem' }} />)}
+                  </TableCell>
+                  <TableCell>
+                    <Chip size="small" label={b.stage} color={STAGE_COLOR[b.stage]} sx={{ textTransform: 'capitalize' }} />
+                    {b.converted_party_id && <Typography sx={{ fontSize: isMobile ? '0.6rem' : '0.68rem', color: 'text.secondary', mt: 0.5 }}>→ Converted to CRM</Typography>}
+                  </TableCell>
+                  <TableCell className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.8rem' }}>{b.joined_date?.slice(0, 10) || '—'}</TableCell>
+                  <TableCell align="right">
+                    <MobileStack gap={1} direction="row">
+                      {canConvert && !b.converted_party_id && <MobileButton size="small" onClick={() => handleConvert(b)}>Convert</MobileButton>}
+                      {canEdit && <MobileButton size="small" onClick={() => openEdit(b)}>Edit</MobileButton>}
+                      {canDelete && <MobileButton size="small" color="error" onClick={() => handleDelete(b)}>Delete</MobileButton>}
+                    </MobileStack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!betaUsers.length && (
+                <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No beta users yet.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{editingId ? 'Edit' : 'Add'} beta user</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="Name" margin="normal" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <TextField fullWidth label="Company (optional)" margin="normal" value={form.company_name} onChange={(e) => setForm({ ...form, company_name: e.target.value })} />
-          <TextField fullWidth label="Email" margin="normal" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <TextField fullWidth label="Phone" margin="normal" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          <TextField fullWidth select label="Stage" margin="normal" value={form.stage} onChange={(e) => setForm({ ...form, stage: e.target.value })}>
-            {STAGES.map((s) => <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s}</MenuItem>)}
-          </TextField>
-          <TextField
-            fullWidth select label="Areas of interest" margin="normal" SelectProps={{ multiple: true }}
-            value={form.areas_of_interest} onChange={(e) => setForm({ ...form, areas_of_interest: e.target.value })}
-          >
-            {AREAS.map((a) => <MenuItem key={a} value={a}>{AREA_LABEL[a] || a}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth type="date" label="Joined date" InputLabelProps={{ shrink: true }} margin="normal" value={form.joined_date} onChange={(e) => setForm({ ...form, joined_date: e.target.value })} />
-          <TextField fullWidth label="Notes" margin="normal" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField fullWidth label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <MobileTextField fullWidth label="Company (optional)" value={form.company_name} onChange={(e) => setForm({ ...form, company_name: e.target.value })} />
+            <MobileTextField fullWidth label="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <MobileTextField fullWidth label="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Stage"
+              value={form.stage}
+              onChange={(e) => setForm({ ...form, stage: e.target.value })}
+              options={STAGES.map((s) => ({ value: s, label: s }))}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Areas of interest"
+              value={form.areas_of_interest}
+              onChange={(e) => setForm({ ...form, areas_of_interest: e.target.value })}
+              options={AREAS.map((a) => ({ value: a, label: AREA_LABEL[a] || a }))}
+            />
+            <MobileTextField fullWidth type="date" label="Joined date" InputLabelProps={{ shrink: true }} value={form.joined_date} onChange={(e) => setForm({ ...form, joined_date: e.target.value })} />
+            <MobileTextField fullWidth label="Notes" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving || !form.name}>{saving ? 'Saving…' : 'Save'}</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleSave} disabled={saving || !form.name}>{saving ? 'Saving…' : 'Save'}</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

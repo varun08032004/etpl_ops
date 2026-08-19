@@ -98,8 +98,12 @@ export default function SecurityGuard({ children }) {
   }, [isExempt]);
 
   if (isExempt) {
-    // Founder device: render children untouched, nothing attached.
-    return <>{children}</>;
+    // Founder device: render children but still enforce viewport lock
+    return (
+      <div style={{ height: '100vh', overflow: 'hidden' }}>
+        {children}
+      </div>
+    );
   }
 
   const label = staff ? `${staff.email} · ${staff.role || ''}` : '';
@@ -119,8 +123,10 @@ export default function SecurityGuard({ children }) {
     <div
       ref={overlayRef}
       style={{
-        position: 'relative',
-        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100vh',
+        overflow: 'hidden',
         userSelect: 'none',
         WebkitUserSelect: 'none',
         filter: 'blur(var(--guard-blur, 0px))',

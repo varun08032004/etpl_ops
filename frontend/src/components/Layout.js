@@ -62,11 +62,11 @@ import client from '../api/client';
 // product_hod get the full operational console. Everyone else (manager/employee)
 // gets a scoped self-service view — they should not see company-wide financials,
 // other people's records, or admin tools like Team logins / CSV import.
-const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'sales_hod', 'product_hod', 'accounting_hod'];
-const ADMIN_ROLES = ['owner', 'admin'];
+export const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'sales_hod', 'product_hod', 'accounting_hod'];
+export const ADMIN_ROLES = ['owner', 'admin'];
 
 // Grouped instead of one flat list — 13+ items in a row was too much to scan.
-const NAV_GROUPS = [
+export const NAV_GROUPS = [
   {
     label: 'Overview',
     items: [
@@ -182,7 +182,7 @@ const NAV_GROUPS = [
 // sees the Revenue/Accounting/Finance groups (the same routes finance.js/
 // accounting.js/invoices.js/expenses.js already gate behind requireRole
 // ('finance') — see middleware/auth.js + services/departmentAccess.js).
-const ROLE_TO_NAV_GROUP_LABELS = {
+export const ROLE_TO_NAV_GROUP_LABELS = {
   finance: ['Sales', 'Accounting', 'Finance'],
   hr: ['HR'],
   legal_hod: ['Legal'],
@@ -193,7 +193,7 @@ const ROLE_TO_NAV_GROUP_LABELS = {
   accounting_hod: ['Accounting'],
 };
 
-const ADMIN_NAV_GROUP = {
+export const ADMIN_NAV_GROUP = {
   label: 'Admin',
   items: [
     { to: '/admin', label: 'Permissions & Audit', icon: AdminPanelSettingsOutlinedIcon },
@@ -202,7 +202,7 @@ const ADMIN_NAV_GROUP = {
   ],
 };
 
-const SELF_SERVICE_NAV = [
+export const SELF_SERVICE_NAV = [
   { to: '/', label: 'My Profile', icon: PersonOutlinedIcon, end: true },
   { to: '/my-activity', label: 'My Activity', icon: TimelineOutlinedIcon },
 ];
@@ -265,13 +265,13 @@ export default function Layout() {
   const toggleGroup = (label) => setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+    <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <Box
         component="nav"
         sx={{
           width: 232, flexShrink: 0, bgcolor: 'background.paper',
           borderRight: '1px solid', borderColor: 'divider',
-          display: 'flex', flexDirection: 'column', position: 'sticky', top: 0, height: '100vh',
+          display: 'flex', flexDirection: 'column', position: 'sticky', top: 0, height: '100vh', overflowY: 'auto',
         }}
       >
         <Box sx={{ px: 3, py: 3 }}>
@@ -384,11 +384,11 @@ export default function Layout() {
         </Box>
       </Box>
 
-      <Box component="main" sx={{ flex: 1, minWidth: 0 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: 4, pt: 2 }}>
+      <Box component="main" sx={{ flex: 1, minWidth: 0, overflow: 'hidden', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: 4, pt: 2, flexShrink: 0 }}>
           <NotificationBell />
         </Box>
-        <Box sx={{ px: 4, pb: 4 }}>
+        <Box sx={{ flex: 1, minHeight: 0, px: 4, pb: 4, overflow: 'auto' }}>
           <Outlet />
         </Box>
       </Box>

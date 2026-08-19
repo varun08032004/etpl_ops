@@ -5,17 +5,20 @@
 // GST-computation + ledger-posting logic can be called from a service
 // (services/corporateDeals.js, generating one invoice per billing period
 // for a Corporate deal) as well as the existing manual "create invoice"
-// route. Behavior is unchanged from what invoices.js always did — this is
-// a pure extraction, not a rewrite.
+// route. Now supports subscription invoices with deferred revenue recognition.
 
 const { safeQuery, withTransaction } = require('../db/pool');
 const ledger = require('./ledger');
+const { createRevenueRecognitionSchedule } = require('./accrualService');
 
 const HOME_STATE = process.env.COMPANY_STATE || 'Maharashtra';
 
-// createInvoice({ party_id, invoice_date, due_date, items, notes, createdBy })
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// createInvoice({ party_id, invoice_date, due_date, items, notes, createdBy, invoice_type })
+// invoice_type: 'one_time' (default) | 'subscription'
 // items: [{ description, hsn_sac_code?, quantity?, unit_price, gst_rate?, income_account_id? }]
-async function createInvoice({ party_id, invoice_date, due_date, items, notes, createdBy }) {
+async function createInvoice({ party_id, invoice_date, due_date, items, notes, createdBy, invoice_type = 'one_time' }) {
   if (!party_id || !invoice_date || !due_date || !Array.isArray(items) || !items.length) {
     throw Object.assign(new Error('party_id, invoice_date, due_date, items[] are required'), { status: 400 });
   }
@@ -40,7 +43,6 @@ async function createInvoice({ party_id, invoice_date, due_date, items, notes, c
     return { ...it, lineTotal, gstRate };
   });
 
-  const round2 = (n) => Math.round(n * 100) / 100;
   subtotal = round2(subtotal); cgstTotal = round2(cgstTotal); sgstTotal = round2(sgstTotal); igstTotal = round2(igstTotal);
   const totalAmount = round2(subtotal + cgstTotal + sgstTotal + igstTotal);
 
@@ -59,10 +61,10 @@ async function createInvoice({ party_id, invoice_date, due_date, items, notes, c
 
     const { rows: [invoice] } = await client.query(
       `INSERT INTO invoices (invoice_number, party_id, invoice_date, due_date, status,
-         subtotal, cgst_amount, sgst_amount, igst_amount, total_amount, place_of_supply, notes, created_by)
-       VALUES ($1,$2,$3,$4,'draft',$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+         subtotal, cgst_amount, sgst_amount, igst_amount, total_amount, place_of_supply, notes, created_by, invoice_type)
+       VALUES ($1,$2,$3,$4,'draft',$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [next_num, party_id, invoice_date, due_date, subtotal, cgstTotal, sgstTotal, igstTotal, totalAmount,
-       party.state || null, notes || null, createdBy]
+       party.state || null, notes || null, createdBy, invoice_type]
     );
 
     for (const it of computedItems) {
@@ -76,6 +78,15 @@ async function createInvoice({ party_id, invoice_date, due_date, items, notes, c
     return invoice;
   });
 
+  // For subscription invoices, use deferred revenue recognition
+  if (invoice_type === 'subscription') {
+    const accrualResult = await createRevenueRecognitionSchedule(result.id, createdBy);
+    if (accrualResult) {
+      return { ...result, journal_entry_id: accrualResult.journalEntry.id, status: 'sent', deferredRevenue: true };
+    }
+  }
+
+  // Standard one-time invoice: post to income directly
   const lines = [
     { accountId: arAcct.id, debit: totalAmount, partyId: party_id, description: `Invoice ${result.invoice_number}` },
     { accountId: defaultIncomeAcct.id, credit: subtotal, description: `Revenue - ${result.invoice_number}` },

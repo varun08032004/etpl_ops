@@ -7,7 +7,7 @@ const api = require('./api');
 const store = require('./store');
 const { Tracker } = require('./tracker');
 const { startLocalServer } = require('./localServer');
-const { applyIncognitoRestriction, alreadyApplied } = require('./incognitoLock');
+const { applyIncognitoRestriction, revertIncognitoRestriction, isApplied } = require('./incognitoLock');
 
 const AGENT_VERSION = require('../package.json').version;
 
@@ -161,10 +161,52 @@ async function captureScreenshot() {
 }
 
 // ── auth ────────────────────────────────────────────────────────────────
-async function maybeApplyIncognitoRestriction() {
-  if (!settings?.restrict_incognito || alreadyApplied()) return;
-  const result = await applyIncognitoRestriction();
-  if (result.applied) console.log('[incognitoLock] applied successfully');
+// Reacts to whatever `settings` currently holds — applies the incognito
+// restriction if the toggle is on and it isn't applied yet, REVERTS it if
+// the toggle got turned back off. Called after every settings refresh,
+// not just at login, which is the actual fix for "toggling it on/off
+// doesn't do anything" — the old code only ever checked this once.
+async function syncIncognitoRestriction() {
+  if (settings?.restrict_incognito && !isApplied()) {
+    const result = await applyIncognitoRestriction();
+    if (result.applied) console.log('[incognitoLock] applied');
+  } else if (!settings?.restrict_incognito && isApplied()) {
+    const result = await revertIncognitoRestriction();
+    if (result.reverted) console.log('[incognitoLock] reverted');
+  }
+}
+
+// This is the fix for "screenshots on but nothing captures" too — the
+// agent used to read settings exactly once (at login) and never again.
+// Flip the dashboard toggle while someone's already mid-session and the
+// old code had no way of finding out. Runs every 2 minutes, no-ops
+// without a token.
+let settingsRefreshTimer = null;
+function startSettingsRefreshLoop() {
+  if (settingsRefreshTimer) return;
+  settingsRefreshTimer = setInterval(refreshSettings, 2 * 60 * 1000);
+}
+
+async function refreshSettings() {
+  if (!token) return;
+  try {
+    const me = await api.getMe(token);
+    settings = me.settings;
+
+    if (session) {
+      if (settings.screenshots_enabled && !screenshotTimer) {
+        const shotMs = (settings.screenshot_interval_seconds || 600) * 1000;
+        screenshotTimer = setInterval(captureScreenshot, shotMs);
+      } else if (!settings.screenshots_enabled && screenshotTimer) {
+        clearInterval(screenshotTimer);
+        screenshotTimer = null;
+      }
+    }
+
+    await syncIncognitoRestriction();
+  } catch (err) {
+    console.error('[settingsRefresh]', err.message);
+  }
 }
 
 async function attemptAutoLogin() {
@@ -178,7 +220,7 @@ async function attemptAutoLogin() {
       session = { id: me.open_session.id, clock_in: me.open_session.clock_in };
       dailyTotals = { active: me.today_totals?.active_seconds || 0, idle: me.today_totals?.idle_seconds || 0 };
     }
-    maybeApplyIncognitoRestriction(); // fire-and-forget — the UAC prompt shouldn't block login
+    syncIncognitoRestriction(); // fire-and-forget — the UAC prompt shouldn't block login
     return true;
   } catch {
     token = null;
@@ -206,7 +248,7 @@ ipcMain.handle('auth:login', async (_evt, { email, password, totpToken, backupCo
     session = { id: me.open_session.id, clock_in: me.open_session.clock_in };
     dailyTotals = { active: me.today_totals?.active_seconds || 0, idle: me.today_totals?.idle_seconds || 0 };
   }
-  maybeApplyIncognitoRestriction();
+  syncIncognitoRestriction();
 
   createStatusWindow();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
@@ -249,6 +291,7 @@ app.whenReady().then(async () => {
 
   buildTray();
   startLocalServer(() => tracker); // always running — no-ops until a session/tracker exists; the extension can start reporting the moment it's paired, whether or not Start Work has been clicked yet
+  startSettingsRefreshLoop(); // always running — no-ops without a token; this is what makes screenshot/incognito toggles take effect without needing a re-login
   const loggedIn = await attemptAutoLogin();
   if (loggedIn) {
     createStatusWindow();

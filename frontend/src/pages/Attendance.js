@@ -1,11 +1,22 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
-  TextField, MenuItem, Button, Alert, Grid, Chip, CircularProgress,
+  TextField, MenuItem, Button, Alert, Chip, CircularProgress,
 } from '@mui/material';
 import SyncOutlinedIcon from '@mui/icons-material/SyncOutlined';
 import client from '../api/client';
 import StatusChip from '../components/StatusChip';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileFormGrid,
+  MobileActionButtons,
+  ResponsiveTableContainer,
+  MobileCardGrid,
+  MobileButton,
+  MobileTextField,
+  useMobile,
+} from '../components/MobileResponsive';
 
 function firstOfMonth() {
   const now = new Date();
@@ -14,7 +25,6 @@ function firstOfMonth() {
 function today() {
   return new Date().toISOString().slice(0, 10);
 }
-
 function fmtDuration(seconds) {
   if (seconds == null) return '—';
   const h = Math.floor(seconds / 3600);
@@ -29,6 +39,7 @@ function fmtTime(t) {
 const STATUS_ORDER = ['present', 'half_day', 'absent', 'on_leave'];
 
 export default function Attendance() {
+  const isMobile = useMobile();
   const [employees, setEmployees] = useState([]);
   const [employeeId, setEmployeeId] = useState('');
   const [from, setFrom] = useState(firstOfMonth());
@@ -82,89 +93,98 @@ export default function Attendance() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">Attendance</Typography>
-        <Button
+      <MobilePageHeader>
+        <Typography variant={isMobile ? 'h6' : 'h5'}>Attendance</Typography>
+        <MobileButton
           variant="outlined"
+          size="small"
           startIcon={syncing ? <CircularProgress size={16} /> : <SyncOutlinedIcon />}
           onClick={runSync}
           disabled={syncing}
         >
           {syncing ? 'Syncing…' : 'Sync from TrackPilot'}
-        </Button>
-      </Box>
+        </MobileButton>
+      </MobilePageHeader>
 
-      <Typography sx={{ color: 'text.secondary', fontSize: '0.85rem', mb: 2.5 }}>
-        Sourced from Trackpilots (Section 18.2). "Sync from Trackpilots" pulls the whole month
-        containing your "To" date — Trackpilots reports monthly, not by arbitrary range. New
-        employees are auto-linked by matching their work email to their Trackpilots login on first sync.
-      </Typography>
+      <MobilePaper sx={{ mb: 2 }}>
+        <Typography sx={{ color: 'text.secondary', fontSize: isMobile ? '0.7rem' : '0.85rem', mb: 2 }}>
+          Sourced from Trackpilots (Section 18.2). "Sync from Trackpilots" pulls the whole month
+          containing your "To" date — Trackpilots reports monthly, not by arbitrary range. New
+          employees are auto-linked by matching their work email to their Trackpilots login on first sync.
+        </Typography>
 
-      {syncMessage && <Alert severity={syncMessage.severity} sx={{ mb: 2.5 }}>{syncMessage.text}</Alert>}
+        {syncMessage && <Alert severity={syncMessage.severity} sx={{ mb: 2 }}>{syncMessage.text}</Alert>}
 
-      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2.5, flexWrap: 'wrap' }}>
-        <TextField select size="small" label="Employee" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} sx={{ minWidth: 220 }}>
-          <MenuItem value="">All employees</MenuItem>
-          {employees.map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
-        </TextField>
-        <TextField size="small" type="date" label="From" InputLabelProps={{ shrink: true }} value={from} onChange={(e) => setFrom(e.target.value)} />
-        <TextField size="small" type="date" label="To" InputLabelProps={{ shrink: true }} value={to} onChange={(e) => setTo(e.target.value)} />
-      </Box>
+        <MobileFormGrid>
+          <MobileTextField
+            select
+            size="small"
+            label="Employee"
+            value={employeeId}
+            onChange={(e) => setEmployeeId(e.target.value)}
+            options={[{ value: '', label: 'All employees' }, ...employees.map((e) => ({ value: e.id, label: e.full_name }))]}
+          />
+          <MobileTextField size="small" type="date" label="From" InputLabelProps={{ shrink: true }} value={from} onChange={(e) => setFrom(e.target.value)} />
+          <MobileTextField size="small" type="date" label="To" InputLabelProps={{ shrink: true }} value={to} onChange={(e) => setTo(e.target.value)} />
+        </MobileFormGrid>
 
-      {error && <Alert severity="error" sx={{ mb: 2.5 }}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ mt: 2, mb: 2 }}>{error}</Alert>}
 
-      {records && (
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          {STATUS_ORDER.map((s) => (
-            <Grid item xs={6} sm={3} key={s}>
-              <Paper sx={{ p: 2 }}>
-                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', textTransform: 'capitalize' }}>{s.replace('_', ' ')}</Typography>
-                <Typography sx={{ fontSize: '1.3rem', fontWeight: 600 }}>{counts[s]}</Typography>
-              </Paper>
-            </Grid>
-          ))}
-        </Grid>
-      )}
+        {records && (
+          <>
+            <MobileCardGrid sx={{ mb: 3 }}>
+              <MobilePaper>
+                <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>Present</Typography>
+                <Typography className="figure" sx={{ fontSize: isMobile ? '1.5rem' : '2rem', fontWeight: 600, color: 'success.main' }}>{counts.present || 0}</Typography>
+              </MobilePaper>
+              <MobilePaper>
+                <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>Half Day</Typography>
+                <Typography className="figure" sx={{ fontSize: isMobile ? '1.5rem' : '2rem', fontWeight: 600, color: 'warning.main' }}>{counts.half_day || 0}</Typography>
+              </MobilePaper>
+              <MobilePaper>
+                <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>Absent</Typography>
+                <Typography className="figure" sx={{ fontSize: isMobile ? '1.5rem' : '2rem', fontWeight: 600, color: 'error.main' }}>{counts.absent || 0}</Typography>
+              </MobilePaper>
+              <MobilePaper>
+                <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>On Leave</Typography>
+                <Typography className="figure" sx={{ fontSize: isMobile ? '1.5rem' : '2rem', fontWeight: 600, color: 'info.main' }}>{counts.on_leave || 0}</Typography>
+              </MobilePaper>
+            </MobileCardGrid>
 
-      {loading && <CircularProgress size={22} />}
-
-      {!loading && records && (
-        <Paper>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Date</TableCell>
-                {!employeeId && <TableCell>Employee</TableCell>}
-                <TableCell>Status</TableCell>
-                <TableCell>Clock in</TableCell>
-                <TableCell>Clock out</TableCell>
-                <TableCell align="right">Active</TableCell>
-                <TableCell align="right">Idle</TableCell>
-                <TableCell>Source</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {records.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="figure" sx={{ fontSize: '0.8rem' }}>{r.work_date?.slice(0, 10)}</TableCell>
-                  {!employeeId && <TableCell sx={{ fontSize: '0.8rem' }}>{employeeName(r.employee_id)}</TableCell>}
-                  <TableCell><StatusChip status={r.status} /></TableCell>
-                  <TableCell sx={{ fontSize: '0.8rem' }}>{fmtTime(r.clock_in)}</TableCell>
-                  <TableCell sx={{ fontSize: '0.8rem' }}>{fmtTime(r.clock_out)}</TableCell>
-                  <TableCell align="right" sx={{ fontSize: '0.8rem' }}>{fmtDuration(r.active_seconds)}</TableCell>
-                  <TableCell align="right" sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>{fmtDuration(r.idle_seconds)}</TableCell>
-                  <TableCell><Chip size="small" label={r.source || 'manual'} variant="outlined" /></TableCell>
-                </TableRow>
-              ))}
-              {records.length === 0 && (
-                <TableRow><TableCell colSpan={employeeId ? 7 : 8} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>
-                  No attendance records for this range.
-                </TableCell></TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Paper>
-      )}
+            <MobilePaper>
+              <ResponsiveTableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Employee</TableCell>
+                      <TableCell>Date</TableCell>
+                      <TableCell>Check-in</TableCell>
+                      <TableCell>Check-out</TableCell>
+                      <TableCell>Duration</TableCell>
+                      <TableCell>Status</TableCell>
+                      <TableCell>Source</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {records.map((r) => (
+                      <TableRow key={r.id} hover>
+                        <TableCell>{employeeName(r.employee_id)}</TableCell>
+                        <TableCell className="figure">{r.date}</TableCell>
+                        <TableCell className="figure">{fmtTime(r.check_in)}</TableCell>
+                        <TableCell className="figure">{fmtTime(r.check_out)}</TableCell>
+                        <TableCell className="figure">{fmtDuration(r.duration_seconds)}</TableCell>
+                        <TableCell><StatusChip status={r.status} /></TableCell>
+                        <TableCell><Chip size="small" label={r.source || 'manual'} variant="outlined" /></TableCell>
+                      </TableRow>
+                    ))}
+                    {!records.length && <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No attendance records for this period.</TableCell></TableRow>}
+                  </TableBody>
+                </Table>
+              </ResponsiveTableContainer>
+            </MobilePaper>
+          </>
+        )}
+      </MobilePaper>
     </Box>
   );
 }

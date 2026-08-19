@@ -7,6 +7,19 @@ import AddIcon from '@mui/icons-material/Add';
 import client from '../api/client';
 import Money from '../components/Money';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  MobileCardGrid,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const STATUS_COLOR = { planned: 'default', confirmed: 'info', completed: 'success', cancelled: 'error' };
 const EVENT_TYPES = ['conference', 'webinar', 'meetup', 'trade_show', 'panel', 'workshop', 'other'];
@@ -18,6 +31,7 @@ const emptyForm = {
 };
 
 export default function MarketingEvents() {
+  const isMobile = useMobile();
   const { staff } = useAuth();
   const [isMarketingHead, setIsMarketingHead] = useState(false);
   const canEdit = ['owner', 'admin'].includes(staff?.role) || isMarketingHead;
@@ -79,91 +93,116 @@ export default function MarketingEvents() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">Events & Webinars</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>Events & Webinars</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Conferences, panels, and webinars — cost, role, and leads generated.
           </Typography>
         </Box>
-        {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add event</Button>}
-      </Box>
+        {canEdit && <MobileButton variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add event</MobileButton>}
+      </MobilePageHeader>
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Event</TableCell>
-              <TableCell>Type / role</TableCell>
-              <TableCell>Dates</TableCell>
-              <TableCell>Location</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell align="right">Cost</TableCell>
-              <TableCell align="right">Leads</TableCell>
-              <TableCell align="right">Action</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {events.map((e) => (
-              <TableRow key={e.id}>
-                <TableCell>
-                  <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{e.name}</Typography>
-                  {e.url && <Typography component="a" href={e.url} target="_blank" rel="noopener noreferrer" sx={{ fontSize: '0.75rem' }}>Link</Typography>}
-                </TableCell>
-                <TableCell sx={{ fontSize: '0.8rem', textTransform: 'capitalize' }}>{e.event_type?.replace('_', ' ')} · {e.role}</TableCell>
-                <TableCell className="figure" sx={{ fontSize: '0.8rem' }}>{e.start_date?.slice(0, 10) || '—'}{e.end_date ? ` → ${e.end_date.slice(0, 10)}` : ''}</TableCell>
-                <TableCell sx={{ fontSize: '0.8rem' }}>{e.is_virtual ? 'Virtual' : (e.location || '—')}</TableCell>
-                <TableCell><Chip size="small" label={e.status} color={STATUS_COLOR[e.status]} sx={{ textTransform: 'capitalize' }} /></TableCell>
-                <TableCell align="right"><Money amount={e.cost} /></TableCell>
-                <TableCell align="right" className="figure">{e.leads_generated || 0}</TableCell>
-                <TableCell align="right">
-                  {canEdit && <Button size="small" onClick={() => openEdit(e)}>Edit</Button>}
-                  {canDelete && <Button size="small" color="error" onClick={() => handleDelete(e)}>Delete</Button>}
-                </TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Event</TableCell>
+                <TableCell>Type / role</TableCell>
+                <TableCell>Dates</TableCell>
+                <TableCell>Location</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell align="right">Cost</TableCell>
+                <TableCell align="right">Leads</TableCell>
+                <TableCell align="right">Action</TableCell>
               </TableRow>
-            ))}
-            {!events.length && (
-              <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No events tracked yet.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {events.map((e) => (
+                <TableRow key={e.id}>
+                  <TableCell>
+                    <Typography sx={{ fontWeight: 600, fontSize: isMobile ? '0.75rem' : '0.875rem' }}>{e.name}</Typography>
+                    {e.url && <Typography component="a" href={e.url} target="_blank" rel="noopener noreferrer" sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}>Link</Typography>}
+                  </TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem', textTransform: 'capitalize' }}>{e.event_type?.replace('_', ' ')} · {e.role}</TableCell>
+                  <TableCell className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.8rem' }}>{e.start_date?.slice(0, 10) || '—'}{e.end_date ? ` → ${e.end_date.slice(0, 10)}` : ''}</TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.8rem' }}>{e.is_virtual ? 'Virtual' : (e.location || '—')}</TableCell>
+                  <TableCell><Chip size="small" label={e.status} color={STATUS_COLOR[e.status]} sx={{ textTransform: 'capitalize' }} /></TableCell>
+                  <TableCell align="right"><Money amount={e.cost} /></TableCell>
+                  <TableCell align="right" className="figure">{e.leads_generated || 0}</TableCell>
+                  <TableCell align="right">
+                    <MobileStack gap={1} direction="row">
+                      {canEdit && <MobileButton size="small" onClick={() => openEdit(e)}>Edit</MobileButton>}
+                      {canDelete && <MobileButton size="small" color="error" onClick={() => handleDelete(e)}>Delete</MobileButton>}
+                    </MobileStack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!events.length && (
+                <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No events tracked yet.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{editingId ? 'Edit' : 'Add'} event</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="Event name" margin="normal" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <TextField fullWidth select label="Type" margin="normal" value={form.event_type} onChange={(e) => setForm({ ...form, event_type: e.target.value })}>
-            {EVENT_TYPES.map((t) => <MenuItem key={t} value={t} sx={{ textTransform: 'capitalize' }}>{t.replace('_', ' ')}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth select label="Our role" margin="normal" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-            {ROLES.map((r) => <MenuItem key={r} value={r} sx={{ textTransform: 'capitalize' }}>{r}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth select label="Status" margin="normal" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-            {Object.keys(STATUS_COLOR).map((s) => <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s}</MenuItem>)}
-          </TextField>
-          <Box sx={{ display: 'flex', gap: 1.5 }}>
-            <TextField fullWidth type="date" label="Start date" InputLabelProps={{ shrink: true }} margin="normal" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
-            <TextField fullWidth type="date" label="End date" InputLabelProps={{ shrink: true }} margin="normal" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
-          </Box>
-          <TextField fullWidth label="Location" margin="normal" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} disabled={form.is_virtual} />
-          <TextField fullWidth select label="Virtual?" margin="normal" value={form.is_virtual ? 'yes' : 'no'} onChange={(e) => setForm({ ...form, is_virtual: e.target.value === 'yes' })}>
-            <MenuItem value="no">No</MenuItem>
-            <MenuItem value="yes">Yes</MenuItem>
-          </TextField>
-          <Box sx={{ display: 'flex', gap: 1.5 }}>
-            <TextField fullWidth type="number" label="Cost (₹)" margin="normal" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} />
-            <TextField fullWidth type="number" label="Leads generated" margin="normal" value={form.leads_generated} onChange={(e) => setForm({ ...form, leads_generated: e.target.value })} />
-          </Box>
-          <TextField fullWidth label="Event URL" margin="normal" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
-          <TextField fullWidth label="Notes" margin="normal" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField fullWidth label="Event name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Type"
+              value={form.event_type}
+              onChange={(e) => setForm({ ...form, event_type: e.target.value })}
+              options={EVENT_TYPES.map((t) => ({ value: t, label: t.replace('_', ' ') }))}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Our role"
+              value={form.role}
+              onChange={(e) => setForm({ ...form, role: e.target.value })}
+              options={ROLES.map((r) => ({ value: r, label: r }))}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Status"
+              value={form.status}
+              onChange={(e) => setForm({ ...form, status: e.target.value })}
+              options={Object.keys(STATUS_COLOR).map((s) => ({ value: s, label: s }))}
+            />
+            <MobileStack gap={1.5} direction="row" flexWrap="wrap">
+              <MobileTextField fullWidth type="date" label="Start date" InputLabelProps={{ shrink: true }} value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
+              <MobileTextField fullWidth type="date" label="End date" InputLabelProps={{ shrink: true }} value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
+            </MobileStack>
+            <MobileTextField fullWidth label="Location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} disabled={form.is_virtual} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Virtual?"
+              value={form.is_virtual ? 'yes' : 'no'}
+              onChange={(e) => setForm({ ...form, is_virtual: e.target.value === 'yes' })}
+              options={[{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }]}
+            />
+            <MobileStack gap={1.5} direction="row" flexWrap="wrap">
+              <MobileTextField fullWidth type="number" label="Cost (₹)" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} />
+              <MobileTextField fullWidth type="number" label="Leads generated" value={form.leads_generated} onChange={(e) => setForm({ ...form, leads_generated: e.target.value })} />
+            </MobileStack>
+            <MobileTextField fullWidth label="Event URL" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+            <MobileTextField fullWidth label="Notes" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving || !form.name}>{saving ? 'Saving…' : 'Save'}</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleSave} disabled={saving || !form.name}>{saving ? 'Saving…' : 'Save'}</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

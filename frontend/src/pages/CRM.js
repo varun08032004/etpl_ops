@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
-  TextField, InputAdornment, Button, Dialog, DialogTitle, DialogContent, DialogActions,
+  TextField, InputAdornment, Dialog, DialogTitle, DialogContent, DialogActions,
   Grid, MenuItem, Chip, Alert, IconButton,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
@@ -12,6 +12,17 @@ import MergeTypeIcon from '@mui/icons-material/MergeType';
 import client from '../api/client';
 import Money from '../components/Money';
 import StatusChip from '../components/StatusChip';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileDialog,
+  MobileButton,
+  MobileTextField,
+  MobileStack,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const emptyForm = {
   name: '', party_type: 'customer', email: '', phone: '', gstin: '', pan: '', cin: '',
@@ -19,6 +30,7 @@ const emptyForm = {
 };
 
 function CompanyList() {
+  const isMobile = useMobile();
   const [parties, setParties] = useState([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
@@ -48,18 +60,22 @@ function CompanyList() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">CRM</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpen(true)}>Add company</Button>
-      </Box>
+      <MobilePageHeader>
+        <Typography variant={isMobile ? 'h6' : 'h5'}>CRM</Typography>
+        <MobileButton variant="contained" startIcon={<AddIcon />} onClick={() => setOpen(true)}>Add company</MobileButton>
+      </MobilePageHeader>
 
-      <TextField
-        fullWidth placeholder="Search by name or GSTIN" value={search} onChange={handleSearch}
-        size="small" sx={{ mb: 2, maxWidth: 360 }}
+      <MobileTextField
+        fullWidth
+        placeholder="Search by name or GSTIN"
+        value={search}
+        onChange={handleSearch}
+        size="small"
+        sx={{ mb: 2, maxWidth: 360 }}
         InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
       />
 
-      <Paper>
+      <MobilePaper>
         <Table>
           <TableHead>
             <TableRow>
@@ -89,34 +105,37 @@ function CompanyList() {
             )}
           </TableBody>
         </Table>
-      </Paper>
+      </MobilePaper>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Add company</DialogTitle>
         <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 0.5 }}>
-            <Grid item xs={12}><TextField fullWidth label="Company name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Grid>
-            <Grid item xs={6}><TextField fullWidth label="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Grid>
-            <Grid item xs={6}><TextField fullWidth label="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Grid>
-            <Grid item xs={6}><TextField fullWidth label="GSTIN" value={form.gstin} onChange={(e) => setForm({ ...form, gstin: e.target.value.toUpperCase() })} helperText="15 characters, e.g. 27ABCDE1234F1Z5" /></Grid>
-            <Grid item xs={6}><TextField fullWidth label="PAN" value={form.pan} onChange={(e) => setForm({ ...form, pan: e.target.value.toUpperCase() })} /></Grid>
-            <Grid item xs={6}><TextField fullWidth label="CIN" value={form.cin} onChange={(e) => setForm({ ...form, cin: e.target.value.toUpperCase() })} /></Grid>
-            <Grid item xs={6}><TextField fullWidth label="Industry" value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} /></Grid>
-            <Grid item xs={6}><TextField fullWidth label="Employee band" placeholder="e.g. 50-200" value={form.employee_band} onChange={(e) => setForm({ ...form, employee_band: e.target.value })} /></Grid>
-            <Grid item xs={6}><TextField fullWidth label="Turnover band" placeholder="e.g. ₹10-50 Cr" value={form.turnover_band} onChange={(e) => setForm({ ...form, turnover_band: e.target.value })} /></Grid>
-            <Grid item xs={6}>
-              <TextField fullWidth select label="Lead source" value={form.lead_source} onChange={(e) => setForm({ ...form, lead_source: e.target.value })}>
-                {['referral', 'outbound', 'inbound', 'event', 'other'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-              </TextField>
-            </Grid>
-          </Grid>
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField fullWidth label="Company name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            <MobileTextField fullWidth label="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <MobileTextField fullWidth label="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            <MobileTextField fullWidth label="GSTIN" value={form.gstin} onChange={(e) => setForm({ ...form, gstin: e.target.value.toUpperCase() })} helperText="15 characters, e.g. 27ABCDE1234F1Z5" />
+            <MobileTextField fullWidth label="PAN" value={form.pan} onChange={(e) => setForm({ ...form, pan: e.target.value.toUpperCase() })} />
+            <MobileTextField fullWidth label="CIN" value={form.cin} onChange={(e) => setForm({ ...form, cin: e.target.value.toUpperCase() })} />
+            <MobileTextField fullWidth label="Industry" value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} />
+            <MobileTextField fullWidth label="Employee band" placeholder="e.g. 50-200" value={form.employee_band} onChange={(e) => setForm({ ...form, employee_band: e.target.value })} />
+            <MobileTextField fullWidth label="Turnover band" placeholder="e.g. ₹10-50 Cr" value={form.turnover_band} onChange={(e) => setForm({ ...form, turnover_band: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Lead source"
+              value={form.lead_source}
+              onChange={(e) => setForm({ ...form, lead_source: e.target.value })}
+              options={['referral', 'outbound', 'inbound', 'event', 'other'].map((s) => ({ value: s, label: s }))}
+            />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleCreate} disabled={saving || !form.name}>{saving ? 'Creating…' : 'Create'}</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleCreate} disabled={saving || !form.name}>{saving ? 'Creating…' : 'Create'}</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }
@@ -129,6 +148,7 @@ const TIMELINE_LABEL = {
 };
 
 function CompanyDetail() {
+  const isMobile = useMobile();
   const { id } = useParams();
   const [data, setData] = useState(null);
   const [contactOpen, setContactOpen] = useState(false);
@@ -187,91 +207,116 @@ function CompanyDetail() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">{party.name}</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>{party.name}</Typography>
           <Typography sx={{ color: 'text.secondary' }}>{party.industry || 'No industry set'} · {party.email || 'No email'}</Typography>
         </Box>
-        <Button variant="outlined" startIcon={<MergeTypeIcon />} onClick={openMerge}>Merge into another company</Button>
-      </Box>
+        <MobileButton variant="outlined" startIcon={<MergeTypeIcon />} onClick={openMerge}>Merge into another company</MobileButton>
+      </MobilePageHeader>
 
       {message && <Alert severity={message.severity} sx={{ mb: 2.5 }}>{message.text}</Alert>}
       {party.merged_into_party_id && <Alert severity="warning" sx={{ mb: 2.5 }}>This record has been merged into another company.</Alert>}
 
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={7}>
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography sx={{ fontWeight: 600, mb: 2 }}>Company details</Typography>
-            <Grid container spacing={2}>
-              <Grid item xs={6}><Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>GSTIN</Typography><Typography className="figure">{party.gstin || '—'}</Typography></Grid>
-              <Grid item xs={6}><Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>PAN</Typography><Typography className="figure">{party.pan || '—'}</Typography></Grid>
-              <Grid item xs={6}><Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>CIN</Typography><Typography className="figure">{party.cin || '—'}</Typography></Grid>
-              <Grid item xs={6}><Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Phone</Typography><Typography>{party.phone || '—'}</Typography></Grid>
-              <Grid item xs={6}><Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Employee band</Typography><Typography>{party.employee_band || '—'}</Typography></Grid>
-              <Grid item xs={6}><Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Turnover band</Typography><Typography>{party.turnover_band || '—'}</Typography></Grid>
-              <Grid item xs={6}><Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Lead source</Typography><Typography sx={{ textTransform: 'capitalize' }}>{party.lead_source || '—'}</Typography></Grid>
-              <Grid item xs={6}><Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Renewal date</Typography><Typography className="figure">{party.renewal_date?.slice(0, 10) || '—'}</Typography></Grid>
-            </Grid>
-          </Paper>
+      <MobilePaper sx={{ mb: 3 }}>
+        <Typography sx={{ fontWeight: 600, mb: 2 }}>Company details</Typography>
+        <MobileFormGrid>
+          <Box>
+            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>GSTIN</Typography>
+            <Typography className="figure">{party.gstin || '—'}</Typography>
+          </Box>
+          <Box>
+            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>PAN</Typography>
+            <Typography className="figure">{party.pan || '—'}</Typography>
+          </Box>
+          <Box>
+            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>CIN</Typography>
+            <Typography className="figure">{party.cin || '—'}</Typography>
+          </Box>
+          <Box>
+            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Phone</Typography>
+            <Typography>{party.phone || '—'}</Typography>
+          </Box>
+          <Box>
+            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Employee band</Typography>
+            <Typography>{party.employee_band || '—'}</Typography>
+          </Box>
+          <Box>
+            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Turnover band</Typography>
+            <Typography>{party.turnover_band || '—'}</Typography>
+          </Box>
+          <Box>
+            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Lead source</Typography>
+            <Typography sx={{ textTransform: 'capitalize' }}>{party.lead_source || '—'}</Typography>
+          </Box>
+          <Box>
+            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Renewal date</Typography>
+            <Typography className="figure">{party.renewal_date?.slice(0, 10) || '—'}</Typography>
+          </Box>
+        </MobileFormGrid>
+      </MobilePaper>
 
-          <Paper sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography sx={{ fontWeight: 600 }}>Contacts</Typography>
-              <Button size="small" onClick={() => setContactOpen(true)}>+ Add contact</Button>
+      <MobilePaper sx={{ mb: 3 }}>
+        <MobilePageHeader>
+          <Typography sx={{ fontWeight: 600 }}>Contacts</Typography>
+          <MobileButton size="small" onClick={() => setContactOpen(true)}>+ Add contact</MobileButton>
+        </MobilePageHeader>
+        {contacts.map((c) => (
+          <Box key={c.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Box>
+              <Typography sx={{ fontSize: '0.875rem' }}>{c.full_name} {c.role && <Chip size="small" label={c.role} sx={{ ml: 1 }} />}</Typography>
+              <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{c.email || '—'} · {c.phone || '—'}</Typography>
             </Box>
-            {contacts.map((c) => (
-              <Box key={c.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
-                <Box>
-                  <Typography sx={{ fontSize: '0.875rem' }}>{c.full_name} {c.role && <Chip size="small" label={c.role} sx={{ ml: 1 }} />}</Typography>
-                  <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{c.email || '—'} · {c.phone || '—'}</Typography>
-                </Box>
-                <IconButton size="small" onClick={() => removeContact(c.id)}><DeleteOutlineIcon fontSize="small" /></IconButton>
-              </Box>
-            ))}
-            {!contacts.length && <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>No contacts yet.</Typography>}
-          </Paper>
-        </Grid>
+            <IconButton size="small" onClick={() => removeContact(c.id)}><DeleteOutlineIcon fontSize="small" /></IconButton>
+          </Box>
+        ))}
+        {!contacts.length && <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>No contacts yet.</Typography>}
+      </MobilePaper>
 
-        <Grid item xs={12} md={5}>
-          <Paper sx={{ p: 3 }}>
-            <Typography sx={{ fontWeight: 600, mb: 2 }}>Timeline</Typography>
-            <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-              <TextField fullWidth size="small" placeholder="Add a note…" value={noteText} onChange={(e) => setNoteText(e.target.value)} />
-              <Button size="small" variant="contained" onClick={addNote}>Add</Button>
+      <MobilePaper>
+        <Typography sx={{ fontWeight: 600, mb: 2 }}>Timeline</Typography>
+        <MobileStack gap={1} direction="row" sx={{ mb: 2 }}>
+          <MobileTextField fullWidth size="small" placeholder="Add a note…" value={noteText} onChange={(e) => setNoteText(e.target.value)} />
+          <MobileButton size="small" variant="contained" onClick={addNote}>Add</MobileButton>
+        </MobileStack>
+        {timeline.map((item, i) => (
+          <Box key={i} sx={{ py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Typography sx={{ fontSize: '0.85rem' }}>{TIMELINE_LABEL[item.type](item.data)}</Typography>
+              <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>{new Date(item.at).toLocaleDateString('en-IN')}</Typography>
             </Box>
-            {timeline.map((item, i) => (
-              <Box key={i} sx={{ py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Typography sx={{ fontSize: '0.85rem' }}>{TIMELINE_LABEL[item.type](item.data)}</Typography>
-                  <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>{new Date(item.at).toLocaleDateString('en-IN')}</Typography>
-                </Box>
-                {item.type === 'note' && <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>{item.data.note} — {item.data.created_by_email}</Typography>}
-                {item.type === 'deal' && <Money amount={item.data.deal_value} size="0.8rem" />}
-                {item.type === 'invoice' && <Money amount={item.data.total_amount} size="0.8rem" />}
-              </Box>
-            ))}
-            {!timeline.length && <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>Nothing yet.</Typography>}
-          </Paper>
-        </Grid>
-      </Grid>
+            {item.type === 'note' && <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>{item.data.note} — {item.data.created_by_email}</Typography>}
+            {item.type === 'deal' && <Money amount={item.data.deal_value} size="0.8rem" />}
+            {item.type === 'invoice' && <Money amount={item.data.total_amount} size="0.8rem" />}
+          </Box>
+        ))}
+        {!timeline.length && <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>Nothing yet.</Typography>}
+      </MobilePaper>
 
-      <Dialog open={contactOpen} onClose={() => setContactOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={contactOpen} onClose={() => setContactOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Add contact</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="Full name" margin="normal" value={contactForm.full_name} onChange={(e) => setContactForm({ ...contactForm, full_name: e.target.value })} />
-          <TextField fullWidth select label="Role" margin="normal" value={contactForm.role} onChange={(e) => setContactForm({ ...contactForm, role: e.target.value })}>
-            {['decision_maker', 'technical', 'billing', 'other'].map((r) => <MenuItem key={r} value={r}>{r.replace('_', ' ')}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth label="Email" margin="normal" value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} />
-          <TextField fullWidth label="Phone" margin="normal" value={contactForm.phone} onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })} />
+          <MobileFormGrid>
+            <MobileTextField fullWidth label="Full name" value={contactForm.full_name} onChange={(e) => setContactForm({ ...contactForm, full_name: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Role"
+              value={contactForm.role}
+              onChange={(e) => setContactForm({ ...contactForm, role: e.target.value })}
+              options={['decision_maker', 'technical', 'billing', 'other'].map((r) => ({ value: r, label: r.replace('_', ' ') }))}
+            />
+            <MobileTextField fullWidth label="Email" value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} />
+            <MobileTextField fullWidth label="Phone" value={contactForm.phone} onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })} />
+          </MobileFormGrid>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setContactOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={addContact} disabled={!contactForm.full_name}>Add</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setContactOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={addContact} disabled={!contactForm.full_name}>Add</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
 
-      <Dialog open={mergeOpen} onClose={() => setMergeOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={mergeOpen} onClose={() => setMergeOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Merge "{party.name}" into…</DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 2 }}>
@@ -279,15 +324,20 @@ function CompanyDetail() {
             deactivated, never deleted. Touches financial records — Admin and Finance requests need
             Founder approval; only the Founder can do this immediately.
           </Alert>
-          <TextField fullWidth select label="Surviving company" value={mergeTargetId} onChange={(e) => setMergeTargetId(e.target.value)}>
-            {allParties.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
-          </TextField>
+          <MobileTextField
+            fullWidth
+            select
+            label="Surviving company"
+            value={mergeTargetId}
+            onChange={(e) => setMergeTargetId(e.target.value)}
+            options={allParties.map((p) => ({ value: p.id, label: p.name }))}
+          />
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setMergeOpen(false)}>Cancel</Button>
-          <Button variant="contained" color="warning" onClick={doMerge} disabled={!mergeTargetId}>Merge</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setMergeOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" color="warning" onClick={doMerge} disabled={!mergeTargetId}>Merge</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

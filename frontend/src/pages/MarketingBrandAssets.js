@@ -13,6 +13,19 @@ import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import InsertLinkOutlinedIcon from '@mui/icons-material/InsertLinkOutlined';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  MobileCardGrid,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const ASSET_TYPES = ['logo', 'brand_guideline', 'template', 'photo', 'video', 'presentation', 'one_pager', 'press_kit', 'other'];
 const TYPE_LABEL = { brand_guideline: 'Brand guideline', one_pager: 'One-pager', press_kit: 'Press kit' };
@@ -20,6 +33,7 @@ const TYPE_LABEL = { brand_guideline: 'Brand guideline', one_pager: 'One-pager',
 const emptyForm = { title: '', asset_type: 'logo', external_url: '', description: '', tags: '' };
 
 export default function MarketingBrandAssets() {
+  const isMobile = useMobile();
   const { staff } = useAuth();
   const [isMarketingHead, setIsMarketingHead] = useState(false);
   const canEdit = ['owner', 'admin'].includes(staff?.role) || isMarketingHead;
@@ -32,7 +46,7 @@ export default function MarketingBrandAssets() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [source, setSource] = useState('link'); // 'link' | 'upload'
+  const [source, setSource] = useState('link');
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
@@ -82,7 +96,6 @@ export default function MarketingBrandAssets() {
     setSaving(true);
     setError('');
     try {
-      // 1. Create/update the asset's metadata row first.
       const payload = { ...form, external_url: source === 'link' ? form.external_url : '' };
       let asset;
       if (editingId) {
@@ -91,8 +104,6 @@ export default function MarketingBrandAssets() {
         ({ data: { asset } } = await client.post('/marketing/brand-assets', payload));
       }
 
-      // 2. If a new file was picked, upload it via the existing Documents module,
-      //    then link it back onto the asset.
       if (source === 'upload' && file) {
         setUploading(true);
         const fd = new FormData();
@@ -133,96 +144,108 @@ export default function MarketingBrandAssets() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">Brand Assets</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>Brand Assets</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Logo pack, brand guidelines, templates, and press kit — one link for the whole team to reuse.
           </Typography>
         </Box>
-        {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add asset</Button>}
-      </Box>
+        {canEdit && <MobileButton variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add asset</MobileButton>}
+      </MobilePageHeader>
 
-      <TextField
-        select size="small" label="Filter type" value={typeFilter}
-        onChange={(e) => setTypeFilter(e.target.value)} sx={{ mb: 2, minWidth: 200 }}
-      >
-        <MenuItem value="">All types</MenuItem>
-        {ASSET_TYPES.map((t) => <MenuItem key={t} value={t} sx={{ textTransform: 'capitalize' }}>{TYPE_LABEL[t] || t}</MenuItem>)}
-      </TextField>
+      <MobilePaper sx={{ mb: 2 }}>
+        <MobileTextField
+          select
+          size="small"
+          label="Filter type"
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          options={[{ value: '', label: 'All types' }, ...ASSET_TYPES.map((t) => ({ value: t, label: TYPE_LABEL[t] || t }))]}
+        />
+      </MobilePaper>
 
-      <Grid container spacing={2}>
+      <MobileCardGrid>
         {assets.map((a) => (
-          <Grid item xs={12} sm={6} md={4} key={a.id}>
-            <Paper sx={{ p: 2.5, height: '100%', display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                {a.asset_type === 'photo' || a.asset_type === 'video' || a.asset_type === 'logo' ? (
-                  <ImageOutlinedIcon sx={{ color: 'primary.main' }} />
-                ) : (
-                  <DescriptionOutlinedIcon sx={{ color: 'primary.main' }} />
+          <MobilePaper key={a.id}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              {a.asset_type === 'photo' || a.asset_type === 'video' || a.asset_type === 'logo' ? (
+                <ImageOutlinedIcon sx={{ color: 'primary.main', fontSize: isMobile ? 20 : 24 }} />
+              ) : (
+                <DescriptionOutlinedIcon sx={{ color: 'primary.main', fontSize: isMobile ? 20 : 24 }} />
+              )}
+              <Typography sx={{ fontWeight: 700, fontSize: isMobile ? '0.85rem' : '0.95rem', flex: 1 }} noWrap>{a.title}</Typography>
+            </Box>
+            <Chip size="small" label={TYPE_LABEL[a.asset_type] || a.asset_type} sx={{ textTransform: 'capitalize', width: 'fit-content' }} />
+            {a.description && <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem', color: 'text.secondary', mb: 1 }}>{a.description}</Typography>}
+            {a.tags && a.tags.length && (
+              <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1 }}>
+                {a.tags.map((t) => <Chip key={t} size="small" variant="outlined" label={t} />)}
+              </Box>
+            )}
+            {a.document_file_name && (
+              <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary', mb: 1 }}>File: {a.document_file_name}</Typography>
+            )}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 'auto', pt: 1 }}>
+              {a.external_url ? (
+                <MobileButton size="small" endIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />} href={a.external_url} target="_blank" rel="noopener noreferrer">
+                  Open
+                </MobileButton>
+              ) : a.document_id ? (
+                <MobileButton size="small" endIcon={<UploadFileOutlinedIcon sx={{ fontSize: 14 }} />} onClick={() => handleOpenFile(a)}>
+                  Open file
+                </MobileButton>
+              ) : <span />}
+              <Box>
+                {canEdit && (
+                  <Tooltip title="Edit">
+                    <IconButton size="small" onClick={() => openEdit(a)}><EditIcon sx={{ fontSize: 18 }} /></IconButton>
+                  </Tooltip>
                 )}
-                <Typography sx={{ fontWeight: 700, fontSize: '0.95rem', flex: 1 }} noWrap>{a.title}</Typography>
+                {canDelete && (
+                  <Tooltip title="Delete">
+                    <IconButton size="small" color="error" onClick={() => handleDelete(a)}><DeleteIcon sx={{ fontSize: 18 }} /></IconButton>
+                  </Tooltip>
+                )}
               </Box>
-              <Chip size="small" label={TYPE_LABEL[a.asset_type] || a.asset_type} sx={{ textTransform: 'capitalize', width: 'fit-content' }} />
-              {a.description && <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>{a.description}</Typography>}
-              {!!(a.tags && a.tags.length) && (
-                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                  {a.tags.map((t) => <Chip key={t} size="small" variant="outlined" label={t} />)}
-                </Box>
-              )}
-              {a.document_file_name && (
-                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>File: {a.document_file_name}</Typography>
-              )}
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 'auto', pt: 1 }}>
-                {a.external_url ? (
-                  <Button size="small" endIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />} href={a.external_url} target="_blank" rel="noopener noreferrer">
-                    Open
-                  </Button>
-                ) : a.document_id ? (
-                  <Button size="small" endIcon={<UploadFileOutlinedIcon sx={{ fontSize: 14 }} />} onClick={() => handleOpenFile(a)}>
-                    Open file
-                  </Button>
-                ) : <span />}
-                <Box>
-                  {canEdit && (
-                    <Tooltip title="Edit">
-                      <IconButton size="small" onClick={() => openEdit(a)}><EditIcon sx={{ fontSize: 18 }} /></IconButton>
-                    </Tooltip>
-                  )}
-                  {canDelete && (
-                    <Tooltip title="Delete">
-                      <IconButton size="small" color="error" onClick={() => handleDelete(a)}><DeleteIcon sx={{ fontSize: 18 }} /></IconButton>
-                    </Tooltip>
-                  )}
-                </Box>
-              </Box>
-            </Paper>
-          </Grid>
+            </Box>
+          </MobilePaper>
         ))}
         {!assets.length && (
-          <Grid item xs={12}>
-            <Paper sx={{ p: 4, textAlign: 'center', color: 'text.secondary' }}>
-              No brand assets added yet. {canEdit ? 'Add your logo pack or guidelines above.' : ''}
-            </Paper>
-          </Grid>
+          <MobilePaper sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>
+            No brand assets added yet. {canEdit ? 'Add your logo pack or guidelines above.' : ''}
+          </MobilePaper>
         )}
-      </Grid>
+      </MobileCardGrid>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{editingId ? 'Edit' : 'Add'} brand asset</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="Title" margin="normal" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          <TextField fullWidth select label="Type" margin="normal" value={form.asset_type} onChange={(e) => setForm({ ...form, asset_type: e.target.value })}>
-            {ASSET_TYPES.map((t) => <MenuItem key={t} value={t} sx={{ textTransform: 'capitalize' }}>{TYPE_LABEL[t] || t}</MenuItem>)}
-          </TextField>
-
-          <ToggleButtonGroup fullWidth exclusive size="small" value={source} onChange={(e, v) => v && setSource(v)} sx={{ mt: 2 }}>
-            <ToggleButton value="link"><InsertLinkOutlinedIcon sx={{ fontSize: 16, mr: 0.5 }} />Link</ToggleButton>
-            <ToggleButton value="upload"><UploadFileOutlinedIcon sx={{ fontSize: 16, mr: 0.5 }} />Upload file</ToggleButton>
-          </ToggleButtonGroup>
+          <MobileTextField fullWidth label="Title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          <MobileTextField
+            fullWidth
+            select
+            label="Type"
+            value={form.asset_type}
+            onChange={(e) => setForm({ ...form, asset_type: e.target.value })}
+            options={ASSET_TYPES.map((t) => ({ value: t, label: TYPE_LABEL[t] || t }))}
+          />
+          <MobileStack gap={1} direction="row" sx={{ mt: 2 }}>
+            <MobileTextField
+              fullWidth
+              select
+              label="Source"
+              value={source}
+              onChange={(e, v) => v && setSource(v)}
+              options={[
+                { value: 'link', label: 'Link' },
+                { value: 'upload', label: 'Upload file' },
+              ]}
+            />
+          </MobileStack>
 
           {source === 'link' ? (
-            <TextField fullWidth label="Link (Drive, Canva, Figma, etc.)" margin="normal" value={form.external_url} onChange={(e) => setForm({ ...form, external_url: e.target.value })} />
+            <MobileTextField fullWidth label="Link (Drive, Canva, Figma, etc.)" value={form.external_url} onChange={(e) => setForm({ ...form, external_url: e.target.value })} />
           ) : (
             <Box sx={{ mt: 2 }}>
               <input
@@ -231,9 +254,9 @@ export default function MarketingBrandAssets() {
                 hidden
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
               />
-              <Button fullWidth variant="outlined" startIcon={<UploadFileOutlinedIcon />} onClick={() => fileInputRef.current?.click()}>
+              <MobileButton fullWidth variant="outlined" startIcon={<UploadFileOutlinedIcon />} onClick={() => fileInputRef.current?.click()}>
                 {file ? file.name : 'Choose file (max 20MB)'}
-              </Button>
+              </MobileButton>
               {editingId && !file && (
                 <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', mt: 0.5 }}>
                   Leave empty to keep the currently attached file.
@@ -243,17 +266,17 @@ export default function MarketingBrandAssets() {
             </Box>
           )}
 
-          <TextField fullWidth label="Description" margin="normal" multiline rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-          <TextField fullWidth label="Tags (comma separated)" margin="normal" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} />
+          <MobileTextField fullWidth label="Description" multiline rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <MobileTextField fullWidth label="Tags (comma separated)" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} />
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving || !form.title}>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleSave} disabled={saving || !form.title}>
             {saving ? 'Saving…' : 'Save'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

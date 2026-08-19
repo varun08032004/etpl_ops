@@ -1,20 +1,29 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
-  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Switch, Chip,
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Switch, Chip,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import LinkIcon from '@mui/icons-material/Link';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileDialog,
+  ResponsiveTableContainer,
+  MobileButton,
+  MobileTextField,
+  MobileStack,
+  useMobile,
+} from '../components/MobileResponsive';
 
-// Was missing legal_hod/compliance_hod/marketing_hod/partnerships_hod —
-// same class of bug flagged earlier in App.js/Layout.js/staff-accounts.js:
-// any *_hod role added to ROLE_TO_NAV_GROUP_LABELS needs to also land here,
-// or it can never actually be assigned to a login through this page.
 const ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'sales_hod', 'product_hod', 'accounting_hod', 'manager', 'employee'];
 
 export default function Team() {
+  const isMobile = useMobile();
   const { staff: me } = useAuth();
   const isFounder = me?.role === 'owner';
 
@@ -28,10 +37,7 @@ export default function Team() {
   const [pendingRequests, setPendingRequests] = useState([]);
   const [actionMessage, setActionMessage] = useState(null);
 
-  // Link-employee dialog — for accounts that already exist but weren't
-  // linked at creation time (e.g. created here before this fix, or via an
-  // API call that didn't pass employee_id).
-  const [linkTarget, setLinkTarget] = useState(null); // the staff row being linked
+  const [linkTarget, setLinkTarget] = useState(null);
   const [linkEmployeeId, setLinkEmployeeId] = useState('');
   const [linking, setLinking] = useState(false);
 
@@ -60,9 +66,6 @@ export default function Team() {
     }
   };
 
-  // Prefills email from the chosen employee's work email, same convenience
-  // the employee-detail "Create login" button already gives — this dialog
-  // was the one entry point that didn't do that.
   const handleEmployeePick = (employeeId) => {
     const emp = employees.find((e) => e.id === employeeId);
     setForm({ ...form, employee_id: employeeId, email: emp?.work_email || form.email });
@@ -131,139 +134,156 @@ export default function Team() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">Team logins</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpen(true)}>Create login</Button>
-      </Box>
+      <MobilePageHeader>
+        <Typography variant={isMobile ? 'h6' : 'h5'}>Team logins</Typography>
+        <MobileButton variant="contained" size="small" startIcon={<AddIcon />} onClick={() => setOpen(true)}>Create login</MobileButton>
+      </MobilePageHeader>
 
-      {actionMessage && <Alert severity={actionMessage.severity} sx={{ mb: 2.5 }}>{actionMessage.text}</Alert>}
+      {actionMessage && <Alert severity={actionMessage.severity} sx={{ mb: 2 }}>{actionMessage.text}</Alert>}
 
       {isFounder && pendingRequests.length > 0 && (
-        <Paper sx={{ p: 2.5, mb: 3 }}>
-          <Typography sx={{ fontWeight: 600, mb: 1.5 }}>
+        <MobilePaper sx={{ mb: 2 }}>
+          <Typography sx={{ fontWeight: 600, mb: 1.5, fontSize: isMobile ? '0.85rem' : '1rem' }}>
             Pending your approval ({pendingRequests.length})
           </Typography>
           {pendingRequests.map((r) => (
-            <Box key={r.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
-              <Box>
-                <Typography sx={{ fontSize: '0.875rem' }}>
+            <Box key={r.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1, borderTop: '1px solid', borderColor: 'divider', flexWrap: 'wrap', gap: 1 }}>
+              <Box sx={{ minWidth: isMobile ? '100%' : 'auto' }}>
+                <Typography sx={{ fontSize: isMobile ? '0.8rem' : '0.875rem' }}>
                   {r.action_type === 'staff_account.deactivate' ? 'Deactivate' : r.action_type === 'employee.exit' ? 'Exit employee' : r.action_type === 'department.delete' ? 'Delete department' : r.action_type}{' '}
                   <strong>{r.target_label}</strong>
                 </Typography>
-                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
+                <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.75rem', color: 'text.secondary' }}>
                   Requested by {r.requested_by_email} · {new Date(r.created_at).toLocaleString()}
                   {r.reason ? ` · "${r.reason}"` : ''}
                 </Typography>
               </Box>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button size="small" color="error" onClick={() => decide(r.id, 'reject')}>Reject</Button>
-                <Button size="small" variant="contained" onClick={() => decide(r.id, 'approve')}>Approve</Button>
-              </Box>
+              <MobileStack gap={1} direction="row">
+                <MobileButton size="small" color="error" onClick={() => decide(r.id, 'reject')}>Reject</MobileButton>
+                <MobileButton size="small" variant="contained" onClick={() => decide(r.id, 'approve')}>Approve</MobileButton>
+              </MobileStack>
             </Box>
           ))}
-        </Paper>
+        </MobilePaper>
       )}
 
       {!isFounder && pendingRequests.length > 0 && (
-        <Alert severity="info" sx={{ mb: 3 }}>
+        <Alert severity="info" sx={{ mb: 2 }}>
           {pendingRequests.length} request{pendingRequests.length === 1 ? '' : 's'} awaiting Founder approval.
         </Alert>
       )}
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Email</TableCell>
-              <TableCell>Role</TableCell>
-              <TableCell>Linked employee</TableCell>
-              <TableCell>Last login</TableCell>
-              <TableCell>Active</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {staff.map((s) => {
-              const hasPendingDeactivation = pendingRequests.some(
-                (r) => r.target_type === 'staff_account' && r.target_id === s.id && r.action_type === 'staff_account.deactivate'
-              );
-              return (
-                <TableRow key={s.id}>
-                  <TableCell>{s.email}</TableCell>
-                  <TableCell>
-                    <TextField select size="small" value={s.role} onChange={(e) => changeRole(s, e.target.value)} sx={{ minWidth: 150 }}>
-                      {ROLES.map((r) => <MenuItem key={r} value={r}>{r.replace('_', ' ')}</MenuItem>)}
-                    </TextField>
-                  </TableCell>
-                  <TableCell>
-                    {s.employee_name ? (
-                      <Chip size="small" label={s.employee_name} onClick={() => openLinkDialog(s)} variant="outlined" />
-                    ) : (
-                      <Button size="small" startIcon={<LinkIcon fontSize="small" />} onClick={() => openLinkDialog(s)}>
-                        Link to employee
-                      </Button>
-                    )}
-                  </TableCell>
-                  <TableCell className="figure">{s.last_login ? new Date(s.last_login).toLocaleString() : 'Never'}</TableCell>
-                  <TableCell>
-                    {hasPendingDeactivation ? (
-                      <Chip size="small" color="warning" label="Deactivation pending" />
-                    ) : (
-                      <Switch checked={s.is_active} onChange={() => toggleActive(s)} size="small" />
-                    )}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-            {!staff.length && (
-              <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No team logins yet besides your own.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Paper>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Email</TableCell>
+                <TableCell>Role</TableCell>
+                <TableCell>Linked employee</TableCell>
+                <TableCell>Last login</TableCell>
+                <TableCell>Active</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {staff.map((s) => {
+                const hasPendingDeactivation = pendingRequests.some(
+                  (r) => r.target_type === 'staff_account' && r.target_id === s.id && r.action_type === 'staff_account.deactivate'
+                );
+                return (
+                  <TableRow key={s.id}>
+                    <TableCell>{s.email}</TableCell>
+                    <TableCell>
+                      <MobileTextField
+                        select
+                        size="small"
+                        value={s.role}
+                        onChange={(e) => changeRole(s, e.target.value)}
+                        options={ROLES.map((r) => ({ value: r, label: r.replace('_', ' ') }))}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      {s.employee_name ? (
+                        <Chip size="small" label={s.employee_name} onClick={() => openLinkDialog(s)} variant="outlined" />
+                      ) : (
+                        <MobileButton size="small" startIcon={<LinkIcon fontSize="small" />} onClick={() => openLinkDialog(s)}>
+                          Link to employee
+                        </MobileButton>
+                      )}
+                    </TableCell>
+                    <TableCell className="figure">{s.last_login ? new Date(s.last_login).toLocaleString() : 'Never'}</TableCell>
+                    <TableCell>
+                      {hasPendingDeactivation ? (
+                        <Chip size="small" color="warning" label="Deactivation pending" />
+                      ) : (
+                        <Switch checked={s.is_active} onChange={() => toggleActive(s)} size="small" />
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {!staff.length && (
+                <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No team logins yet besides your own.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Create a login</DialogTitle>
         <DialogContent>
-          <TextField
-            fullWidth select label="Link to employee (optional)" margin="normal" value={form.employee_id}
-            onChange={(e) => handleEmployeePick(e.target.value)}
-            helperText="Picking an employee links this login so their profile, payslips, and leave show up correctly."
-          >
-            <MenuItem value="">Not linked to an employee</MenuItem>
-            {employees.map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth label="Email" margin="normal" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <TextField fullWidth label="Temporary password" margin="normal" type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} helperText="Share this with them securely — they should change it after first login (no self-service change screen yet)." />
-          <TextField fullWidth select label="Role" margin="normal" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-            {ROLES.map((r) => <MenuItem key={r} value={r}>{r.replace('_', ' ')}</MenuItem>)}
-          </TextField>
+          <MobileFormGrid>
+            <MobileTextField
+              fullWidth
+              select
+              label="Link to employee (optional)"
+              value={form.employee_id}
+              onChange={(e) => handleEmployeePick(e.target.value)}
+              helperText="Picking an employee links this login so their profile, payslips, and leave show up correctly."
+              options={[{ value: '', label: 'Not linked to an employee' }, ...employees.map((e) => ({ value: e.id, label: e.full_name }))]}
+            />
+            <MobileTextField fullWidth label="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <MobileTextField fullWidth label="Temporary password" type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} helperText="Share this with them securely — they should change it after first login." />
+            <MobileTextField
+              fullWidth
+              select
+              label="Role"
+              value={form.role}
+              onChange={(e) => setForm({ ...form, role: e.target.value })}
+              options={ROLES.map((r) => ({ value: r, label: r.replace('_', ' ') }))}
+            />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleCreate} disabled={saving || !form.email || !form.password}>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleCreate} disabled={saving || !form.email || !form.password}>
             {saving ? 'Creating…' : 'Create login'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
 
-      <Dialog open={Boolean(linkTarget)} onClose={() => setLinkTarget(null)} maxWidth="xs" fullWidth>
+      <MobileDialog open={Boolean(linkTarget)} onClose={() => setLinkTarget(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Link {linkTarget?.email} to an employee</DialogTitle>
         <DialogContent>
-          <TextField
-            fullWidth select label="Employee" margin="normal" value={linkEmployeeId}
-            onChange={(e) => setLinkEmployeeId(e.target.value)}
-            helperText="This unlocks their self-service profile — payslips, leave balance, and their own record."
-          >
-            <MenuItem value="">Not linked to an employee</MenuItem>
-            {employees.map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
-          </TextField>
+          <MobileFormGrid>
+            <MobileTextField
+              fullWidth
+              select
+              label="Employee"
+              value={linkEmployeeId}
+              onChange={(e) => setLinkEmployeeId(e.target.value)}
+              helperText="This unlocks their self-service profile — payslips, leave balance, and their own record."
+              options={[{ value: '', label: 'Not linked to an employee' }, ...employees.map((e) => ({ value: e.id, label: e.full_name }))]}
+            />
+          </MobileFormGrid>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setLinkTarget(null)}>Cancel</Button>
-          <Button variant="contained" onClick={saveLink} disabled={linking}>{linking ? 'Saving…' : 'Save'}</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setLinkTarget(null)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={saveLink} disabled={linking}>{linking ? 'Saving…' : 'Save'}</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

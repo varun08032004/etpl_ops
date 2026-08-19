@@ -6,30 +6,129 @@ const cors = require('cors');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
+const { errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
 
-app.use(helmet());
-app.use(cors({ origin: process.env.INTERNAL_OPS_ALLOWED_ORIGIN, credentials: true }));
+// Trust proxy for rate limiting behind reverse proxy
+app.set('trust proxy', 1);
+
+// Request ID middleware for tracing
+app.use((req, res, next) => {
+  req.id = req.headers['x-request-id'] || crypto.randomUUID();
+  res.setHeader('X-Request-ID', req.id);
+  next();
+});
+
+// Security headers - CSP and Permissions-Policy
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // React dev needs unsafe-eval
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      connectSrc: ["'self'"],
+      frameSrc: ["'none'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'none'"],
+      upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
+    },
+  },
+  crossOriginEmbedderPolicy: false, // Disable for React dev compatibility
+  crossOriginResourcePolicy: { policy: 'same-origin' },
+  crossOriginOpenerPolicy: { policy: 'same-origin' },
+  dnsPrefetchControl: { allow: false },
+  frameguard: { action: 'deny' },
+  hidePoweredBy: true,
+  hsts: process.env.NODE_ENV === 'production' ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
+  ieNoOpen: true,
+  noSniff: true,
+  permittedCrossDomainPolicies: { permittedPolicies: 'none' },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  xssFilter: true,
+}));
+
+// Permissions-Policy header
+app.use((req, res, next) => {
+  res.setHeader('Permissions-Policy', [
+    'accelerometer=()',
+    'camera=()',
+    'geolocation=()',
+    'gyroscope=()',
+    'magnetometer=()',
+    'microphone=()',
+    'payment=()',
+    'usb=()',
+    'interest-cohort=()',
+  ].join(', '));
+  next();
+});
+
+// CORS
+app.use(cors({ 
+  origin: process.env.INTERNAL_OPS_ALLOWED_ORIGIN, 
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+  exposedHeaders: ['X-Request-ID'],
+}));
+
 app.use(cookieParser());
 
+// Request ID middleware for tracing
+app.use((req, res, next) => {
+  req.id = req.headers['x-request-id'] || crypto.randomUUID();
+  res.setHeader('X-Request-ID', req.id);
+  next();
+});
+
+// Structured logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const log = {
+      requestId: req.id,
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs: duration,
+      ip: req.ip,
+      userAgent: req.get('user-agent'),
+    };
+    if (res.statusCode >= 400) {
+      console.warn('[HTTP]', JSON.stringify(log));
+    } else {
+      console.log('[HTTP]', JSON.stringify(log));
+    }
+  });
+  next();
+});
+
 // Webhooks need raw body for signature verification — mount BEFORE express.json().
-// FIXED: previously listed '/api/payroll/webhooks/razorpay-payout', a path that
-// no longer exists in routes/payroll.js (it's Axis-based now: /webhooks/axis-payout).
-// With the wrong path here, express.json() below was consuming and parsing the
-// real webhook's body as JSON before it ever reached payroll.js's own
-// express.raw() middleware — so the HMAC signature check on that webhook was
-// never actually running against raw bytes. Fixed to the real path.
 app.use('/api/payroll/webhooks/axis-payout', express.raw({ type: 'application/json' }));
 app.use('/api/attendance/webhooks/trackpilot', express.raw({ type: 'application/json', limit: '50mb' }));
 
-app.use(express.json());
+// Body parsing with size limits
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-app.set('trust proxy', 1); // needed so express-rate-limit doesn't choke on X-Forwarded-For locally
-
-app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
+// Rate limiting
+app.use(rateLimit({ 
+  windowMs: 15 * 60 * 1000, 
+  max: 500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later', code: 'RATE_LIMIT_EXCEEDED' },
+}));
 
 app.get('/health', (req, res) => res.json({ ok: true, service: 'ethertrack-internal-ops' }));
+app.get('/ready', (req, res) => res.json({ ok: true, service: 'ethertrack-internal-ops', ready: true }));
 
 app.use('/api/auth', require('./routes/auth'));               // TODO: login route (bcrypt compare -> signToken)
 app.use('/api/employees', require('./routes/employees'));
@@ -107,14 +206,12 @@ app.use('/api/product/coupons', require('./routes/productCoupons')); // Product/
 app.use('/api/product/corporate-deals', require('./routes/corporateDeals')); // Product/Sales module: Corporate deal setup + installment invoicing
 app.use('/api/support-tickets-view', require('./routes/supportTicketsView')); // NEW — Sales/CS module: read-only platform support ticket visibility
 
-app.use((err, req, res, next) => {
-  console.error('[unhandled]', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
+// Global error handler (must be last middleware)
+app.use(errorHandler);
 
 const PORT = process.env.INTERNAL_OPS_PORT || 5050;
-app.listen(PORT, () => {
-  console.log(`[internal-ops] listening on :${PORT}`);
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`[internal-ops] listening on 127.0.0.1:${PORT}`);
   // Required here, AFTER the server starts listening, so a scheduler failing
   // to initialize doesn't prevent the API from coming up at all — each one
   // logs its own errors internally and degrades to "manual trigger only"

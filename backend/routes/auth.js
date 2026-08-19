@@ -6,7 +6,17 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { safeQuery } = require('../db/pool');
-const { signToken, authenticate } = require('../middleware/auth');
+const {
+  signAccessToken,
+  signRefreshToken,
+  storeRefreshToken,
+  revokeAllRefreshTokens,
+  validateRefreshToken,
+  revokeRefreshToken,
+  enforceSessionLimit,
+  cookieOptions,
+  authenticate,
+} = require('../middleware/auth');
 const { sendEmail, APP_BASE_URL } = require('../services/email');
 const { logAction } = require('../services/auditLog');
 const { hashToken, generateDeviceToken, generateOtp, ipAllowed } = require('../services/deviceSecurity');
@@ -14,37 +24,63 @@ const {
   encryptSecret, decryptSecret, generateSecret, generateQrCodeDataUrl,
   verifyTotp, generateBackupCodes, hashBackupCode,
 } = require('../services/twoFactor');
+const { validateBody } = require('../middleware/validation');
+const { z } = require('zod');
 
 const DEVICE_COOKIE_MAX_AGE = 400 * 24 * 60 * 60 * 1000; // ~13 months (Chrome's cookie cap)
 const PENDING_DEVICE_COOKIE_MAX_AGE = 10 * 60 * 1000;
 
-/**
- * Frontend (Vercel) and backend (Render) are different domains, so these
- * are cross-site requests from the browser's point of view. Cookies with
- * sameSite: 'lax' are NOT sent on cross-site fetch/XHR calls — only on
- * top-level navigations — so with 'lax' in production, trusted-device
- * recognition and cookie-based auth would silently never work; every
- * login would look like a brand-new device forever.
- *
- * sameSite: 'none' is required for cross-site cookies to be sent at all,
- * but browsers mandate 'secure: true' alongside it (cookie only sent over
- * HTTPS) — which is exactly what Vercel + Render give you by default, so
- * this is safe to require unconditionally in production.
- *
- * In local dev, frontend and backend are both on localhost (different
- * ports, same registrable domain) — browsers treat that as same-site, so
- * 'lax' still works there, and 'none' would additionally require HTTPS
- * locally which most dev setups don't have. Hence the split by NODE_ENV.
- */
-function cookieOptions(maxAge) {
-  const isProd = process.env.NODE_ENV === 'production';
-  return {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
-    ...(maxAge ? { maxAge } : {}),
-  };
-}
+const ACCESS_COOKIE_MAX_AGE = 30 * 60 * 1000; // 30 minutes
+const REFRESH_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// Validation schemas
+const loginSchema = z.object({
+  email: z.string().email({ message: 'Invalid email format' }).toLowerCase(),
+  password: z.string().min(1, 'Password is required'),
+  totpToken: z.string().length(6).optional(),
+  backupCode: z.string().optional(),
+});
+
+const verifyDeviceSchema = z.object({
+  email: z.string().email({ message: 'Invalid email format' }).toLowerCase(),
+  otp: z.string().length(6, 'OTP must be 6 digits'),
+  label: z.string().max(100).optional(),
+});
+
+const forgotPasswordSchema = z.object({
+  email: z.string().email({ message: 'Invalid email format' }).toLowerCase(),
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1, 'Token is required'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+});
+
+const securitySettingsSchema = z.object({
+  deviceLockEnabled: z.boolean().optional(),
+  ipAllowlistEnabled: z.boolean().optional(),
+}).refine((data) => data.deviceLockEnabled !== undefined || data.ipAllowlistEnabled !== undefined, {
+  message: 'At least one setting must be provided',
+});
+
+const ipAllowlistSchema = z.object({
+  ipOrCidr: z.string().min(1, 'IP/CIDR is required'),
+  label: z.string().max(100).optional(),
+});
+
+const bootstrapSchema = z.object({
+  email: z.string().email({ message: 'Invalid email format' }).toLowerCase(),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+});
+
+const twoFaConfirmSchema = z.object({
+  token: z.string().length(6, 'TOTP code must be 6 digits'),
+});
+
+const twoFaDisableSchema = z.object({
+  password: z.string().min(1, 'Password is required'),
+  token: z.string().length(6, 'TOTP code must be 6 digits'),
+});
 
 // Login and forgot-password get a much tighter limit than the app-wide one
 // in server.js — these are the two routes credential-stuffing / enumeration
@@ -59,16 +95,87 @@ const authRateLimit = rateLimit({
   message: { error: 'Too many attempts — please wait a few minutes and try again.' },
 });
 
-router.post('/login', authRateLimit, async (req, res) => {
+router.post('/login', authRateLimit, validateBody(loginSchema), async (req, res) => {
+  console.log('[auth:login] Request body:', { email: req.body?.email, hasPassword: !!req.body?.password });
   try {
     const { email, password, totpToken, backupCode } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'email and password required' });
 
     const { rows: [staff] } = await safeQuery(`SELECT * FROM staff_accounts WHERE email = $1`, [email.toLowerCase()]);
-    if (!staff || !staff.is_active) return res.status(401).json({ error: 'Invalid credentials' });
+    console.log('[auth:login] Staff found:', !!staff, 'active:', staff?.is_active);
+    if (!staff || !staff.is_active) {
+      // Record failed attempt for non-existent/inactive accounts (to prevent enumeration)
+      await safeQuery(
+        `INSERT INTO failed_login_attempts (staff_account_id, ip_address, user_agent, success)
+         VALUES ($1, $2, $3, FALSE)
+         ON CONFLICT DO NOTHING`,
+        [staff?.id || '00000000-0000-0000-0000-000000000000', req.ip, req.headers['user-agent'] || null]
+      );
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
+    // ── Brute-force protection: check for account lockout ────────────────────
+    const lockoutConfig = {
+      maxAttempts: 5,
+      lockoutMinutes: 30,
+      windowMinutes: 15,
+    };
+    const { rows: [lockout] } = await safeQuery(
+      `SELECT lockout_until FROM failed_login_attempts
+       WHERE staff_account_id = $1 AND lockout_until > NOW()
+       ORDER BY lockout_until DESC LIMIT 1`,
+      [staff.id]
+    );
+    if (lockout) {
+      await logAction({
+        staffId: staff.id, action: 'login.blocked_account_locked',
+        entity: 'staff_accounts', entityId: staff.id, ipAddress: req.ip,
+      });
+      const minsLeft = Math.ceil((new Date(lockout.lockout_until) - Date.now()) / 60000);
+      return res.status(429).json({ error: `Account temporarily locked. Try again in ${minsLeft} minutes.` });
+    }
+
+    // Check recent failed attempts
+    const { rows: [recentFails] } = await safeQuery(
+      `SELECT COUNT(*) AS count FROM failed_login_attempts
+       WHERE staff_account_id = $1 AND attempt_time > NOW() - INTERVAL '${lockoutConfig.windowMinutes} minutes' AND success = FALSE`,
+      [staff.id]
+    );
+    if (parseInt(recentFails.count, 10) >= lockoutConfig.maxAttempts) {
+      const lockoutUntil = new Date(Date.now() + lockoutConfig.lockoutMinutes * 60000);
+      await safeQuery(
+        `INSERT INTO failed_login_attempts (staff_account_id, ip_address, user_agent, success, lockout_until)
+         VALUES ($1, $2, $3, FALSE, $4)`,
+        [staff.id, req.ip, req.headers['user-agent'] || null, lockoutUntil]
+      );
+      await logAction({
+        staffId: staff.id, action: 'login.account_locked_brute_force',
+        entity: 'staff_accounts', entityId: staff.id, ipAddress: req.ip,
+      });
+      return res.status(429).json({ error: `Too many failed attempts. Account locked for ${lockoutConfig.lockoutMinutes} minutes.` });
+    }
+
+    console.log('[auth:login] Password hash:', staff.password_hash.substring(0, 20) + '...');
     const ok = await bcrypt.compare(password, staff.password_hash);
-    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    console.log('[auth:login] bcrypt.compare result:', ok);
+    if (!ok) {
+      // Record failed attempt
+      await safeQuery(
+        `INSERT INTO failed_login_attempts (staff_account_id, ip_address, user_agent, success)
+         VALUES ($1, $2, $3, FALSE)`,
+        [staff.id, req.ip, req.headers['user-agent'] || null]
+      );
+      await logAction({
+        staffId: staff.id, action: 'login.failed_password',
+        entity: 'staff_accounts', entityId: staff.id, ipAddress: req.ip,
+      });
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Success — clear failed attempts
+    await safeQuery(
+      `UPDATE failed_login_attempts SET success = TRUE WHERE staff_account_id = $1 AND success = FALSE`,
+      [staff.id]
+    );
 
     // ── IP allow-list (opt-in per account) ──────────────────────────────
     if (staff.ip_allowlist_enabled) {
@@ -168,135 +275,31 @@ router.post('/login', authRateLimit, async (req, res) => {
       );
     }
 
-    const token = signToken(staff);
+    console.log('[auth:login] Generating tokens...');
+    const accessToken = signAccessToken(staff);
+    console.log('[auth:login] Access token generated');
+    const refreshToken = signRefreshToken(staff);
+    console.log('[auth:login] Refresh token generated');
+    await enforceSessionLimit(staff.id);
+    console.log('[auth:login] Session limit enforced');
+    await storeRefreshToken(staff.id, refreshToken, req.headers['user-agent'] || null, req.ip);
+    console.log('[auth:login] Refresh token stored');
     await safeQuery(`UPDATE staff_accounts SET last_login = NOW() WHERE id = $1`, [staff.id]);
+    console.log('[auth:login] Last login updated');
 
-    res.cookie('internal_ops_token', token, cookieOptions(8 * 60 * 60 * 1000));
-    res.json({ token, staff: { id: staff.id, email: staff.email, role: staff.role, employee_id: staff.employee_id } });
+    res.cookie('internal_ops_token', accessToken, cookieOptions(ACCESS_COOKIE_MAX_AGE));
+    console.log('[auth:login] Access token cookie set');
+    res.cookie('internal_ops_refresh', refreshToken, cookieOptions(REFRESH_COOKIE_MAX_AGE));
+    console.log('[auth:login] Refresh token cookie set');
+    res.json({ staff: { id: staff.id, email: staff.email, role: staff.role, employee_id: staff.employee_id } });
+    console.log('[auth:login] Response sent successfully');
   } catch (err) {
     console.error('[auth:login]', err);
-    res.status(500).json({ error: 'Login failed' });
+    res.status(500).json({ error: 'Login failed', details: err.message, stack: err.stack });
   }
 });
 
-router.get('/me', authenticate, (req, res) => res.json({ staff: req.staff }));
-
-router.post('/logout', (req, res) => {
-  res.clearCookie('internal_ops_token', cookieOptions());
-  res.json({ ok: true });
-});
-
-// ── forgot password — always responds the same way whether or not the email
-// exists, so this can't be used to enumerate valid accounts. Token is a
-// random 32-byte value; only its SHA-256 hash is stored, so a DB leak alone
-// can't be used to reset anyone's password. Expires in 15 minutes. ─────────
-router.post('/forgot-password', authRateLimit, async (req, res) => {
-  const genericResponse = { message: 'If that email is registered, a password reset link has been sent to it.' };
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'email is required' });
-
-    const { rows: [account] } = await safeQuery(
-      `SELECT id, email FROM staff_accounts WHERE email = $1 AND is_active = true`,
-      [email.toLowerCase()]
-    );
-
-    if (account) {
-      const rawToken = crypto.randomBytes(32).toString('hex');
-      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-
-      await safeQuery(
-        `INSERT INTO password_reset_tokens (staff_account_id, token_hash, expires_at, requested_ip)
-         VALUES ($1,$2,$3,$4)`,
-        [account.id, tokenHash, expiresAt.toISOString(), req.ip || null]
-      );
-
-      const resetUrl = `${APP_BASE_URL}/reset-password?token=${rawToken}`;
-      await sendEmail({
-        to: account.email,
-        subject: 'Reset your EtherTrack password',
-        html: `
-          <div style="font-family:sans-serif">
-            <p>Someone (hopefully you) requested a password reset for your EtherTrack account.</p>
-            <p><a href="${resetUrl}">Click here to set a new password</a> — this link expires in 15 minutes.</p>
-            <p style="color:#666;font-size:12px">If you didn't request this, you can safely ignore this email — your password won't change unless you click the link above and set a new one.</p>
-          </div>
-        `,
-      });
-    }
-
-    res.json(genericResponse);
-  } catch (err) {
-    console.error('[auth:forgot-password]', err);
-    // Still return the generic message — don't leak whether something broke
-    // vs. the email just not existing.
-    res.json(genericResponse);
-  }
-});
-
-// ── reset password — consumes the token, sets the new password, and
-// invalidates every other outstanding reset token for that account so an
-// old, forgotten link can't be replayed after a successful reset. ──────────
-router.post('/reset-password', authRateLimit, async (req, res) => {
-  try {
-    const { token, password } = req.body;
-    if (!token || !password) return res.status(400).json({ error: 'token and password are required' });
-    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-
-    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-    const { rows: [resetRow] } = await safeQuery(
-      `SELECT * FROM password_reset_tokens WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()`,
-      [tokenHash]
-    );
-    if (!resetRow) return res.status(400).json({ error: 'This reset link is invalid or has expired — request a new one.' });
-
-    const hash = await bcrypt.hash(password, 12);
-    await safeQuery(`UPDATE staff_accounts SET password_hash = $1 WHERE id = $2`, [hash, resetRow.staff_account_id]);
-    // Kill every pending reset link for this account, not just the one used —
-    // if several were requested, none of the others should stay usable.
-    await safeQuery(
-      `UPDATE password_reset_tokens SET used_at = NOW() WHERE staff_account_id = $1 AND used_at IS NULL`,
-      [resetRow.staff_account_id]
-    );
-
-    res.json({ message: 'Password updated — you can now sign in with your new password.' });
-  } catch (err) {
-    console.error('[auth:reset-password]', err);
-    res.status(500).json({ error: 'Failed to reset password' });
-  }
-});
-
-// One-time bootstrap: create the first owner account. Disable/remove this route after first use.
-router.post('/bootstrap-owner', async (req, res) => {
-  try {
-    if (process.env.ALLOW_BOOTSTRAP !== 'true') {
-      return res.status(403).json({ error: 'Bootstrap disabled. Set ALLOW_BOOTSTRAP=true temporarily to use this once.' });
-    }
-    const { email, password } = req.body;
-    if (!email || !password || password.length < 8) {
-      return res.status(400).json({ error: 'email and password (min 8 chars) required' });
-    }
-    const { rows: existing } = await safeQuery(`SELECT id FROM staff_accounts WHERE role = 'owner'`);
-    if (existing.length) return res.status(409).json({ error: 'An owner account already exists' });
-
-    const hash = await bcrypt.hash(password, 12);
-    const { rows: [staff] } = await safeQuery(
-      `INSERT INTO staff_accounts (email, password_hash, role) VALUES ($1,$2,'owner') RETURNING id, email, role`,
-      [email.toLowerCase(), hash]
-    );
-    res.status(201).json({ staff });
-  } catch (err) {
-    console.error('[auth:bootstrap]', err);
-    res.status(500).json({ error: 'Bootstrap failed' });
-  }
-});
-
-// ── verify-device — completes the OTP challenge from /login when a
-// device-locked account signs in from an unrecognized browser. On
-// success this issues the normal session AND marks the device trusted
-// so future logins from this browser skip the OTP step. ────────────────
-router.post('/verify-device', authRateLimit, async (req, res) => {
+router.post('/verify-device', authRateLimit, validateBody(verifyDeviceSchema), async (req, res) => {
   try {
     const { email, otp, label } = req.body;
     const pendingToken = req.cookies?.pending_device_id;
@@ -330,14 +333,18 @@ router.post('/verify-device', authRateLimit, async (req, res) => {
       [staff.id, deviceTokenHash, label || null, req.headers['user-agent'] || null, req.ip]
     );
 
-    const token = signToken(staff);
+    const accessToken = signAccessToken(staff);
+    const refreshToken = signRefreshToken(staff);
+    await enforceSessionLimit(staff.id);
+    await storeRefreshToken(staff.id, refreshToken, req.headers['user-agent'] || null, req.ip);
     await safeQuery(`UPDATE staff_accounts SET last_login = NOW() WHERE id = $1`, [staff.id]);
     await logAction({ staffId: staff.id, action: 'login.device_approved', entity: 'staff_accounts', entityId: staff.id, ipAddress: req.ip });
 
-    res.cookie('internal_ops_token', token, cookieOptions(8 * 60 * 60 * 1000));
+    res.cookie('internal_ops_token', accessToken, cookieOptions(ACCESS_COOKIE_MAX_AGE));
+    res.cookie('internal_ops_refresh', refreshToken, cookieOptions(REFRESH_COOKIE_MAX_AGE));
     res.cookie('trusted_device_id', pendingToken, cookieOptions(DEVICE_COOKIE_MAX_AGE));
     res.clearCookie('pending_device_id', cookieOptions());
-    res.json({ token, staff: { id: staff.id, email: staff.email, role: staff.role, employee_id: staff.employee_id } });
+    res.json({ staff: { id: staff.id, email: staff.email, role: staff.role, employee_id: staff.employee_id } });
   } catch (err) {
     console.error('[auth:verify-device]', err);
     res.status(500).json({ error: 'Device verification failed' });
@@ -360,6 +367,8 @@ router.post('/2fa/setup', authenticate, async (req, res) => {
       [encryptSecret(secret.base32), req.staff.id]
     );
 
+    await logAuthEvent({ event: 'two_fa_setup', staffId: req.staff.id, ipAddress: req.ip, requestId: req.id });
+
     res.json({ qrCodeDataUrl, manualEntryKey: secret.base32 });
   } catch (err) {
     console.error('[auth:2fa:setup]', err);
@@ -372,7 +381,7 @@ router.post('/2fa/setup', authenticate, async (req, res) => {
 // shown ONCE here — only their hashes are stored, so if you navigate
 // away without saving them, they cannot be recovered, only regenerated
 // (which invalidates the old set). ──────────────────────────────────────
-router.post('/2fa/confirm', authenticate, async (req, res) => {
+router.post('/2fa/confirm', authenticate, validateBody(twoFaConfirmSchema), async (req, res) => {
   try {
     const { token } = req.body;
     const { rows: [staff] } = await safeQuery(`SELECT two_fa_secret FROM staff_accounts WHERE id = $1`, [req.staff.id]);
@@ -394,7 +403,7 @@ router.post('/2fa/confirm', authenticate, async (req, res) => {
       );
     }
 
-    await logAction({ staffId: req.staff.id, action: '2fa.enabled', entity: 'staff_accounts', entityId: req.staff.id, ipAddress: req.ip });
+    await logAuthEvent({ event: 'two_fa_enable', staffId: req.staff.id, ipAddress: req.ip, requestId: req.id });
     res.json({ ok: true, backupCodes: codes });
   } catch (err) {
     console.error('[auth:2fa:confirm]', err);
@@ -410,10 +419,9 @@ router.get('/2fa/status', authenticate, (req, res) => {
 // code, so a hijacked logged-in session (e.g. an unattended laptop) can't
 // silently turn 2FA off on its own — the attacker would need to also
 // know the password. ─────────────────────────────────────────────────
-router.post('/2fa/disable', authenticate, async (req, res) => {
+router.post('/2fa/disable', authenticate, validateBody(twoFaDisableSchema), async (req, res) => {
   try {
     const { password, token } = req.body;
-    if (!password || !token) return res.status(400).json({ error: 'password and token are required' });
 
     const { rows: [staff] } = await safeQuery(`SELECT password_hash, two_fa_secret FROM staff_accounts WHERE id = $1`, [req.staff.id]);
     const passwordOk = await bcrypt.compare(password, staff.password_hash);
@@ -425,7 +433,7 @@ router.post('/2fa/disable', authenticate, async (req, res) => {
 
     await safeQuery(`UPDATE staff_accounts SET two_fa_enabled = false, two_fa_secret = NULL WHERE id = $1`, [req.staff.id]);
     await safeQuery(`DELETE FROM two_fa_backup_codes WHERE staff_account_id = $1`, [req.staff.id]);
-    await logAction({ staffId: req.staff.id, action: '2fa.disabled', entity: 'staff_accounts', entityId: req.staff.id, ipAddress: req.ip });
+    await logAuthEvent({ event: 'two_fa_disable', staffId: req.staff.id, ipAddress: req.ip, requestId: req.id });
 
     res.json({ ok: true });
   } catch (err) {
@@ -460,7 +468,7 @@ router.get('/security-settings', authenticate, async (req, res) => {
   }
 });
 
-router.patch('/security-settings', authenticate, async (req, res) => {
+router.patch('/security-settings', authenticate, validateBody(securitySettingsSchema), async (req, res) => {
   try {
     const { deviceLockEnabled, ipAllowlistEnabled } = req.body;
 
@@ -499,10 +507,9 @@ router.patch('/security-settings', authenticate, async (req, res) => {
   }
 });
 
-router.post('/ip-allowlist', authenticate, async (req, res) => {
+router.post('/ip-allowlist', authenticate, validateBody(ipAllowlistSchema), async (req, res) => {
   try {
     const { ipOrCidr, label } = req.body;
-    if (!ipOrCidr) return res.status(400).json({ error: 'ipOrCidr is required' });
     const { rows: [entry] } = await safeQuery(
       `INSERT INTO login_ip_allowlist (staff_account_id, ip_or_cidr, label) VALUES ($1,$2,$3) RETURNING *`,
       [req.staff.id, ipOrCidr.trim(), label || null]
@@ -537,6 +544,41 @@ router.delete('/trusted-devices/:id', authenticate, async (req, res) => {
   } catch (err) {
     console.error('[auth:trusted-devices:delete]', err);
     res.status(500).json({ error: 'Failed to revoke device' });
+  }
+});
+
+router.get('/me', authenticate, async (req, res) => {
+  try {
+    const { rows: [staff] } = await safeQuery(
+      `SELECT sa.id, sa.email, sa.role, sa.employee_id, sa.two_fa_enabled, sa.last_login, sa.created_at,
+              e.full_name, e.department_id,
+              d.name as department_name
+       FROM staff_accounts sa
+       LEFT JOIN employees e ON e.id = sa.employee_id
+       LEFT JOIN departments d ON d.id = e.department_id
+       WHERE sa.id = $1`,
+      [req.staff.id]
+    );
+    if (!staff) return res.status(404).json({ error: 'Staff not found' });
+
+    res.json({
+      id: staff.id,
+      email: staff.email,
+      fullName: staff.full_name,
+      role: staff.role,
+      employeeId: staff.employee_id,
+      departmentId: staff.department_id,
+      department: staff.department_name,
+      avatarUrl: null,
+      twoFactorEnabled: staff.two_fa_enabled,
+      lastLogin: staff.last_login,
+      createdAt: staff.created_at,
+      effectiveRoles: req.staff.effectiveRoles || [],
+      deptAccess: req.staff.deptAccess || {}
+    });
+  } catch (err) {
+    console.error('[auth:me] ERROR:', err.message, err.stack);
+    res.status(500).json({ error: 'Failed to fetch profile', details: err.message });
   }
 });
 

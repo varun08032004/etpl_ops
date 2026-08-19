@@ -303,7 +303,9 @@ router.get('/reports/revenue-growth', requireRole('finance', 'accounting_hod'), 
            COALESCE(SUM(CASE WHEN jl.account_id IN ($3,$4,$5) THEN jl.credit - jl.debit ELSE 0 END), 0) AS gst_collected
          FROM journal_lines jl
          JOIN journal_entries je ON je.id = jl.journal_entry_id
-         WHERE je.entry_date BETWEEN $6 AND $7`,
+         WHERE je.entry_date BETWEEN $6 AND $7
+           AND je.source != 'adjustment'
+           AND je.source_type != 'reversal'`,
         [acctMap['4100'] || null, acctMap['4200'] || null, acctMap['2210'] || null, acctMap['2220'] || null, acctMap['2230'] || null, from, to]
       );
 
@@ -355,7 +357,9 @@ router.get('/reports/gst-summary', requireRole('finance', 'accounting_hod'), asy
          COALESCE(SUM(CASE WHEN jl.account_id = $3 THEN jl.credit - jl.debit ELSE 0 END), 0) AS igst
        FROM journal_lines jl
        JOIN journal_entries je ON je.id = jl.journal_entry_id
-       WHERE je.entry_date BETWEEN $4 AND $5`,
+       WHERE je.entry_date BETWEEN $4 AND $5
+         AND je.source != 'adjustment'
+         AND je.source_type != 'reversal'`,
       [acctMap['2210'] || null, acctMap['2220'] || null, acctMap['2230'] || null, from, to]
     );
 
@@ -413,6 +417,239 @@ router.get('/reports/monthly-breakdown', requireRole('finance', 'accounting_hod'
   } catch (err) {
     console.error('[accounting:monthly-breakdown]', err);
     res.status(500).json({ error: 'Failed to compute monthly breakdown' });
+  }
+});
+
+// GET /api/accounting/reports/gst-collected?from=2026-01-01&to=2026-12-31&revenue_type=subscription
+//
+// GSTR-1 ready report: Invoice-wise GST collected on subscriptions/services
+// Filters: from, to, revenue_type (subscription|services|all)
+router.get('/reports/gst-collected', requireRole('finance', 'accounting_hod'), async (req, res) => {
+  try {
+    const { from, to, revenue_type } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to query params are required (YYYY-MM-DD)' });
+
+    const { rows: accts } = await safeQuery(
+      `SELECT code, id FROM chart_of_accounts WHERE code = ANY($1)`,
+      [['4100', '4200', '2210', '2220', '2230']]
+    );
+    const acctMap = Object.fromEntries(accts.map((a) => [a.code, a.id]));
+
+console.log('[GST-Collected] Params:', { from, to, revenue_type, acctMap });
+    console.log('[GST-Collected] SQL params:', [acctMap['4100'] || null, acctMap['4200'] || null, acctMap['2210'] || null, acctMap['2220'] || null, acctMap['2230'] || null, from, to, revenue_type || 'all']);
+    const { rows } = await safeQuery(
+      `SELECT 
+         je.id as journal_entry_id,
+         je.entry_date,
+         je.narration,
+         je.source,
+         je.source_type,
+         COALESCE(SUM(CASE WHEN jl.account_id = $1 THEN jl.credit - jl.debit ELSE 0 END), 0) as subscription_revenue,
+         COALESCE(SUM(CASE WHEN jl.account_id = $2 THEN jl.credit - jl.debit ELSE 0 END), 0) as services_revenue,
+         COALESCE(SUM(CASE WHEN jl.account_id = $3 THEN jl.credit - jl.debit ELSE 0 END), 0) as cgst,
+         COALESCE(SUM(CASE WHEN jl.account_id = $4 THEN jl.credit - jl.debit ELSE 0 END), 0) as sgst,
+         COALESCE(SUM(CASE WHEN jl.account_id = $5 THEN jl.credit - jl.debit ELSE 0 END), 0) as igst
+       FROM journal_entries je
+       JOIN journal_lines jl ON jl.journal_entry_id = je.id
+       JOIN chart_of_accounts coa ON coa.id = jl.account_id
+       WHERE je.entry_date BETWEEN $6 AND $7
+         AND je.source != 'adjustment'
+         AND je.source_type != 'reversal'
+         AND ($8 = 'all' OR je.source_type = $8 OR je.source::text = $8)
+       GROUP BY je.id, je.entry_date, je.narration, je.source, je.source_type
+       ORDER BY je.entry_date`,
+      [acctMap['4100'] || null, acctMap['4200'] || null, acctMap['2210'] || null, acctMap['2220'] || null, acctMap['2230'] || null, from, to, revenue_type || 'all']
+    );
+    console.log('[GST-Collected] Query result:', rows);
+
+    const data = rows.map(r => {
+      const round2 = (n) => Math.round(n * 100) / 100;
+      const subscriptionRevenue = round2(r.subscription_revenue);
+      const servicesRevenue = round2(r.services_revenue);
+      const cgst = round2(r.cgst);
+      const sgst = round2(r.sgst);
+      const igst = round2(r.igst);
+      const totalGst = round2(cgst + sgst + igst);
+      // subscriptionRevenue IS the taxable value (ex-GST revenue)
+      const taxableValue = subscriptionRevenue;
+      const inclusiveTotal = round2(subscriptionRevenue + servicesRevenue + cgst + sgst + igst);
+      return {
+        journalEntryId: r.journal_entry_id,
+        date: r.entry_date,
+        narration: r.narration,
+        source: r.source,
+        sourceType: r.source_type,
+        subscriptionRevenue,
+        servicesRevenue,
+        taxableValue,
+        cgst,
+        sgst,
+        igst,
+        totalGst: round2(cgst + sgst + igst),
+        inclusiveTotal: inclusiveTotal,
+        total: inclusiveTotal,
+      };
+    });
+
+const totals = data.reduce((acc, r) => {
+      const rowTotalGst = round2(r.cgst + r.sgst + r.igst);
+      const rowInclusiveTotal = round2(r.taxableValue + r.cgst + r.sgst + r.igst);
+      return {
+        subscriptionRevenue: round2(acc.subscriptionRevenue + r.subscriptionRevenue),
+        servicesRevenue: round2(acc.servicesRevenue + r.servicesRevenue),
+        taxableValue: round2(acc.taxableValue + r.taxableValue),
+        cgst: round2(acc.cgst + r.cgst),
+        sgst: round2(acc.sgst + r.sgst),
+        igst: round2(acc.igst + r.igst),
+        totalGst: round2(acc.totalGst + rowTotalGst),
+        inclusiveTotal: round2(acc.inclusiveTotal + rowInclusiveTotal),
+        total: round2(acc.total + r.total),
+      };
+    }, { subscriptionRevenue: 0, servicesRevenue: 0, taxableValue: 0, cgst: 0, sgst: 0, igst: 0, totalGst: 0, inclusiveTotal: 0, total: 0 });
+
+    res.json({ from, to, revenueType: revenue_type || 'all', data, totals });
+  } catch (err) {
+    console.error('[accounting:gst-collected]', err);
+    res.status(500).json({ error: 'Failed to generate GST collected report' });
+  }
+});
+
+// GET /api/accounting/reports/gst-liability?from=2026-01-01&to=2026-12-31
+//
+// GSTR-3B style: GST Liability vs ITC (Input Tax Credit)
+// Shows monthly: Output GST (liability) vs Input GST (ITC) vs Net Payable
+router.get('/reports/gst-liability', requireRole('finance', 'accounting_hod'), async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to query params are required (YYYY-MM-DD)' });
+
+    const { rows: accts } = await safeQuery(
+      `SELECT code, id FROM chart_of_accounts WHERE code = ANY($1)`,
+      [['2210', '2220', '2230', '1410', '1420', '1430']]
+    );
+    const acctMap = Object.fromEntries(accts.map((a) => [a.code, a.id]));
+
+    const { rows } = await safeQuery(
+      `SELECT 
+         DATE_TRUNC('month', je.entry_date)::date as month,
+         COALESCE(SUM(CASE WHEN jl.account_id = $1 THEN jl.credit - jl.debit ELSE 0 END), 0) as output_cgst,
+         COALESCE(SUM(CASE WHEN jl.account_id = $2 THEN jl.credit - jl.debit ELSE 0 END), 0) as output_sgst,
+         COALESCE(SUM(CASE WHEN jl.account_id = $3 THEN jl.credit - jl.debit ELSE 0 END), 0) as output_igst,
+         COALESCE(SUM(CASE WHEN jl.account_id = $4 THEN jl.debit - jl.credit ELSE 0 END), 0) as input_cgst,
+         COALESCE(SUM(CASE WHEN jl.account_id = $5 THEN jl.debit - jl.credit ELSE 0 END), 0) as input_sgst,
+         COALESCE(SUM(CASE WHEN jl.account_id = $6 THEN jl.debit - jl.credit ELSE 0 END), 0) as input_igst
+       FROM journal_entries je
+       JOIN journal_lines jl ON jl.journal_entry_id = je.id
+       WHERE je.entry_date BETWEEN $7 AND $8
+         AND je.source != 'adjustment'
+         AND je.source_type != 'reversal'
+       GROUP BY DATE_TRUNC('month', je.entry_date)
+       ORDER BY month`,
+      [acctMap['2210'] || null, acctMap['2220'] || null, acctMap['2230'] || null,
+       acctMap['1410'] || null, acctMap['1420'] || null, acctMap['1430'] || null,
+       from, to]
+    );
+
+    const round2 = (n) => Math.round(n * 100) / 100;
+    const data = rows.map(r => {
+      const outputCgst = round2(r.output_cgst);
+      const outputSgst = round2(r.output_sgst);
+      const outputIgst = round2(r.output_igst);
+      const inputCgst = round2(r.input_cgst);
+      const inputSgst = round2(r.input_sgst);
+      const inputIgst = round2(r.input_igst);
+      const outputTotal = round2(outputCgst + outputSgst + outputIgst);
+      const inputTotal = round2(inputCgst + inputSgst + inputIgst);
+      return {
+        month: r.month,
+        output: { cgst: outputCgst, sgst: outputSgst, igst: outputIgst, total: outputTotal },
+        input: { cgst: inputCgst, sgst: inputSgst, igst: inputIgst, total: inputTotal },
+        net: { cgst: round2(outputCgst - inputCgst), sgst: round2(outputSgst - inputSgst), igst: round2(outputIgst - inputIgst), total: round2(outputTotal - inputTotal) },
+      };
+    });
+
+    res.json({ from, to, data });
+  } catch (err) {
+    console.error('[accounting:gst-liability]', err);
+    res.status(500).json({ error: 'Failed to compute GST liability vs ITC' });
+  }
+});
+
+// GET /api/accounting/reports/platform-settlement?from=2026-01-01&to=2026-12-31
+//
+// Platform Settlement Reconciliation
+// Shows: Platform settlement account (1120) movements, GST breakdown, net receivable
+router.get('/reports/platform-settlement', requireRole('finance', 'accounting_hod'), async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to query params are required (YYYY-MM-DD)' });
+
+    const { rows: accts } = await safeQuery(
+      `SELECT code, id, name FROM chart_of_accounts WHERE code = ANY($1)`,
+      [['1120', '4100', '2210', '2220', '2230']]
+    );
+    const acctMap = Object.fromEntries(accts.map((a) => [a.code, { id: a.id, name: a.name }]));
+
+    // Get all settlement JEs with GST breakdown
+    const { rows } = await safeQuery(
+      `SELECT 
+         je.id, je.entry_date, je.narration, je.source, je.source_type,
+         COALESCE(SUM(CASE WHEN jl.account_id = $1 THEN jl.debit - jl.credit ELSE 0 END), 0) as settlement_dr,
+         COALESCE(SUM(CASE WHEN jl.account_id = $2 THEN jl.credit - jl.debit ELSE 0 END), 0) as subscription_rev,
+         COALESCE(SUM(CASE WHEN jl.account_id = $3 THEN jl.credit - jl.debit ELSE 0 END), 0) as cgst,
+         COALESCE(SUM(CASE WHEN jl.account_id = $4 THEN jl.credit - jl.debit ELSE 0 END), 0) as sgst,
+         COALESCE(SUM(CASE WHEN jl.account_id = $5 THEN jl.credit - jl.debit ELSE 0 END), 0) as igst
+       FROM journal_entries je
+       JOIN journal_lines jl ON jl.journal_entry_id = je.id
+       WHERE je.source = 'platform_sync' AND je.source_type = 'subscription'
+         AND je.entry_date BETWEEN $6 AND $7
+       GROUP BY je.id, je.entry_date, je.narration, je.source, je.source_type
+       ORDER BY je.entry_date`,
+      [acctMap['1120']?.id || null, acctMap['4100']?.id || null, acctMap['2210']?.id || null, acctMap['2220']?.id || null, acctMap['2230']?.id || null, from, to]
+    );
+
+    const round2 = (n) => Math.round(n * 100) / 100;
+    const data = rows.map(r => {
+      const settlement = round2(r.settlement_dr);
+      const subscription = round2(r.subscription_rev);
+      const cgst = round2(r.cgst);
+      const sgst = round2(r.sgst);
+      const igst = round2(r.igst);
+      const gst = round2(cgst + sgst + igst);
+      const ourShare = round2(subscription - cgst - sgst - igst);
+      return {
+        date: r.entry_date,
+        narration: r.narration,
+        totalCollected: settlement,
+        ourRevenue: ourShare,
+        gst: { cgst, sgst, igst, total: round2(cgst + sgst + igst) },
+        netReceivable: round2(settlement - subscription), // what platform actually owes after GST
+      };
+    });
+
+    const totals = data.reduce((acc, r) => ({
+      totalCollected: round2(acc.totalCollected + r.totalCollected),
+      ourRevenue: round2(acc.ourRevenue + r.ourRevenue),
+      cgst: round2(acc.cgst + r.gst.cgst),
+      sgst: round2(acc.sgst + r.gst.sgst),
+      igst: round2(acc.igst + r.gst.igst),
+      totalGst: round2(acc.totalGst + r.gst.total),
+      netReceivable: round2(acc.netReceivable + r.netReceivable),
+    }), { totalCollected: 0, ourRevenue: 0, cgst: 0, sgst: 0, igst: 0, totalGst: 0, netReceivable: 0 });
+
+    // Also get current 1120 balance
+    const { rows: [bal] } = await safeQuery(
+      `SELECT COALESCE(SUM(jl.debit - jl.credit), 0) as balance
+       FROM journal_lines jl
+       JOIN chart_of_accounts coa ON coa.id = jl.account_id
+       JOIN journal_entries je ON je.id = jl.journal_entry_id
+       WHERE coa.code = '1120'`,
+    );
+
+    res.json({ from, to, data, totals, currentBalance: round2(bal?.balance || 0) });
+  } catch (err) {
+    console.error('[accounting:platform-settlement]', err);
+    res.status(500).json({ error: 'Failed to compute platform settlement reconciliation' });
   }
 });
 

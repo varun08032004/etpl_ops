@@ -13,17 +13,14 @@ const client = axios.create({
   withCredentials: true,
 });
 
-client.interceptors.request.use((config) => {
-  const token = localStorage.getItem('etpl_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
+// No localStorage token — HttpOnly cookie is the single source of truth.
+// Backend sets 'internal_ops_token' cookie on login; browser sends it automatically.
 
 client.interceptors.response.use(
   (res) => res,
   async (err) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('etpl_token');
+      // Session expired or invalid — redirect to login
       if (window.location.pathname !== '/login') window.location.href = '/login';
       return Promise.reject(err);
     }

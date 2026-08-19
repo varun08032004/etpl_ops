@@ -7,6 +7,18 @@ import AddIcon from '@mui/icons-material/Add';
 import client from '../api/client';
 import Money from '../components/Money';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const PROVIDERS = [
   { value: 'manual', label: 'Manual (no API sync)' },
@@ -39,40 +51,47 @@ function AddAccountDialog({ open, onClose, onSaved }) {
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+    <MobileDialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle>Add bank account</DialogTitle>
       <DialogContent>
-        <TextField fullWidth label="Account nickname" margin="normal" value={form.account_name} onChange={(e) => setForm({ ...form, account_name: e.target.value })} placeholder="e.g. Axis Current Account — Ops" />
-        <TextField fullWidth label="Bank name" margin="normal" value={form.bank_name} onChange={(e) => setForm({ ...form, bank_name: e.target.value })} />
-        <TextField fullWidth label="Account number" margin="normal" value={form.account_number} onChange={(e) => setForm({ ...form, account_number: e.target.value })} />
-        <TextField fullWidth label="IFSC code (optional)" margin="normal" value={form.ifsc_code} onChange={(e) => setForm({ ...form, ifsc_code: e.target.value })} />
-        <TextField fullWidth select label="Provider" margin="normal" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })}>
-          {PROVIDERS.map((p) => <MenuItem key={p.value} value={p.value}>{p.label}</MenuItem>)}
-        </TextField>
+        <MobileFormGrid sx={{ mt: 0.5 }}>
+          <MobileTextField fullWidth label="Account nickname" value={form.account_name} onChange={(e) => setForm({ ...form, account_name: e.target.value })} placeholder="e.g. Axis Current Account — Ops" />
+          <MobileTextField fullWidth label="Bank name" value={form.bank_name} onChange={(e) => setForm({ ...form, bank_name: e.target.value })} />
+          <MobileTextField fullWidth label="Account number" value={form.account_number} onChange={(e) => setForm({ ...form, account_number: e.target.value })} />
+          <MobileTextField fullWidth label="IFSC code (optional)" value={form.ifsc_code} onChange={(e) => setForm({ ...form, ifsc_code: e.target.value })} />
+          <MobileTextField
+            fullWidth
+            select
+            label="Provider"
+            value={form.provider}
+            onChange={(e) => setForm({ ...form, provider: e.target.value })}
+            options={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))}
+          />
 
-        {isNonManual && (
-          <>
-            <Alert severity="info" sx={{ mt: 1, mb: 1 }}>
-              Each account needs its own API credentials, even if you have multiple accounts at the same bank — they don't share one global config.
-            </Alert>
-            <TextField fullWidth label="API Client ID" margin="normal" value={form.api_client_id} onChange={(e) => setForm({ ...form, api_client_id: e.target.value })} />
-            <TextField fullWidth label="API Client Secret" type="password" margin="normal" value={form.api_client_secret} onChange={(e) => setForm({ ...form, api_client_secret: e.target.value })} />
-            <TextField fullWidth label="API Base URL" margin="normal" value={form.api_base_url} onChange={(e) => setForm({ ...form, api_base_url: e.target.value })} placeholder="https://api.axisbank.com/..." />
-          </>
-        )}
+          {isNonManual && (
+            <>
+              <Alert severity="info" sx={{ mt: 1, mb: 1 }}>
+                Each account needs its own API credentials, even if you have multiple accounts at the same bank — they don't share one global config.
+              </Alert>
+              <MobileTextField fullWidth label="API Client ID" value={form.api_client_id} onChange={(e) => setForm({ ...form, api_client_id: e.target.value })} />
+              <MobileTextField fullWidth label="API Client Secret" type="password" value={form.api_client_secret} onChange={(e) => setForm({ ...form, api_client_secret: e.target.value })} />
+              <MobileTextField fullWidth label="API Base URL" value={form.api_base_url} onChange={(e) => setForm({ ...form, api_base_url: e.target.value })} placeholder="https://api.axisbank.com/..." />
+            </>
+          )}
 
-        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+          {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+        </MobileFormGrid>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button
+      <MobileActionButtons>
+        <MobileButton onClick={onClose}>Cancel</MobileButton>
+        <MobileButton
           variant="contained" onClick={handleSave}
           disabled={saving || !form.account_name || !form.bank_name || !form.account_number || (isNonManual && (!form.api_client_id || !form.api_client_secret || !form.api_base_url))}
         >
           {saving ? 'Saving…' : 'Add account'}
-        </Button>
-      </DialogActions>
-    </Dialog>
+        </MobileButton>
+      </MobileActionButtons>
+    </MobileDialog>
   );
 }
 
@@ -92,17 +111,19 @@ function UpdateBalanceDialog({ account, onClose, onSaved }) {
   };
 
   return (
-    <Dialog open={!!account} onClose={onClose} maxWidth="xs" fullWidth>
+    <MobileDialog open={!!account} onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle>Update balance — {account?.account_name}</DialogTitle>
       <DialogContent>
-        <TextField fullWidth type="number" label="Current balance (₹)" margin="normal" value={balance} onChange={(e) => setBalance(e.target.value)} />
+        <MobileFormGrid sx={{ mt: 0.5 }}>
+          <MobileTextField fullWidth type="number" label="Current balance (₹)" value={balance} onChange={(e) => setBalance(e.target.value)} />
+        </MobileFormGrid>
         {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" onClick={handleSave}>Save</Button>
-      </DialogActions>
-    </Dialog>
+      <MobileActionButtons>
+        <MobileButton onClick={onClose}>Cancel</MobileButton>
+        <MobileButton variant="contained" onClick={handleSave}>Save</MobileButton>
+      </MobileActionButtons>
+    </MobileDialog>
   );
 }
 
@@ -130,28 +151,31 @@ function UpdateCredentialsDialog({ account, onClose, onSaved }) {
   };
 
   return (
-    <Dialog open={!!account} onClose={onClose} maxWidth="xs" fullWidth>
+    <MobileDialog open={!!account} onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle>Update API credentials — {account?.account_name}</DialogTitle>
       <DialogContent>
         <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', mb: 1 }}>
           These are specific to this account only — updating them won't affect any of your other accounts, even at the same bank.
         </Typography>
-        <TextField fullWidth label="API Client ID" margin="normal" value={form.api_client_id} onChange={(e) => setForm({ ...form, api_client_id: e.target.value })} />
-        <TextField fullWidth label="API Client Secret" type="password" margin="normal" value={form.api_client_secret} onChange={(e) => setForm({ ...form, api_client_secret: e.target.value })} />
-        <TextField fullWidth label="API Base URL" margin="normal" value={form.api_base_url} onChange={(e) => setForm({ ...form, api_base_url: e.target.value })} />
+        <MobileFormGrid sx={{ mt: 0.5 }}>
+          <MobileTextField fullWidth label="API Client ID" value={form.api_client_id} onChange={(e) => setForm({ ...form, api_client_id: e.target.value })} />
+          <MobileTextField fullWidth label="API Client Secret" type="password" value={form.api_client_secret} onChange={(e) => setForm({ ...form, api_client_secret: e.target.value })} />
+          <MobileTextField fullWidth label="API Base URL" value={form.api_base_url} onChange={(e) => setForm({ ...form, api_base_url: e.target.value })} />
+        </MobileFormGrid>
         {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" onClick={handleSave} disabled={saving || !form.api_client_id || !form.api_client_secret || !form.api_base_url}>
+      <MobileActionButtons>
+        <MobileButton onClick={onClose}>Cancel</MobileButton>
+        <MobileButton variant="contained" onClick={handleSave} disabled={saving || !form.api_client_id || !form.api_client_secret || !form.api_base_url}>
           {saving ? 'Saving…' : 'Save credentials'}
-        </Button>
-      </DialogActions>
-    </Dialog>
+        </MobileButton>
+      </MobileActionButtons>
+    </MobileDialog>
   );
 }
 
 export default function BankAccounts() {
+  const isMobile = useMobile();
   const { staff } = useAuth();
   const authorized = ['owner', 'admin', 'finance'].includes(staff?.role);
 
@@ -194,70 +218,74 @@ export default function BankAccounts() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">Bank Accounts</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>Add account</Button>
-      </Box>
+      <MobilePageHeader>
+        <Typography variant={isMobile ? 'h6' : 'h5'}>Bank Accounts</Typography>
+        <MobileButton variant="contained" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>Add account</MobileButton>
+      </MobilePageHeader>
 
       {message && <Alert severity={message.severity} sx={{ mb: 2.5 }} onClose={() => setMessage(null)}>{message.text}</Alert>}
       {currencyWarning && <Alert severity="warning" sx={{ mb: 2.5 }}>{currencyWarning}</Alert>}
 
-      <Paper sx={{ p: 2.5, mb: 3 }}>
+      <MobilePaper sx={{ mb: 3 }}>
         <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Total cash position — all accounts</Typography>
         <Money amount={totalBalance} size="1.6rem" />
-      </Paper>
+      </MobilePaper>
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Account</TableCell>
-              <TableCell>Bank</TableCell>
-              <TableCell>Account #</TableCell>
-              <TableCell>Provider</TableCell>
-              <TableCell align="right">Balance</TableCell>
-              <TableCell>As of</TableCell>
-              <TableCell align="right">Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {accounts.map((a) => (
-              <TableRow key={a.id}>
-                <TableCell>{a.account_name}</TableCell>
-                <TableCell sx={{ fontSize: '0.85rem' }}>{a.bank_name}</TableCell>
-                <TableCell className="figure" sx={{ fontSize: '0.85rem' }}>•••• {a.account_number_last4}</TableCell>
-                <TableCell>
-                  <Chip size="small" label={a.provider} color={a.provider === 'manual' ? 'default' : 'success'} variant={a.provider === 'manual' ? 'outlined' : 'filled'} />
-                  {a.provider !== 'manual' && !a.api_configured && (
-                    <Typography sx={{ fontSize: '0.68rem', color: 'error.main', mt: 0.25 }}>No credentials set</Typography>
-                  )}
-                </TableCell>
-                <TableCell align="right"><Money amount={a.current_balance || 0} size="0.9rem" /></TableCell>
-                <TableCell sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>
-                  {a.balance_as_of ? new Date(a.balance_as_of).toLocaleString() : '—'}
-                  {a.balance_source && <Typography sx={{ fontSize: '0.7rem' }}>({a.balance_source})</Typography>}
-                </TableCell>
-                <TableCell align="right">
-                  <Button size="small" onClick={() => setBalanceDialogAccount(a)}>Update balance</Button>
-                  {a.provider !== 'manual' && (
-                    <>
-                      <Button size="small" onClick={() => setCredentialsDialogAccount(a)}>
-                        {a.api_configured ? 'Update credentials' : 'Set credentials'}
-                      </Button>
-                      <Button size="small" disabled={syncingId === a.id} onClick={() => runSync(a)}>
-                        {syncingId === a.id ? 'Syncing…' : 'Sync'}
-                      </Button>
-                    </>
-                  )}
-                </TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Account</TableCell>
+                <TableCell>Bank</TableCell>
+                <TableCell>Account #</TableCell>
+                <TableCell>Provider</TableCell>
+                <TableCell align="right">Balance</TableCell>
+                <TableCell>As of</TableCell>
+                <TableCell align="right">Actions</TableCell>
               </TableRow>
-            ))}
-            {!accounts.length && (
-              <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No bank accounts added yet.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {accounts.map((a) => (
+                <TableRow key={a.id}>
+                  <TableCell>{a.account_name}</TableCell>
+                  <TableCell sx={{ fontSize: '0.85rem' }}>{a.bank_name}</TableCell>
+                  <TableCell className="figure" sx={{ fontSize: '0.85rem' }}>•••• {a.account_number_last4}</TableCell>
+                  <TableCell>
+                    <Chip size="small" label={a.provider} color={a.provider === 'manual' ? 'default' : 'success'} variant={a.provider === 'manual' ? 'outlined' : 'filled'} />
+                    {a.provider !== 'manual' && !a.api_configured && (
+                      <Typography sx={{ fontSize: '0.68rem', color: 'error.main', mt: 0.25 }}>No credentials set</Typography>
+                    )}
+                  </TableCell>
+                  <TableCell align="right"><Money amount={a.current_balance || 0} size="0.9rem" /></TableCell>
+                  <TableCell sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>
+                    {a.balance_as_of ? new Date(a.balance_as_of).toLocaleString() : '—'}
+                    {a.balance_source && <Typography sx={{ fontSize: '0.7rem' }}>({a.balance_source})</Typography>}
+                  </TableCell>
+                  <TableCell align="right">
+                    <MobileStack gap={1} direction="row">
+                      <MobileButton size="small" onClick={() => setBalanceDialogAccount(a)}>Update balance</MobileButton>
+                      {a.provider !== 'manual' && (
+                        <>
+                          <MobileButton size="small" onClick={() => setCredentialsDialogAccount(a)}>
+                            {a.api_configured ? 'Update credentials' : 'Set credentials'}
+                          </MobileButton>
+                          <MobileButton size="small" disabled={syncingId === a.id} onClick={() => runSync(a)}>
+                            {syncingId === a.id ? 'Syncing…' : 'Sync'}
+                          </MobileButton>
+                        </>
+                      )}
+                    </MobileStack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!accounts.length && (
+                <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No bank accounts added yet.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
       <AddAccountDialog open={addOpen} onClose={() => setAddOpen(false)} onSaved={load} />
       <UpdateBalanceDialog account={balanceDialogAccount} onClose={() => setBalanceDialogAccount(null)} onSaved={load} />

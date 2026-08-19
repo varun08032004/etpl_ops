@@ -7,10 +7,32 @@ import AddIcon from '@mui/icons-material/Add';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer } from 'recharts';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  MobileCardGrid,
+  MobileChartContainer,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const emptyForm = { snapshot_date: '', subscriber_count: '', campaign_title: '', emails_sent: '', open_rate: '', click_rate: '', notes: '' };
 
+function formatCount(n) {
+  const num = Number(n || 0);
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+  return String(num);
+}
+
 export default function MarketingNewsletter() {
+  const isMobile = useMobile();
   const { staff } = useAuth();
   const [isMarketingHead, setIsMarketingHead] = useState(false);
   const canEdit = ['owner', 'admin'].includes(staff?.role) || isMarketingHead;
@@ -64,107 +86,117 @@ export default function MarketingNewsletter() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">Newsletter / Email</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>Newsletter / Email</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Subscriber growth and campaign performance — log a snapshot whenever you check your ESP (Mailchimp/Resend/etc).
           </Typography>
         </Box>
-        {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Log snapshot</Button>}
-      </Box>
+        {canEdit && <MobileButton variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Log snapshot</MobileButton>}
+      </MobilePageHeader>
 
       {latest && (
-        <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
-          <Paper sx={{ p: 2, minWidth: 160 }}>
-            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Current subscribers</Typography>
-            <Typography sx={{ fontSize: '1.3rem', fontWeight: 700 }} className="figure">{latest.subscriber_count}</Typography>
-          </Paper>
+        <MobileCardGrid sx={{ mb: 3 }}>
+          <MobilePaper>
+            <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>Current subscribers</Typography>
+            <Typography sx={{ fontSize: isMobile ? '1rem' : '1.3rem', fontWeight: 700 }} className="figure">{latest.subscriber_count}</Typography>
+          </MobilePaper>
           {latest.open_rate != null && (
-            <Paper sx={{ p: 2, minWidth: 160 }}>
-              <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Last open rate</Typography>
-              <Typography sx={{ fontSize: '1.3rem', fontWeight: 700 }} className="figure">{latest.open_rate}%</Typography>
-            </Paper>
+            <MobilePaper>
+              <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>Last open rate</Typography>
+              <Typography sx={{ fontSize: isMobile ? '1rem' : '1.3rem', fontWeight: 700 }} className="figure">{latest.open_rate}%</Typography>
+            </MobilePaper>
           )}
           {latest.click_rate != null && (
-            <Paper sx={{ p: 2, minWidth: 160 }}>
-              <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Last click rate</Typography>
-              <Typography sx={{ fontSize: '1.3rem', fontWeight: 700 }} className="figure">{latest.click_rate}%</Typography>
-            </Paper>
+            <MobilePaper>
+              <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>Last click rate</Typography>
+              <Typography sx={{ fontSize: isMobile ? '1rem' : '1.3rem', fontWeight: 700 }} className="figure">{latest.click_rate}%</Typography>
+            </MobilePaper>
           )}
-        </Box>
+        </MobileCardGrid>
       )}
 
       {chartData.length > 1 && (
-        <Paper sx={{ p: 2, mb: 3, height: 260 }}>
+        <MobilePaper sx={{ mb: 3 }}>
           <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', mb: 1 }}>Subscriber growth</Typography>
-          <ResponsiveContainer width="100%" height="90%">
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <ChartTooltip />
-              <Line type="monotone" dataKey="subscribers" stroke="#2FBF71" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </Paper>
+          <MobileChartContainer>
+            <Box sx={{ height: isMobile ? 220 : 260, minWidth: isMobile ? '320px' : '100%' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#232c26" />
+                  <XAxis dataKey="date" stroke="#8fa398" fontSize={isMobile ? 10 : 11} />
+                  <YAxis stroke="#8fa398" fontSize={isMobile ? 10 : 11} />
+                  <ChartTooltip contentStyle={{ background: '#121815', border: '1px solid #232c26', fontSize: isMobile ? 10 : 12 }} />
+                  <Line type="monotone" dataKey="subscribers" stroke="#2fbf71" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </Box>
+          </MobileChartContainer>
+        </MobilePaper>
       )}
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Date</TableCell>
-              <TableCell align="right">Subscribers</TableCell>
-              <TableCell>Campaign</TableCell>
-              <TableCell align="right">Sent</TableCell>
-              <TableCell align="right">Open %</TableCell>
-              <TableCell align="right">Click %</TableCell>
-              <TableCell align="right">Action</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {snapshots.map((s) => (
-              <TableRow key={s.id}>
-                <TableCell className="figure" sx={{ fontSize: '0.85rem' }}>{s.snapshot_date?.slice(0, 10)}</TableCell>
-                <TableCell align="right" className="figure">{s.subscriber_count}</TableCell>
-                <TableCell sx={{ fontSize: '0.85rem' }}>{s.campaign_title || '—'}</TableCell>
-                <TableCell align="right" className="figure">{s.emails_sent ?? '—'}</TableCell>
-                <TableCell align="right" className="figure">{s.open_rate != null ? `${s.open_rate}%` : '—'}</TableCell>
-                <TableCell align="right" className="figure">{s.click_rate != null ? `${s.click_rate}%` : '—'}</TableCell>
-                <TableCell align="right">
-                  {canEdit && <Button size="small" color="error" onClick={() => handleDelete(s)}>Delete</Button>}
-                </TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Date</TableCell>
+                <TableCell align="right">Subscribers</TableCell>
+                <TableCell>Campaign</TableCell>
+                <TableCell align="right">Sent</TableCell>
+                <TableCell align="right">Open %</TableCell>
+                <TableCell align="right">Click %</TableCell>
+                <TableCell align="right">Action</TableCell>
               </TableRow>
-            ))}
-            {!snapshots.length && (
-              <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No snapshots logged yet.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {snapshots.map((s) => (
+                <TableRow key={s.id}>
+                  <TableCell className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.snapshot_date?.slice(0, 10)}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.subscriber_count}</TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.campaign_title || '—'}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.emails_sent ?? '—'}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.open_rate != null ? `${s.open_rate}%` : '—'}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.click_rate != null ? `${s.click_rate}%` : '—'}</TableCell>
+                  <TableCell align="right">
+                    <MobileStack gap={1} direction="row">
+                      {canEdit && <MobileButton size="small" color="error" onClick={() => handleDelete(s)}>Delete</MobileButton>}
+                    </MobileStack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!snapshots.length && (
+                <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No snapshots logged yet.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Log newsletter snapshot</DialogTitle>
         <DialogContent>
-          <TextField fullWidth type="date" label="Date" InputLabelProps={{ shrink: true }} margin="normal" value={form.snapshot_date} onChange={(e) => setForm({ ...form, snapshot_date: e.target.value })} />
-          <TextField fullWidth type="number" label="Subscriber count" margin="normal" value={form.subscriber_count} onChange={(e) => setForm({ ...form, subscriber_count: e.target.value })} />
-          <TextField fullWidth label="Campaign title (optional)" margin="normal" value={form.campaign_title} onChange={(e) => setForm({ ...form, campaign_title: e.target.value })} />
-          <Box sx={{ display: 'flex', gap: 1.5 }}>
-            <TextField fullWidth type="number" label="Emails sent" margin="normal" value={form.emails_sent} onChange={(e) => setForm({ ...form, emails_sent: e.target.value })} />
-          </Box>
-          <Box sx={{ display: 'flex', gap: 1.5 }}>
-            <TextField fullWidth type="number" label="Open rate %" margin="normal" value={form.open_rate} onChange={(e) => setForm({ ...form, open_rate: e.target.value })} />
-            <TextField fullWidth type="number" label="Click rate %" margin="normal" value={form.click_rate} onChange={(e) => setForm({ ...form, click_rate: e.target.value })} />
-          </Box>
-          <TextField fullWidth label="Notes" margin="normal" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField fullWidth type="date" label="Date" InputLabelProps={{ shrink: true }} value={form.snapshot_date} onChange={(e) => setForm({ ...form, snapshot_date: e.target.value })} />
+            <MobileTextField fullWidth type="number" label="Subscriber count" value={form.subscriber_count} onChange={(e) => setForm({ ...form, subscriber_count: e.target.value })} />
+            <MobileTextField fullWidth label="Campaign title (optional)" value={form.campaign_title} onChange={(e) => setForm({ ...form, campaign_title: e.target.value })} />
+            <MobileStack gap={1.5} direction="row" flexWrap="wrap">
+              <MobileTextField fullWidth type="number" label="Emails sent" value={form.emails_sent} onChange={(e) => setForm({ ...form, emails_sent: e.target.value })} />
+            </MobileStack>
+            <MobileStack gap={1.5} direction="row" flexWrap="wrap">
+              <MobileTextField fullWidth type="number" label="Open rate %" value={form.open_rate} onChange={(e) => setForm({ ...form, open_rate: e.target.value })} />
+              <MobileTextField fullWidth type="number" label="Click rate %" value={form.click_rate} onChange={(e) => setForm({ ...form, click_rate: e.target.value })} />
+            </MobileStack>
+            <MobileTextField fullWidth label="Notes" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

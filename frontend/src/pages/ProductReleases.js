@@ -6,12 +6,26 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  MobileCardGrid,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const AREA_LABEL = { portfolio_management: 'Portfolio Mgmt', marketplace: 'Marketplace', emission_tracking: 'Emission Tracking', reports: 'Reports', platform: 'Platform', other: 'Other' };
 
 const emptyForm = { version: '', release_date: '', summary: '', feature_ids: [] };
 
 export default function ProductReleases() {
+  const isMobile = useMobile();
   const { staff } = useAuth();
   const [isProductHead, setIsProductHead] = useState(false);
   const canEdit = ['owner', 'admin'].includes(staff?.role) || isProductHead;
@@ -73,61 +87,67 @@ export default function ProductReleases() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">Releases</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>Releases</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Changelog of what's shipped on ethertrack.in.
           </Typography>
         </Box>
-        {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>New release</Button>}
-      </Box>
+        {canEdit && <MobileButton variant="contained" startIcon={<AddIcon />} onClick={openCreate}>New release</MobileButton>}
+      </MobilePageHeader>
 
-      {releases.map((r) => (
-        <Paper key={r.id} sx={{ p: 2.5, mb: 2 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <Box>
-              <Typography sx={{ fontWeight: 700, fontSize: '1rem' }}>{r.version}</Typography>
-              <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary' }} className="figure">{r.release_date?.slice(0, 10)}</Typography>
+      <MobileCardGrid>
+        {releases.map((r) => (
+          <MobilePaper key={r.id}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <Box>
+                <Typography sx={{ fontWeight: 700, fontSize: isMobile ? '0.85rem' : '1rem' }}>{r.version}</Typography>
+                <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.78rem', color: 'text.secondary' }} className="figure">{r.release_date?.slice(0, 10)}</Typography>
+              </Box>
+              <MobileStack gap={1} direction="row">
+                {canEdit && <MobileButton size="small" onClick={() => openEdit(r)}>Edit</MobileButton>}
+                {canDelete && <MobileButton size="small" color="error" onClick={() => handleDelete(r)}>Delete</MobileButton>}
+              </MobileStack>
             </Box>
-            <Box>
-              {canEdit && <Button size="small" onClick={() => openEdit(r)}>Edit</Button>}
-              {canDelete && <Button size="small" color="error" onClick={() => handleDelete(r)}>Delete</Button>}
-            </Box>
-          </Box>
-          {r.summary && <Typography sx={{ fontSize: '0.85rem', mt: 1.5 }}>{r.summary}</Typography>}
-          {!!(r.features && r.features.length) && (
-            <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 1.5 }}>
-              {r.features.map((f) => (
-                <Chip key={f.id} size="small" label={`${AREA_LABEL[f.area] || f.area}: ${f.title}`} variant="outlined" />
-              ))}
-            </Box>
-          )}
-        </Paper>
-      ))}
-      {!releases.length && (
-        <Paper sx={{ p: 4, textAlign: 'center', color: 'text.secondary' }}>No releases logged yet.</Paper>
-      )}
+            {r.summary && <Typography sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem', mt: 1.5 }}>{r.summary}</Typography>}
+            {r.features && r.features.length && (
+              <MobileStack gap={0.5} direction="row" flexWrap="wrap" sx={{ mt: 1.5 }}>
+                {r.features.map((f) => (
+                  <Chip key={f.id} size="small" label={`${AREA_LABEL[f.area] || f.area}: ${f.title}`} variant="outlined" />
+                ))}
+              </MobileStack>
+            )}
+          </MobilePaper>
+        ))}
+        {!releases.length && (
+          <MobilePaper sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>No releases logged yet.</MobilePaper>
+        )}
+      </MobileCardGrid>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{editingId ? 'Edit' : 'New'} release</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="Version (e.g. v1.2.0 or 'July Update')" margin="normal" value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} />
-          <TextField fullWidth type="date" label="Release date" InputLabelProps={{ shrink: true }} margin="normal" value={form.release_date} onChange={(e) => setForm({ ...form, release_date: e.target.value })} />
-          <TextField fullWidth label="Summary" margin="normal" multiline rows={3} value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} />
-          <TextField
-            fullWidth select label="Features shipped in this release" margin="normal" SelectProps={{ multiple: true }}
-            value={form.feature_ids} onChange={(e) => setForm({ ...form, feature_ids: e.target.value })}
-          >
-            {shippedFeatures.map((f) => <MenuItem key={f.id} value={f.id}>{f.title}</MenuItem>)}
-          </TextField>
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField fullWidth label="Version (e.g. v1.2.0 or 'July Update')" value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} />
+            <MobileTextField fullWidth type="date" label="Release date" InputLabelProps={{ shrink: true }} value={form.release_date} onChange={(e) => setForm({ ...form, release_date: e.target.value })} />
+            <MobileTextField fullWidth label="Summary" multiline rows={3} value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Features shipped in this release"
+              value={form.feature_ids}
+              onChange={(e) => setForm({ ...form, feature_ids: e.target.value })}
+              options={shippedFeatures.map((f) => ({ value: f.id, label: f.title }))}
+            />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving || !form.version}>{saving ? 'Saving…' : 'Save'}</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleSave} disabled={saving || !form.version}>{saving ? 'Saving…' : 'Save'}</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

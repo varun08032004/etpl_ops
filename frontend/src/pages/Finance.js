@@ -7,6 +7,7 @@ import AddIcon from '@mui/icons-material/Add';
 import client from '../api/client';
 import Money from '../components/Money';
 import { useAuth } from '../context/AuthContext';
+import { ResponsiveTableContainer, MobileDialog, MobilePaper, MobileButton, MobileTextField, MobileFormGrid, MobileActionButtons, MobileStack } from '../components/MobileResponsive';
 
 const STATUS_COLOR = { pending: 'warning', approved: 'success', rejected: 'error', paid: 'info', cancelled: 'default', converted_to_bill: 'info', reimbursing: 'warning', reimbursed: 'info' };
 const CATEGORIES = ['travel', 'meals', 'software', 'office_supplies', 'client_entertainment', 'training', 'other'];
@@ -79,44 +80,46 @@ function SubmitClaimDialog({ open, onClose, onSubmitted }) {
 function ClaimsTable({ claims, showEmployee, onDecide, onReimburse, onLoadMore, hasMore }) {
   return (
     <Paper>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            {showEmployee && <TableCell>Employee</TableCell>}
-            <TableCell>Category</TableCell>
-            <TableCell>Date</TableCell>
-            <TableCell align="right">Amount</TableCell>
-            <TableCell>Level</TableCell>
-            <TableCell>Status</TableCell>
-            {(onDecide || onReimburse) && <TableCell align="right">Action</TableCell>}
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {claims.map((c) => (
-            <TableRow key={c.id}>
-              {showEmployee && <TableCell sx={{ fontSize: '0.85rem' }}>{c.employee_name}</TableCell>}
-              <TableCell sx={{ fontSize: '0.85rem', textTransform: 'capitalize' }}>{c.category.replace('_', ' ')}</TableCell>
-              <TableCell className="figure" sx={{ fontSize: '0.8rem' }}>{c.expense_date?.slice(0, 10)}</TableCell>
-              <TableCell align="right"><Money amount={c.amount} size="0.85rem" /></TableCell>
-              <TableCell sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>{c.current_level}/{c.levels_required}</TableCell>
-              <TableCell><Chip size="small" label={c.status} color={STATUS_COLOR[c.status]} /></TableCell>
-              {onDecide && c.status === 'pending' && (
-                <TableCell align="right">
-                  <Button size="small" color="error" onClick={() => onDecide(c, 'rejected')}>Reject</Button>
-                  <Button size="small" variant="contained" onClick={() => onDecide(c, 'approved')}>Approve</Button>
-                </TableCell>
-              )}
-              {onReimburse && c.status === 'approved' && (
-                <TableCell align="right"><Button size="small" variant="outlined" onClick={() => onReimburse(c)}>Reimburse</Button></TableCell>
-              )}
-              {onReimburse && !onDecide && !['pending', 'approved'].includes(c.status) && <TableCell />}
+      <ResponsiveTableContainer>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              {showEmployee && <TableCell>Employee</TableCell>}
+              <TableCell>Category</TableCell>
+              <TableCell>Date</TableCell>
+              <TableCell align="right">Amount</TableCell>
+              <TableCell>Level</TableCell>
+              <TableCell>Status</TableCell>
+              {(onDecide || onReimburse) && <TableCell align="right">Action</TableCell>}
             </TableRow>
-          ))}
-          {!claims.length && (
-            <TableRow><TableCell colSpan={showEmployee ? 7 : 6} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>Nothing here.</TableCell></TableRow>
-          )}
-        </TableBody>
-      </Table>
+          </TableHead>
+          <TableBody>
+            {claims.map((c) => (
+              <TableRow key={c.id}>
+                {showEmployee && <TableCell sx={{ fontSize: '0.85rem' }}>{c.employee_name}</TableCell>}
+                <TableCell sx={{ fontSize: '0.85rem', textTransform: 'capitalize' }}>{c.category.replace('_', ' ')}</TableCell>
+                <TableCell className="figure" sx={{ fontSize: '0.8rem' }}>{c.expense_date?.slice(0, 10)}</TableCell>
+                <TableCell align="right"><Money amount={c.amount} size="0.85rem" /></TableCell>
+                <TableCell sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>{c.current_level}/{c.levels_required}</TableCell>
+                <TableCell><Chip size="small" label={c.status} color={STATUS_COLOR[c.status]} /></TableCell>
+                {onDecide && c.status === 'pending' && (
+                  <TableCell align="right">
+                    <Button size="small" color="error" onClick={() => onDecide(c, 'rejected')}>Reject</Button>
+                    <Button size="small" variant="contained" onClick={() => onDecide(c, 'approved')}>Approve</Button>
+                  </TableCell>
+                )}
+                {onReimburse && c.status === 'approved' && (
+                  <TableCell align="right"><Button size="small" variant="outlined" onClick={() => onReimburse(c)}>Reimburse</Button></TableCell>
+                )}
+                {onReimburse && !onDecide && !['pending', 'approved'].includes(c.status) && <TableCell />}
+              </TableRow>
+            ))}
+            {!claims.length && (
+              <TableRow><TableCell colSpan={showEmployee ? 7 : 6} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>Nothing here.</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </ResponsiveTableContainer>
       {hasMore && <Box sx={{ textAlign: 'center', py: 1.5 }}><Button size="small" onClick={onLoadMore}>Load more</Button></Box>}
     </Paper>
   );
@@ -331,46 +334,48 @@ function ConvertToBillDialog({ request, onClose, onSaved }) {
 function PRTable({ requests, showRequester, onDecide, onCancel, onConvert, onLoadMore, hasMore }) {
   return (
     <Paper>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            {showRequester && <TableCell>Requested by</TableCell>}
-            <TableCell>Vendor</TableCell>
-            <TableCell>Item</TableCell>
-            <TableCell align="right">Est. Amount</TableCell>
-            <TableCell>Level</TableCell>
-            <TableCell>Status</TableCell>
-            {(onDecide || onCancel) && <TableCell align="right">Action</TableCell>}
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {requests.map((r) => (
-            <TableRow key={r.id}>
-              {showRequester && <TableCell sx={{ fontSize: '0.85rem' }}>{r.requested_by_name}</TableCell>}
-              <TableCell sx={{ fontSize: '0.85rem' }}>{r.vendor_name}</TableCell>
-              <TableCell sx={{ fontSize: '0.85rem' }}>{r.item_description}</TableCell>
-              <TableCell align="right"><Money amount={r.estimated_amount} size="0.85rem" /></TableCell>
-              <TableCell sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>{r.current_level}/{r.levels_required}</TableCell>
-              <TableCell><Chip size="small" label={r.status} color={STATUS_COLOR[r.status]} /></TableCell>
-              {onDecide && (
-                <TableCell align="right">
-                  <Button size="small" color="error" onClick={() => onDecide(r, 'rejected')}>Reject</Button>
-                  <Button size="small" variant="contained" onClick={() => onDecide(r, 'approved')}>Approve</Button>
-                </TableCell>
-              )}
-              {onCancel && r.status === 'pending' && (
-                <TableCell align="right"><Button size="small" color="error" onClick={() => onCancel(r)}>Cancel</Button></TableCell>
-              )}
-              {onConvert && r.status === 'approved' && (
-                <TableCell align="right"><Button size="small" variant="outlined" onClick={() => onConvert(r)}>Convert to bill</Button></TableCell>
-              )}
+      <ResponsiveTableContainer>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              {showRequester && <TableCell>Requested by</TableCell>}
+              <TableCell>Vendor</TableCell>
+              <TableCell>Item</TableCell>
+              <TableCell align="right">Est. Amount</TableCell>
+              <TableCell>Level</TableCell>
+              <TableCell>Status</TableCell>
+              {(onDecide || onCancel) && <TableCell align="right">Action</TableCell>}
             </TableRow>
-          ))}
-          {!requests.length && (
-            <TableRow><TableCell colSpan={showRequester ? 7 : 6} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>Nothing here.</TableCell></TableRow>
-          )}
-        </TableBody>
-      </Table>
+          </TableHead>
+          <TableBody>
+            {requests.map((r) => (
+              <TableRow key={r.id}>
+                {showRequester && <TableCell sx={{ fontSize: '0.85rem' }}>{r.requested_by_name}</TableCell>}
+                <TableCell sx={{ fontSize: '0.85rem' }}>{r.vendor_name}</TableCell>
+                <TableCell sx={{ fontSize: '0.85rem' }}>{r.item_description}</TableCell>
+                <TableCell align="right"><Money amount={r.estimated_amount} size="0.85rem" /></TableCell>
+                <TableCell sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>{r.current_level}/{r.levels_required}</TableCell>
+                <TableCell><Chip size="small" label={r.status} color={STATUS_COLOR[r.status]} /></TableCell>
+                {onDecide && (
+                  <TableCell align="right">
+                    <Button size="small" color="error" onClick={() => onDecide(r, 'rejected')}>Reject</Button>
+                    <Button size="small" variant="contained" onClick={() => onDecide(r, 'approved')}>Approve</Button>
+                  </TableCell>
+                )}
+                {onCancel && r.status === 'pending' && (
+                  <TableCell align="right"><Button size="small" color="error" onClick={() => onCancel(r)}>Cancel</Button></TableCell>
+                )}
+                {onConvert && r.status === 'approved' && (
+                  <TableCell align="right"><Button size="small" variant="outlined" onClick={() => onConvert(r)}>Convert to bill</Button></TableCell>
+                )}
+              </TableRow>
+            ))}
+            {!requests.length && (
+              <TableRow><TableCell colSpan={showRequester ? 7 : 6} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>Nothing here.</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </ResponsiveTableContainer>
       {hasMore && <Box sx={{ textAlign: 'center', py: 1.5 }}><Button size="small" onClick={onLoadMore}>Load more</Button></Box>}
     </Paper>
   );
@@ -633,13 +638,14 @@ function ExpensesSection() {
   const load = () => client.get('/finance/bills').then(({ data }) => setBills(data.bills)).catch(() => setBills([]));
   useEffect(() => { load(); }, []);
 
-  return (
+return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewOpen(true)}>New expense</Button>
+        <MobileButton variant="contained" startIcon={<AddIcon />} onClick={() => setNewOpen(true)}>New expense</MobileButton>
       </Box>
-      <Paper>
-        <Table size="small">
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
           <TableHead>
             <TableRow>
               <TableCell>Bill #</TableCell><TableCell>Vendor</TableCell><TableCell>Category</TableCell>
@@ -672,7 +678,8 @@ function ExpensesSection() {
             {!bills.length && <TableRow><TableCell colSpan={10} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No expenses recorded yet.</TableCell></TableRow>}
           </TableBody>
         </Table>
-      </Paper>
+      </ResponsiveTableContainer>
+      </MobilePaper>
       <NewExpenseDialog open={newOpen} onClose={() => setNewOpen(false)} onSaved={load} />
       <PayBillDialog bill={payBill} onClose={() => setPayBill(null)} onSaved={load} />
     </Box>
@@ -745,14 +752,9 @@ function BudgetsCashFlowSection() {
       )}
 
       {forecast && (
-        <Paper sx={{ p: 2.5, mb: 3 }}>
-          <Typography sx={{ fontWeight: 600, mb: 1 }}>6-Month Cash Flow Forecast</Typography>
-          {forecast.monthsUntilNegative && (
-            <Alert severity="warning" sx={{ mb: 2 }}>
-              Projected cash goes negative in month {forecast.monthsUntilNegative} at current known commitments.
-            </Alert>
-          )}
-          <Table size="small">
+<MobilePaper>
+            <ResponsiveTableContainer>
+              <Table size="small">
             <TableHead>
               <TableRow>
                 <TableCell>Month</TableCell>
@@ -776,10 +778,11 @@ function BudgetsCashFlowSection() {
                   </TableCell>
                 </TableRow>
               ))}
-            </TableBody>
-          </Table>
-          <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', mt: 1.5 }}>{forecast.note}</Typography>
-        </Paper>
+</TableBody>
+              </Table>
+            </ResponsiveTableContainer>
+              <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', mt: 1.5 }}>{forecast.note}</Typography>
+            </MobilePaper>
       )}
 
       <Paper sx={{ p: 2.5, mb: 3 }}>
@@ -804,9 +807,10 @@ function BudgetsCashFlowSection() {
       </Paper>
 
       {variance && (
-        <Paper sx={{ p: 2.5 }}>
-          <Typography sx={{ fontWeight: 600, mb: 1.5 }}>Budget vs Actual — {fiscalYearLabel}</Typography>
-          <Table size="small">
+<MobilePaper sx={{ p: 2.5 }}>
+            <Typography sx={{ fontWeight: 600, mb: 1.5 }}>Budget vs Actual — {fiscalYearLabel}</Typography>
+            <ResponsiveTableContainer>
+              <Table size="small">
             <TableHead>
               <TableRow>
                 <TableCell>Department</TableCell><TableCell>Category</TableCell>
@@ -830,10 +834,11 @@ function BudgetsCashFlowSection() {
               {!variance.budgets.length && (
                 <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No budgets set for this fiscal year yet.</TableCell></TableRow>
               )}
-            </TableBody>
-          </Table>
-          <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', mt: 1.5 }}>{variance.note}</Typography>
-        </Paper>
+</TableBody>
+            </Table>
+            </ResponsiveTableContainer>
+            <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', mt: 1.5 }}>{variance.note}</Typography>
+          </MobilePaper>
       )}
     </Box>
   );
@@ -870,8 +875,9 @@ function ThresholdsTab() {
         Controls how many approval levels an expense claim or purchase request needs, by amount. 0 = auto-approved, no chain.
         Changing a band only affects requests submitted after the change — already-submitted ones keep their original requirement.
       </Alert>
-      <Paper>
-        <Table size="small">
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
           <TableHead>
             <TableRow><TableCell>Type</TableCell><TableCell align="right">Min (₹)</TableCell><TableCell align="right">Max (₹)</TableCell><TableCell align="right">Levels</TableCell><TableCell align="right"></TableCell></TableRow>
           </TableHead>
@@ -886,26 +892,27 @@ function ThresholdsTab() {
               </TableRow>
             ))}
           </TableBody>
-        </Table>
-      </Paper>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={!!editing} onClose={() => setEditing(null)} maxWidth="xs" fullWidth>
+      <MobileDialog open={!!editing} onClose={() => setEditing(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Edit threshold band</DialogTitle>
         {editing && (
           <DialogContent>
-            <TextField fullWidth type="number" label="Min amount" margin="normal" value={editing.min_amount} onChange={(e) => setEditing({ ...editing, min_amount: e.target.value })} />
-            <TextField fullWidth type="number" label="Max amount (blank = unlimited)" margin="normal" value={editing.max_amount || ''} onChange={(e) => setEditing({ ...editing, max_amount: e.target.value })} />
-            <TextField fullWidth select type="number" label="Levels required" margin="normal" value={editing.levels_required} onChange={(e) => setEditing({ ...editing, levels_required: Number(e.target.value) })}>
+            <MobileTextField fullWidth type="number" label="Min amount" value={editing.min_amount} onChange={(e) => setEditing({ ...editing, min_amount: e.target.value })} />
+            <MobileTextField fullWidth type="number" label="Max amount (blank = unlimited)" value={editing.max_amount || ''} onChange={(e) => setEditing({ ...editing, max_amount: e.target.value })} />
+            <MobileTextField fullWidth select type="number" label="Levels required" value={editing.levels_required} onChange={(e) => setEditing({ ...editing, levels_required: Number(e.target.value) })}>
               {[0, 1, 2, 3].map((n) => <MenuItem key={n} value={n}>{n}</MenuItem>)}
-            </TextField>
+            </MobileTextField>
             {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
           </DialogContent>
         )}
-        <DialogActions>
-          <Button onClick={() => setEditing(null)}>Cancel</Button>
-          <Button variant="contained" onClick={save}>Save</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setEditing(null)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={save}>Save</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

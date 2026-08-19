@@ -5,6 +5,7 @@ const router = express.Router();
 const { safeQuery, withTransaction } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const ledger = require('../services/ledger');
+const { createPrepaidExpenseSchedule } = require('../services/accrualService');
 
 router.use(authenticate);
 
@@ -20,6 +21,7 @@ const round2 = (n) => Math.round(n * 100) / 100;
 // on the input/ITC side: intra-state -> split Input CGST + Input SGST,
 // inter-state -> Input IGST, debited (ITC is a recoverable asset — 1410/1420/1430
 // — not a liability).
+// Supports prepaid expenses (e.g., annual domain, multi-year subscriptions) via is_prepaid flag.
 router.post('/', requireRole('finance'), async (req, res) => {
   try {
     const {
@@ -27,6 +29,7 @@ router.post('/', requireRole('finance'), async (req, res) => {
       subtotal, gst_rate, expense_account_id,
       payment_method, // 'bank' | 'director_loan' | 'unpaid'
       bank_account_id, paid_by_name,
+      is_prepaid, prepaid_end_date, // NEW: for multi-year prepaid expenses
     } = req.body;
 
     if (!vendor_id || !bill_date || !subtotal) {
@@ -38,6 +41,13 @@ router.post('/', requireRole('finance'), async (req, res) => {
     }
     if (method === 'bank' && !bank_account_id) {
       return res.status(400).json({ error: 'bank_account_id is required when payment_method is "bank"' });
+    }
+    // Validate prepaid fields
+    if (is_prepaid && !prepaid_end_date) {
+      return res.status(400).json({ error: 'prepaid_end_date is required when is_prepaid is true' });
+    }
+    if (is_prepaid && new Date(prepaid_end_date) <= new Date(bill_date)) {
+      return res.status(400).json({ error: 'prepaid_end_date must be after bill_date' });
     }
 
     const { rows: [vendor] } = await safeQuery(`SELECT * FROM parties WHERE id = $1`, [vendor_id]);
@@ -77,10 +87,6 @@ router.post('/', requireRole('finance'), async (req, res) => {
     }
 
     const resolvedDueDate = due_date || bill_date;
-    // bill_status enum has no 'pending' — 'received' is the correct not-yet-paid state.
-    // director_loan settles the VENDOR relationship immediately (they've been paid in
-    // full, just not by the company's own bank account), so it's 'paid' too — the
-    // outstanding liability just sits against the director instead of a bank account.
     const status = method === 'unpaid' ? 'received' : 'paid';
 
     const bill = await withTransaction(async (client) => {
@@ -92,16 +98,24 @@ router.post('/', requireRole('finance'), async (req, res) => {
       const noteSuffix = method === 'director_loan' && paid_by_name ? ` (paid personally by ${paid_by_name} — reimbursable)` : '';
       const { rows: [b] } = await client.query(
         `INSERT INTO bills (bill_number, vendor_id, bill_date, due_date, status, category_id,
-           subtotal, gst_amount, total_amount, amount_paid, notes, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+           subtotal, gst_amount, total_amount, amount_paid, notes, created_by, is_prepaid, prepaid_end_date)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
         [next_num, vendor_id, bill_date, resolvedDueDate, status, category_id || null,
          sub, round2(cgst + sgst + igst), totalAmount, method === 'unpaid' ? 0 : totalAmount,
-         (description || '') + noteSuffix, req.staff.id]
+         (description || '') + noteSuffix, req.staff.id, is_prepaid || false, prepaid_end_date || null]
       );
       return b;
     });
 
-    // Dr Expense, Dr Input GST (ITC) | Cr Bank / Cr Due to Director(s) / Cr Accounts Payable
+    // For prepaid expenses, use accrual service (posts to Prepaid Expenses asset, creates amortization schedule)
+    if (is_prepaid) {
+      const accrualResult = await createPrepaidExpenseSchedule(bill.id, req.staff.id);
+      if (accrualResult) {
+        return res.status(201).json({ bill: { ...bill, journal_entry_id: accrualResult.journalEntry.id }, prepaidExpense: true });
+      }
+    }
+
+    // Standard bill: post to expense directly
     const lines = [{ accountId: expenseAcct.id, debit: sub, description: description || `Bill ${bill.bill_number}` }];
     if (cgst > 0) lines.push({ accountId: cgstAcct.id, debit: cgst, description: 'Input CGST (ITC)' });
     if (sgst > 0) lines.push({ accountId: sgstAcct.id, debit: sgst, description: 'Input SGST (ITC)' });
@@ -193,41 +207,58 @@ router.delete('/:id', requireRole('finance'), async (req, res) => {
 // ── pay down a pending bill later (Dr Accounts Payable | Cr Bank) ───────────
 router.post('/:id/pay', requireRole('finance'), async (req, res) => {
   try {
-    const { bank_account_id, amount, payment_date } = req.body;
+    const { bank_account_id, amount, payment_date, idempotency_key } = req.body;
     if (!bank_account_id || !amount) return res.status(400).json({ error: 'bank_account_id and amount are required' });
 
-    const { rows: [bill] } = await safeQuery(`SELECT * FROM bills WHERE id = $1`, [req.params.id]);
-    if (!bill) return res.status(404).json({ error: 'Bill not found' });
-    if (bill.status === 'paid') return res.status(409).json({ error: 'This bill is already fully paid' });
+    // Idempotency check
+    if (idempotency_key) {
+      const { rows: [existing] } = await safeQuery(
+        `SELECT id FROM payments_made WHERE idempotency_key = $1`,
+        [idempotency_key]
+      );
+      if (existing) {
+        return res.status(409).json({ error: 'Payment with this idempotency key already exists', paymentId: existing.id });
+      }
+    }
 
-    const { rows: [bank] } = await safeQuery(`SELECT ledger_account_id FROM bank_accounts WHERE id = $1`, [bank_account_id]);
-    if (!bank) return res.status(404).json({ error: 'Bank account not found' });
-    const { rows: [apAcct] } = await safeQuery(`SELECT id FROM chart_of_accounts WHERE code = '2100'`);
+    // Use transaction for atomicity
+    const result = await withTransaction(async (client) => {
+      // Lock the bill row to prevent concurrent payments
+      const { rows: [bill] } = await client.query(`SELECT * FROM bills WHERE id = $1 FOR UPDATE`, [req.params.id]);
+      if (!bill) throw new Error('Bill not found');
+      if (bill.status === 'paid') throw new Error('This bill is already fully paid');
 
-    const payAmount = round2(Number(amount));
-    const remainingBefore = round2(Number(bill.total_amount) - Number(bill.amount_paid));
-    if (payAmount > remainingBefore) return res.status(400).json({ error: `Amount exceeds remaining balance (${remainingBefore})` });
+      const { rows: [bank] } = await client.query(`SELECT ledger_account_id FROM bank_accounts WHERE id = $1`, [bank_account_id]);
+      if (!bank) throw new Error('Bank account not found');
+      const { rows: [apAcct] } = await client.query(`SELECT id FROM chart_of_accounts WHERE code = '2100'`);
+      if (!apAcct) throw new Error('AP account (2100) not found in chart of accounts');
 
-    const paidDate = payment_date || new Date().toISOString().slice(0, 10);
-    const newPaid = round2(Number(bill.amount_paid) + payAmount);
-    const newStatus = newPaid >= Number(bill.total_amount) ? 'paid' : 'partially_paid';
+      const payAmount = round2(Number(amount));
+      const remainingBefore = round2(Number(bill.total_amount) - Number(bill.amount_paid));
+      if (payAmount > remainingBefore) throw new Error(`Amount exceeds remaining balance (${remainingBefore})`);
 
-    await withTransaction(async (client) => {
-      await client.query(`INSERT INTO payments_made (bill_id, payment_date, amount, bank_account_id, created_by) VALUES ($1,$2,$3,$4,$5)`,
-        [bill.id, paidDate, payAmount, bank_account_id, req.staff.id]);
+      const paidDate = payment_date || new Date().toISOString().slice(0, 10);
+      const newPaid = round2(Number(bill.amount_paid) + payAmount);
+      const newStatus = newPaid >= Number(bill.total_amount) ? 'paid' : 'partially_paid';
+
+      await client.query(`INSERT INTO payments_made (bill_id, payment_date, amount, bank_account_id, created_by, idempotency_key) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [bill.id, paidDate, payAmount, bank_account_id, req.staff.id, idempotency_key || null]);
       await client.query(`UPDATE bills SET amount_paid = $1, status = $2 WHERE id = $3`, [newPaid, newStatus, bill.id]);
+
+      // Post journal entry inside the transaction
+      const je = await ledger.postJournalEntry({
+        entryDate: paidDate, source: 'payment', sourceType: 'bill_payment', sourceId: bill.id,
+        narration: `Payment for ${bill.bill_number}`, createdBy: req.staff.id,
+        lines: [
+          { accountId: apAcct.id, debit: payAmount, partyId: bill.vendor_id, description: `Payment — ${bill.bill_number}` },
+          { accountId: bank.ledger_account_id, credit: payAmount, description: `Payment — ${bill.bill_number}` },
+        ],
+      }, client);
+
+      return { status: newStatus, amountPaid: newPaid, journalEntryId: je.id };
     });
 
-    const je = await ledger.postJournalEntry({
-      entryDate: paidDate, source: 'payment', sourceType: 'bill_payment', sourceId: bill.id,
-      narration: `Payment for ${bill.bill_number}`, createdBy: req.staff.id,
-      lines: [
-        { accountId: apAcct.id, debit: payAmount, partyId: bill.vendor_id, description: `Payment — ${bill.bill_number}` },
-        { accountId: bank.ledger_account_id, credit: payAmount, description: `Payment — ${bill.bill_number}` },
-      ],
-    });
-
-    res.json({ status: newStatus, amountPaid: newPaid, journalEntryId: je.id });
+    res.json(result);
   } catch (err) {
     console.error('[bills:pay]', err);
     res.status(500).json({ error: 'Failed to record payment' });

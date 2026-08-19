@@ -6,6 +6,18 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const TYPE_COLOR = { bug: 'error', feature_request: 'primary', feedback: 'info', question: 'default' };
 const STATUS_COLOR = { open: 'warning', in_progress: 'info', resolved: 'success', wont_fix: 'default', duplicate: 'default' };
@@ -21,6 +33,7 @@ const emptyForm = {
 };
 
 export default function ProductFeedback() {
+  const isMobile = useMobile();
   const { staff } = useAuth();
   const [isProductHead, setIsProductHead] = useState(false);
   const canEdit = ['owner', 'admin'].includes(staff?.role) || isProductHead;
@@ -84,92 +97,131 @@ export default function ProductFeedback() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">Feedback & Bugs</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>Feedback & Bugs</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Bugs, feature requests, and feedback — from the team, advisors, or beta users.
           </Typography>
         </Box>
-        {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Log item</Button>}
-      </Box>
+        {canEdit && <MobileButton variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Log item</MobileButton>}
+      </MobilePageHeader>
 
-      <TextField select size="small" label="Filter status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} sx={{ mb: 2, minWidth: 180 }}>
-        <MenuItem value="">All statuses</MenuItem>
-        {STATUSES.map((s) => <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s.replace(/_/g, ' ')}</MenuItem>)}
-      </TextField>
+      <MobilePaper sx={{ mb: 2 }}>
+        <MobileTextField
+          select
+          size="small"
+          label="Filter status"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          options={[{ value: '', label: 'All statuses' }, ...STATUSES.map((s) => ({ value: s, label: s.replace('_', ' ') }))]}
+        />
+      </MobilePaper>
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Title</TableCell>
-              <TableCell>Type</TableCell>
-              <TableCell>Severity</TableCell>
-              <TableCell>Area</TableCell>
-              <TableCell>Reported by</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell align="right">Action</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {items.map((i) => (
-              <TableRow key={i.id}>
-                <TableCell>
-                  <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{i.title}</Typography>
-                  {i.related_feature_title && <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>Re: {i.related_feature_title}</Typography>}
-                </TableCell>
-                <TableCell><Chip size="small" label={i.feedback_type.replace('_', ' ')} color={TYPE_COLOR[i.feedback_type]} sx={{ textTransform: 'capitalize' }} /></TableCell>
-                <TableCell><Chip size="small" label={i.severity} color={SEVERITY_COLOR[i.severity]} sx={{ textTransform: 'capitalize' }} /></TableCell>
-                <TableCell sx={{ fontSize: '0.8rem', textTransform: 'capitalize' }}>{i.area?.replace(/_/g, ' ')}</TableCell>
-                <TableCell sx={{ fontSize: '0.8rem' }}>{i.reported_by_name || (i.source === 'internal' ? 'Internal' : '—')}</TableCell>
-                <TableCell><Chip size="small" label={i.status.replace('_', ' ')} color={STATUS_COLOR[i.status]} sx={{ textTransform: 'capitalize' }} /></TableCell>
-                <TableCell align="right">
-                  {canEdit && <Button size="small" onClick={() => openEdit(i)}>Edit</Button>}
-                  {canEdit && <Button size="small" color="error" onClick={() => handleDelete(i)}>Delete</Button>}
-                </TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Title</TableCell>
+                <TableCell>Type</TableCell>
+                <TableCell>Severity</TableCell>
+                <TableCell>Area</TableCell>
+                <TableCell>Reported by</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell align="right">Action</TableCell>
               </TableRow>
-            ))}
-            {!items.length && (
-              <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>Nothing logged yet.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {items.map((i) => (
+                <TableRow key={i.id}>
+                  <TableCell>
+                    <Typography sx={{ fontWeight: 600, fontSize: isMobile ? '0.75rem' : '0.875rem' }}>{i.title}</Typography>
+                    {i.related_feature_title && <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: 'text.secondary' }}>Re: {i.related_feature_title}</Typography>}
+                  </TableCell>
+                  <TableCell><Chip size="small" label={i.feedback_type.replace('_', ' ')} color={TYPE_COLOR[i.feedback_type]} sx={{ textTransform: 'capitalize' }} /></TableCell>
+                  <TableCell><Chip size="small" label={i.severity} color={SEVERITY_COLOR[i.severity]} sx={{ textTransform: 'capitalize' }} /></TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.8rem', textTransform: 'capitalize' }}>{i.area?.replace('_', ' ')}</TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.8rem' }}>{i.reported_by_name || (i.source === 'internal' ? 'Internal' : '—')}</TableCell>
+                  <TableCell><Chip size="small" label={i.status.replace('_', ' ')} color={STATUS_COLOR[i.status]} sx={{ textTransform: 'capitalize' }} /></TableCell>
+                  <TableCell align="right">
+                    <MobileStack gap={1} direction="row">
+                      {canEdit && <MobileButton size="small" onClick={() => openEdit(i)}>Edit</MobileButton>}
+                      {canEdit && <MobileButton size="small" color="error" onClick={() => handleDelete(i)}>Delete</MobileButton>}
+                    </MobileStack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!items.length && (
+                <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>Nothing logged yet.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{editingId ? 'Edit' : 'Log'} feedback/bug</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="Title" margin="normal" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          <TextField fullWidth select label="Type" margin="normal" value={form.feedback_type} onChange={(e) => setForm({ ...form, feedback_type: e.target.value })}>
-            {TYPES.map((t) => <MenuItem key={t} value={t} sx={{ textTransform: 'capitalize' }}>{t.replace('_', ' ')}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth select label="Severity" margin="normal" value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })}>
-            <MenuItem value="low">Low</MenuItem>
-            <MenuItem value="medium">Medium</MenuItem>
-            <MenuItem value="high">High</MenuItem>
-            <MenuItem value="critical">Critical</MenuItem>
-          </TextField>
-          <TextField fullWidth select label="Status" margin="normal" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-            {STATUSES.map((s) => <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s.replace('_', ' ')}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth select label="Area" margin="normal" value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })}>
-            {AREAS.map((a) => <MenuItem key={a} value={a} sx={{ textTransform: 'capitalize' }}>{a.replace(/_/g, ' ')}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth label="Description" margin="normal" multiline rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-          <TextField fullWidth select label="Source" margin="normal" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}>
-            {SOURCES.map((s) => <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s.replace('_', ' ')}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth label="Reported by (name)" margin="normal" value={form.reported_by_name} onChange={(e) => setForm({ ...form, reported_by_name: e.target.value })} />
-          <TextField fullWidth label="Reported by (email)" margin="normal" value={form.reported_by_email} onChange={(e) => setForm({ ...form, reported_by_email: e.target.value })} />
-          <TextField fullWidth label="Notes" margin="normal" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField fullWidth label="Title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Type"
+              value={form.feedback_type}
+              onChange={(e) => setForm({ ...form, feedback_type: e.target.value })}
+              options={TYPES.map((t) => ({ value: t, label: t.replace('_', ' ') }))}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Severity"
+              value={form.severity}
+              onChange={(e) => setForm({ ...form, severity: e.target.value })}
+              options={[
+                { value: 'low', label: 'Low' },
+                { value: 'medium', label: 'Medium' },
+                { value: 'high', label: 'High' },
+                { value: 'critical', label: 'Critical' },
+              ]}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Status"
+              value={form.status}
+              onChange={(e) => setForm({ ...form, status: e.target.value })}
+              options={STATUSES.map((s) => ({ value: s, label: s.replace('_', ' ') }))}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Area"
+              value={form.area}
+              onChange={(e) => setForm({ ...form, area: e.target.value })}
+              options={AREAS.map((a) => ({ value: a, label: a.replace('_', ' ') }))}
+            />
+            <MobileTextField fullWidth label="Description" multiline rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Source"
+              value={form.source}
+              onChange={(e) => setForm({ ...form, source: e.target.value })}
+              options={SOURCES.map((s) => ({ value: s, label: s.replace('_', ' ') }))}
+            />
+            <MobileTextField fullWidth label="Reported by (name)" value={form.reported_by_name} onChange={(e) => setForm({ ...form, reported_by_name: e.target.value })} />
+            <MobileTextField fullWidth label="Reported by (email)" value={form.reported_by_email} onChange={(e) => setForm({ ...form, reported_by_email: e.target.value })} />
+            <MobileTextField fullWidth label="Notes" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving || !form.title}>{saving ? 'Saving…' : 'Save'}</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleSave} disabled={saving || !form.title}>{saving ? 'Saving…' : 'Save'}</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

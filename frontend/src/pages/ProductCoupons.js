@@ -5,6 +5,18 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import client from '../api/client';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const PLAN_OPTIONS  = ['starter', 'growth'];
 const CYCLE_OPTIONS = ['monthly', 'annual'];
@@ -18,6 +30,7 @@ const emptyForm = {
 };
 
 export default function ProductCoupons() {
+  const isMobile = useMobile();
   const [coupons, setCoupons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -76,101 +89,121 @@ export default function ProductCoupons() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">Coupons</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>Coupons</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Discount codes for self-serve Starter/Growth checkout only. Corporate discounts are set per-deal instead.
           </Typography>
         </Box>
-        <Button variant="contained" onClick={openCreate}>New coupon</Button>
-      </Box>
+        <MobileButton variant="contained" onClick={openCreate}>New coupon</MobileButton>
+      </MobilePageHeader>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-      <Paper variant="outlined">
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Code</TableCell>
-              <TableCell>Discount</TableCell>
-              <TableCell>Plans</TableCell>
-              <TableCell>Cycles</TableCell>
-              <TableCell>Limits</TableCell>
-              <TableCell align="right">Redeemed</TableCell>
-              <TableCell>Expires</TableCell>
-              <TableCell align="right">Active</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading && (
-              <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>Loading…</TableCell></TableRow>
-            )}
-            {!loading && !coupons.length && (
-              <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>No coupons yet</TableCell></TableRow>
-            )}
-            {coupons.map((c) => (
-              <TableRow key={c.code} hover>
-                <TableCell sx={{ fontWeight: 700, fontFamily: 'monospace' }}>{c.code}</TableCell>
-                <TableCell>{c.discount_type === 'percent' ? `${c.discount_value}% off` : `₹${c.discount_value} off`}</TableCell>
-                <TableCell sx={{ textTransform: 'capitalize' }}>{(c.applicable_plans || []).join(', ')}</TableCell>
-                <TableCell sx={{ textTransform: 'capitalize' }}>{(c.applicable_cycles || []).join(', ')}</TableCell>
-                <TableCell sx={{ fontSize: '0.75rem' }}>
-                  {c.first_time_only ? 'First subscription only · ' : ''}{c.per_user_limit}× per account
-                  {c.max_redemptions ? ` · ${c.max_redemptions} total` : ''}
-                </TableCell>
-                <TableCell align="right" className="figure">{c.redemption_count || 0}</TableCell>
-                <TableCell sx={{ fontSize: '0.75rem' }}>{c.valid_until ? fmtDate(c.valid_until) : 'No expiry'}</TableCell>
-                <TableCell align="right">
-                  <Switch size="small" checked={!!c.active} onChange={() => toggleActive(c)} />
-                </TableCell>
+      <MobilePaper variant="outlined">
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Code</TableCell>
+                <TableCell>Discount</TableCell>
+                <TableCell>Plans</TableCell>
+                <TableCell>Cycles</TableCell>
+                <TableCell>Limits</TableCell>
+                <TableCell align="right">Redeemed</TableCell>
+                <TableCell>Expires</TableCell>
+                <TableCell align="right">Active</TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {loading && (
+                <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>Loading…</TableCell></TableRow>
+              )}
+              {!loading && !coupons.length && (
+                <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>No coupons yet</TableCell></TableRow>
+              )}
+              {coupons.map((c) => (
+                <TableRow key={c.code} hover>
+                  <TableCell sx={{ fontWeight: 700, fontFamily: 'monospace', fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{c.code}</TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{c.discountType === 'percent' ? `${c.discountValue}% off` : `₹${c.discountValue} off`}</TableCell>
+                  <TableCell sx={{ textTransform: 'capitalize', fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{(c.applicablePlans || []).join(', ')}</TableCell>
+                  <TableCell sx={{ textTransform: 'capitalize', fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{(c.applicableCycles || []).join(', ')}</TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.7rem' : '0.75rem' }}>
+                    {c.firstTimeOnly ? 'First subscription only · ' : ''}{c.perUserLimit}× per account
+                    {c.maxRedemptions ? ` · ${c.maxRedemptions} total` : ''}
+                  </TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{c.redemptionCount || 0}</TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.7rem' : '0.75rem' }}>{c.validUntil ? fmtDate(c.validUntil) : 'No expiry'}</TableCell>
+                  <TableCell align="right">
+                    <Switch size="small" checked={!!c.active} onChange={() => toggleActive(c)} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>New coupon</DialogTitle>
         <DialogContent>
-          <TextField fullWidth margin="normal" label="Code" placeholder="e.g. EARLYBIRD50"
-            value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} />
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <TextField select margin="normal" label="Type" sx={{ flex: 1 }}
-              value={form.discountType} onChange={(e) => setForm({ ...form, discountType: e.target.value })}>
-              <MenuItem value="percent">% off</MenuItem>
-              <MenuItem value="flat">₹ flat off</MenuItem>
-            </TextField>
-            <TextField margin="normal" type="number" label={form.discountType === 'percent' ? 'Percent' : 'Amount (₹)'} sx={{ flex: 1 }}
-              value={form.discountValue} onChange={(e) => setForm({ ...form, discountValue: e.target.value })} />
-          </Box>
-          <TextField select margin="normal" fullWidth label="Applicable plans" SelectProps={{ multiple: true, renderValue: (v) => v.join(', ') }}
-            value={form.applicablePlans} onChange={(e) => setForm({ ...form, applicablePlans: e.target.value })}>
-            {PLAN_OPTIONS.map((p) => <MenuItem key={p} value={p}>{p}</MenuItem>)}
-          </TextField>
-          <TextField select margin="normal" fullWidth label="Applicable cycles" SelectProps={{ multiple: true, renderValue: (v) => v.join(', ') }}
-            value={form.applicableCycles} onChange={(e) => setForm({ ...form, applicableCycles: e.target.value })}>
-            {CYCLE_OPTIONS.map((c) => <MenuItem key={c} value={c}>{c}</MenuItem>)}
-          </TextField>
-          <FormControlLabel sx={{ mt: 1 }}
-            control={<Switch checked={form.firstTimeOnly} onChange={(e) => setForm({ ...form, firstTimeOnly: e.target.checked })} />}
-            label="First subscription only (new customers)"
-          />
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <TextField margin="normal" type="number" label="Per-account limit" sx={{ flex: 1 }}
-              value={form.perUserLimit} onChange={(e) => setForm({ ...form, perUserLimit: e.target.value })} />
-            <TextField margin="normal" type="number" label="Total uses (blank = unlimited)" sx={{ flex: 1 }}
-              value={form.maxRedemptions} onChange={(e) => setForm({ ...form, maxRedemptions: e.target.value })} />
-          </Box>
-          <TextField fullWidth margin="normal" type="date" label="Expires (blank = no expiry)" InputLabelProps={{ shrink: true }}
-            value={form.validUntil} onChange={(e) => setForm({ ...form, validUntil: e.target.value })} />
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField fullWidth label="Code" placeholder="e.g. EARLYBIRD50"
+              value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} />
+            <MobileStack gap={1} direction="row" flexWrap="wrap">
+              <MobileTextField
+                fullWidth
+                select
+                label="Type"
+                value={form.discountType}
+                onChange={(e) => setForm({ ...form, discountType: e.target.value })}
+                options={[
+                  { value: 'percent', label: '% off' },
+                  { value: 'flat', label: '₹ flat off' },
+                ]}
+              />
+              <MobileTextField
+                fullWidth
+                type="number"
+                label={form.discountType === 'percent' ? 'Percent' : 'Amount (₹)'}
+                value={form.discountValue}
+                onChange={(e) => setForm({ ...form, discountValue: e.target.value })}
+              />
+            </MobileStack>
+            <MobileTextField
+              fullWidth
+              select
+              label="Applicable plans"
+              value={form.applicablePlans}
+              onChange={(e) => setForm({ ...form, applicablePlans: e.target.value })}
+              options={PLAN_OPTIONS.map((p) => ({ value: p, label: p }))}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Applicable cycles"
+              value={form.applicableCycles}
+              onChange={(e) => setForm({ ...form, applicableCycles: e.target.value })}
+              options={CYCLE_OPTIONS.map((c) => ({ value: c, label: c }))}
+            />
+            <FormControlLabel sx={{ mt: 1 }}
+              control={<Switch checked={form.firstTimeOnly} onChange={(e) => setForm({ ...form, firstTimeOnly: e.target.checked })} />}
+              label="First subscription only (new customers)"
+            />
+            <MobileStack gap={1} direction="row" flexWrap="wrap">
+              <MobileTextField fullWidth type="number" label="Per-account limit" value={form.perUserLimit} onChange={(e) => setForm({ ...form, perUserLimit: e.target.value })} />
+              <MobileTextField fullWidth type="number" label="Total uses (blank = unlimited)" value={form.maxRedemptions} onChange={(e) => setForm({ ...form, maxRedemptions: e.target.value })} />
+            </MobileStack>
+            <MobileTextField fullWidth type="date" label="Expires (blank = no expiry)" InputLabelProps={{ shrink: true }} value={form.validUntil} onChange={(e) => setForm({ ...form, validUntil: e.target.value })} />
+          </MobileFormGrid>
           {formError && <Alert severity="error" sx={{ mt: 1 }}>{formError}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleCreate} disabled={saving}>{saving ? 'Creating…' : 'Create coupon'}</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setCreateOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleCreate} disabled={saving}>{saving ? 'Creating…' : 'Create coupon'}</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

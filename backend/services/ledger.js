@@ -45,7 +45,7 @@ async function nextNumber(client, prefix, table, column) {
  * @param {Array<{accountId:string, debit?:number, credit?:number, partyId?:string, description?:string}>} entry.lines
  * @returns {Promise<{id:string, entryNumber:string}>}
  */
-async function postJournalEntry(entry) {
+async function postJournalEntry(entry, client = null) {
   const { entryDate, source, sourceType, sourceId, narration, createdBy, lines, allowClosedPeriod } = entry;
 
   if (!Array.isArray(lines) || lines.length < 2) {
@@ -83,7 +83,7 @@ async function postJournalEntry(entry) {
     throw new Error(`Journal entry does not balance: debit=${totalDebit} credit=${totalCredit}`);
   }
 
-  return withTransaction(async (client) => {
+  const doPost = async (client) => {
     const entryNumber = await nextNumber(client, 'JE', 'journal_entries', 'entry_number');
 
     const { rows: [je] } = await client.query(
@@ -101,7 +101,13 @@ async function postJournalEntry(entry) {
     }
 
     return { id: je.id, entryNumber: je.entry_number };
-  });
+  };
+
+  if (client) {
+    return doPost(client);
+  }
+
+  return withTransaction(doPost);
 }
 
 async function listFiscalPeriods() {
@@ -301,18 +307,13 @@ async function getTrialBalance(asOfDate = null) {
 
 /** P&L for a date range: income - expenses = net profit. */
 async function getProfitAndLoss(startDate, endDate) {
-  // Was 1+N sequential queries (one per income/expense account); now 1.
-  // This function is called directly by the Dashboard AND once per month
-  // by cashflow-runway (6x by default) — with ~15-20 accounts that was
-  // 100+ sequential DB round trips on a single Dashboard load.
   const { rows } = await safeQuery(
     `SELECT coa.id, coa.code, coa.name, coa.account_type,
-            COALESCE(SUM(jl.debit),0) AS total_debit,
-            COALESCE(SUM(jl.credit),0) AS total_credit
+            COALESCE(SUM(CASE WHEN je.entry_date BETWEEN $1 AND $2 THEN jl.debit ELSE 0 END),0) AS total_debit,
+            COALESCE(SUM(CASE WHEN je.entry_date BETWEEN $1 AND $2 THEN jl.credit ELSE 0 END),0) AS total_credit
      FROM chart_of_accounts coa
      LEFT JOIN journal_lines jl ON jl.account_id = coa.id
      LEFT JOIN journal_entries je ON je.id = jl.journal_entry_id
-       AND je.entry_date BETWEEN $1 AND $2
      WHERE coa.account_type IN ('income','expense') AND coa.is_group = false AND coa.is_active = true
      GROUP BY coa.id, coa.code, coa.name, coa.account_type
      ORDER BY coa.code`,

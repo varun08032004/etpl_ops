@@ -1,15 +1,82 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ETPL Ops — EtherTrack Technologies</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-  </head>
-  <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root"></div>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#1e3a5f" />
+  <meta name="description" content="EtherTrack Internal Operations ERP - HR, Finance, Sales, AI Assistant" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="ETPL Ops" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  
+  <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+  <link rel="icon" href="%PUBLIC_URL%/favicon-16x16.png" sizes="16x16" />
+  <link rel="icon" href="%PUBLIC_URL%/favicon-32x32.png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" sizes="180x180" />
+  <link rel="icon" href="%PUBLIC_URL%/pwa-192.png" sizes="192x192" />
+  <link rel="icon" href="%PUBLIC_URL%/pwa-512.png" sizes="512x512" />
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  
+  <title>ETPL Ops — EtherTrack Technologies</title>
+</head>
+<body>
+  <noscript>You need to enable JavaScript to run this app.</noscript>
+  <div id="root"></div>
+  
+  <script>
+    // Register Service Worker
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('%PUBLIC_URL%/sw.js')
+          .then((registration) => {
+            console.log('SW registered:', registration.scope);
+            
+            // Check for updates
+            registration.addEventListener('updatefound', () => {
+              const newWorker = registration.installing;
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  // New version available
+                  if (confirm('New version available! Reload to update?')) {
+                    window.location.reload();
+                  }
+                });
+              });
+            });
+          })
+          .catch((error) => {
+            console.log('SW registration failed:', error);
+          });
+      });
+    
+    // Detect iOS PWA install
+    if (window.navigator.standalone === true) {
+      document.body.classList.add('ios-pwa');
+    }
+    
+    // Detect Android PWA install
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      document.body.classList.add('pwa-installed');
+    }
+    
+    // Handle online/offline
+    window.addEventListener('online', () => {
+      document.body.classList.remove('offline');
+      console.log('Online');
+    });
+    
+    window.addEventListener('offline', () => {
+      document.body.classList.add('offline');
+      console.log('Offline');
+    });
+  </script>
+</head>
+<body>
+  <noscript>You need to enable JavaScript to run this app.</noscript>
+  <div id="root"></div>
+</body>
 </html>

@@ -7,6 +7,18 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import client from '../api/client';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const fmtDate  = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const fmtMoney = (paise) => `₹${(paise / 100).toLocaleString('en-IN')}`;
@@ -20,6 +32,7 @@ const emptyForm = {
 };
 
 function DealRow({ deal, onReload }) {
+  const isMobile = useMobile();
   const [open, setOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
@@ -54,58 +67,62 @@ function DealRow({ deal, onReload }) {
           </IconButton>
         </TableCell>
         <TableCell>
-          <Typography sx={{ fontSize: '0.82rem', fontWeight: 600 }}>{deal.party_name}</Typography>
-          <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>{deal.platform_email}</Typography>
+          <Typography sx={{ fontSize: isMobile ? '0.75rem' : '0.82rem', fontWeight: 600 }}>{deal.party_name}</Typography>
+          <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: 'text.secondary' }}>{deal.platform_email}</Typography>
         </TableCell>
-        <TableCell sx={{ fontSize: '0.8rem' }}>{deal.term_months} mo</TableCell>
-        <TableCell sx={{ fontSize: '0.8rem', textTransform: 'capitalize' }}>{deal.billing_frequency.replace('_', ' ')}</TableCell>
-        <TableCell className="figure">{fmtMoney(deal.net_value_paise)}{deal.discount_percent > 0 && ` (${deal.discount_percent}% off)`}</TableCell>
+        <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.8rem' }}>{deal.term_months} mo</TableCell>
+        <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.8rem', textTransform: 'capitalize' }}>{deal.billing_frequency.replace('_', ' ')}</TableCell>
+        <TableCell className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.8rem' }}>{fmtMoney(deal.net_value_paise)}{deal.discount_percent > 0 && ` (${deal.discount_percent}% off)`}</TableCell>
         <TableCell>
           <Chip size="small" label={`${paidCount}/${total} paid`} color={paidCount === total ? 'success' : paidCount > 0 ? 'warning' : 'default'} />
         </TableCell>
-        <TableCell sx={{ fontSize: '0.8rem' }}>{fmtDate(deal.started_at)}</TableCell>
+        <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.8rem' }}>{fmtDate(deal.started_at)}</TableCell>
         <TableCell>
           <Chip size="small" label={deal.status} color={DEAL_STATUS_COLOR[deal.status] || 'default'} sx={{ textTransform: 'capitalize' }} />
         </TableCell>
         <TableCell align="right">
-          {deal.status === 'active' && (
-            <Button size="small" color="error" onClick={() => { setCancelReason(''); setCancelError(''); setCancelOpen(true); }}>
-              Cancel
-            </Button>
-          )}
+          <MobileStack gap={1} direction="row">
+            {deal.status === 'active' && (
+              <MobileButton size="small" color="error" onClick={() => { setCancelReason(''); setCancelError(''); setCancelOpen(true); }}>
+                Cancel
+              </MobileButton>
+            )}
+          </MobileStack>
         </TableCell>
       </TableRow>
       <TableRow>
         <TableCell colSpan={9} sx={{ py: 0, borderBottom: open ? undefined : 'none' }}>
           <Collapse in={open} timeout="auto" unmountOnExit>
             <Box sx={{ my: 1.5, ml: 4 }}>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Period</TableCell>
-                    <TableCell>Invoice #</TableCell>
-                    <TableCell>Due</TableCell>
-                    <TableCell align="right">Amount</TableCell>
-                    <TableCell align="right">Paid</TableCell>
-                    <TableCell>Status</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {deal.installments.map((i) => (
-                    <TableRow key={i.period_number}>
-                      <TableCell sx={{ fontSize: '0.78rem' }}>#{i.period_number} ({fmtDate(i.period_start)} – {fmtDate(i.period_end)})</TableCell>
-                      <TableCell sx={{ fontSize: '0.78rem', fontFamily: 'monospace' }}>{i.invoice_number}</TableCell>
-                      <TableCell sx={{ fontSize: '0.78rem' }}>{fmtDate(i.due_date)}</TableCell>
-                      <TableCell align="right" className="figure">₹{Number(i.total_amount).toLocaleString('en-IN')}</TableCell>
-                      <TableCell align="right" className="figure">₹{Number(i.amount_paid).toLocaleString('en-IN')}</TableCell>
-                      <TableCell>
-                        <Chip size="small" label={i.invoice_status.replace('_', ' ')} color={STATUS_COLOR[i.invoice_status] || 'default'} sx={{ textTransform: 'capitalize' }} />
-                      </TableCell>
+              <ResponsiveTableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Period</TableCell>
+                      <TableCell>Invoice #</TableCell>
+                      <TableCell>Due</TableCell>
+                      <TableCell align="right">Amount</TableCell>
+                      <TableCell align="right">Paid</TableCell>
+                      <TableCell>Status</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', mt: 1 }}>
+                  </TableHead>
+                  <TableBody>
+                    {deal.installments.map((i) => (
+                      <TableRow key={i.period_number}>
+                        <TableCell sx={{ fontSize: isMobile ? '0.7rem' : '0.78rem' }}>#{i.period_number} ({fmtDate(i.period_start)} – {fmtDate(i.period_end)})</TableCell>
+                        <TableCell sx={{ fontSize: isMobile ? '0.7rem' : '0.78rem', fontFamily: 'monospace' }}>{i.invoice_number}</TableCell>
+                        <TableCell sx={{ fontSize: isMobile ? '0.7rem' : '0.78rem' }}>{fmtDate(i.due_date)}</TableCell>
+                        <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.7rem' : '0.78rem' }}>₹{Number(i.total_amount).toLocaleString('en-IN')}</TableCell>
+                        <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.7rem' : '0.78rem' }}>₹{Number(i.amount_paid).toLocaleString('en-IN')}</TableCell>
+                        <TableCell>
+                          <Chip size="small" label={i.invoice_status.replace('_', ' ')} color={STATUS_COLOR[i.invoice_status] || 'default'} sx={{ textTransform: 'capitalize' }} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ResponsiveTableContainer>
+              <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: 'text.secondary', mt: 1 }}>
                 To record a payment, open the matching invoice in Accounting → Invoices — status here updates automatically.
               </Typography>
             </Box>
@@ -113,29 +130,29 @@ function DealRow({ deal, onReload }) {
         </TableCell>
       </TableRow>
 
-      <Dialog open={cancelOpen} onClose={() => !cancelling && setCancelOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={cancelOpen} onClose={() => !cancelling && setCancelOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Cancel corporate deal</DialogTitle>
         <DialogContent>
           <Typography sx={{ fontSize: '0.82rem', color: 'text.secondary', mb: 1.5 }}>
             This immediately cuts platform access for {deal.party_name} — the same way a missed installment
             would. Unpaid invoices already issued are left as-is in Accounting for Finance to handle separately.
           </Typography>
-          <TextField fullWidth margin="normal" multiline rows={2} label="Reason (required)"
-            value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} />
+          <MobileTextField fullWidth multiline rows={2} label="Reason (required)" value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} />
           {cancelError && <Alert severity="error" sx={{ mt: 1 }}>{cancelError}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCancelOpen(false)} disabled={cancelling}>Back</Button>
-          <Button color="error" variant="contained" onClick={confirmCancel} disabled={cancelling}>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setCancelOpen(false)} disabled={cancelling}>Back</MobileButton>
+          <MobileButton color="error" variant="contained" onClick={confirmCancel} disabled={cancelling}>
             {cancelling ? 'Cancelling…' : 'Confirm cancellation'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </>
   );
 }
 
 export default function CorporateDeals() {
+  const isMobile = useMobile();
   const [deals, setDeals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -223,9 +240,9 @@ export default function CorporateDeals() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">Corporate Deals</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>Corporate Deals</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Set up a Corporate subscription term — pay once, or split into monthly/annual installments.
             Each period generates a real GST invoice; payment status is read from Accounting. For
@@ -234,94 +251,97 @@ export default function CorporateDeals() {
             the full term up front.
           </Typography>
         </Box>
-        <Button variant="contained" onClick={openCreate}>New corporate deal</Button>
-      </Box>
+        <MobileButton variant="contained" onClick={openCreate}>New corporate deal</MobileButton>
+      </MobilePageHeader>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-      <Paper variant="outlined">
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell />
-              <TableCell>Customer</TableCell>
-              <TableCell>Term</TableCell>
-              <TableCell>Billing</TableCell>
-              <TableCell>Value</TableCell>
-              <TableCell>Payment status</TableCell>
-              <TableCell>Started</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell align="right">Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading && (
-              <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>Loading…</TableCell></TableRow>
-            )}
-            {!loading && !deals.length && (
-              <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>No corporate deals yet</TableCell></TableRow>
-            )}
-            {deals.map((d) => <DealRow key={d.id} deal={d} onReload={load} />)}
-          </TableBody>
-        </Table>
-      </Paper>
+      <MobilePaper variant="outlined">
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell />
+                <TableCell>Customer</TableCell>
+                <TableCell>Term</TableCell>
+                <TableCell>Billing</TableCell>
+                <TableCell>Value</TableCell>
+                <TableCell>Payment status</TableCell>
+                <TableCell>Started</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell align="right">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading && (
+                <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>Loading…</TableCell></TableRow>
+              )}
+              {!loading && !deals.length && (
+                <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>No corporate deals yet</TableCell></TableRow>
+              )}
+              {deals.map((d) => <DealRow key={d.id} deal={d} onReload={load} />)}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={createOpen} onClose={() => !saving && setCreateOpen(false)} maxWidth="sm" fullWidth>
+      <MobileDialog open={createOpen} onClose={() => !saving && setCreateOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>New corporate deal</DialogTitle>
         <DialogContent>
-          <Autocomplete
-            options={parties}
-            getOptionLabel={(p) => p.name || ''}
-            value={form.party}
-            onChange={(e, val) => setForm({ ...form, party: val })}
-            renderInput={(params) => <TextField {...params} fullWidth margin="normal" label="Company (CRM party)" helperText="Must already exist in Parties — created automatically when Sales marks the deal won" />}
-          />
-          <Autocomplete
-            options={customerOptions}
-            getOptionLabel={(c) => c.company_name || c.full_name ? `${c.company_name || c.full_name} — ${c.email}` : c.email}
-            value={form.platformCustomer}
-            onInputChange={(e, val) => setCustomerSearch(val)}
-            onChange={(e, val) => setForm({ ...form, platformCustomer: val })}
-            renderInput={(params) => <TextField {...params} fullWidth margin="normal" label="Platform account" helperText="The ethertrack.in account this deal activates" />}
-          />
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <TextField margin="normal" type="number" label="Term (months)" sx={{ flex: 1 }}
-              value={form.termMonths} onChange={(e) => setForm({ ...form, termMonths: e.target.value })} />
-            <TextField select margin="normal" label="Billing frequency" sx={{ flex: 1 }}
-              value={form.billingFrequency} onChange={(e) => setForm({ ...form, billingFrequency: e.target.value })}>
-              <MenuItem value="one_time">One-time (single invoice)</MenuItem>
-              <MenuItem value="monthly">Monthly installments</MenuItem>
-              <MenuItem value="annual">Annual installments</MenuItem>
-            </TextField>
-          </Box>
-          <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', mb: 1 }}>
-            {numPeriodsPreview > 0 && `Will generate ${numPeriodsPreview} invoice${numPeriodsPreview !== 1 ? 's' : ''}${form.totalValueINR ? `, ₹${(Number(form.totalValueINR) * (1 - (Number(form.discountPercent) || 0) / 100) / numPeriodsPreview).toLocaleString('en-IN', { maximumFractionDigits: 0 })} each` : ''}.`}
-          </Typography>
-          {form.billingFrequency !== 'one_time' && (
-            <>
-              <TextField margin="normal" type="number" fullWidth label="Grace period after each due date (days)"
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <Autocomplete
+              options={parties}
+              getOptionLabel={(p) => p.name || ''}
+              value={form.party}
+              onChange={(e, val) => setForm({ ...form, party: val })}
+              renderInput={(params) => <MobileTextField {...params} fullWidth margin="normal" label="Company (CRM party)" helperText="Must already exist in Parties — created automatically when Sales marks the deal won" />}
+            />
+            <Autocomplete
+              options={customerOptions}
+              getOptionLabel={(c) => c.company_name || c.full_name ? `${c.company_name || c.full_name} — ${c.email}` : c.email}
+              value={form.platformCustomer}
+              onInputChange={(e, val) => setCustomerSearch(val)}
+              onChange={(e, val) => setForm({ ...form, platformCustomer: val })}
+              renderInput={(params) => <MobileTextField {...params} fullWidth margin="normal" label="Platform account" helperText="The ethertrack.in account this deal activates" />}
+            />
+            <MobileStack gap={1} direction="row" flexWrap="wrap">
+              <MobileTextField fullWidth type="number" label="Term (months)" value={form.termMonths} onChange={(e) => setForm({ ...form, termMonths: e.target.value })} />
+              <MobileTextField
+                fullWidth
+                select
+                label="Billing frequency"
+                value={form.billingFrequency}
+                onChange={(e) => setForm({ ...form, billingFrequency: e.target.value })}
+                options={[
+                  { value: 'one_time', label: 'One-time (single invoice)' },
+                  { value: 'monthly', label: 'Monthly installments' },
+                  { value: 'annual', label: 'Annual installments' },
+                ]}
+              />
+            </MobileStack>
+            <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', mb: 1 }}>
+              {numPeriodsPreview > 0 && `Will generate ${numPeriodsPreview} invoice${numPeriodsPreview !== 1 ? 's' : ''}${form.totalValueINR ? `, ₹${(Number(form.totalValueINR) * (1 - (Number(form.discountPercent) || 0) / 100) / numPeriodsPreview).toLocaleString('en-IN', { maximumFractionDigits: 0 })} each` : ''}.`}
+            </Typography>
+            {form.billingFrequency !== 'one_time' && (
+              <MobileTextField fullWidth type="number" label="Grace period after each due date (days)"
                 helperText="Access auto-suspends to Free if a payment isn't recorded within this many days of the installment's due date."
                 value={form.graceDays} onChange={(e) => setForm({ ...form, graceDays: e.target.value })} />
-            </>
-          )}
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <TextField margin="normal" type="number" label="Total value for the term (₹, before discount)" sx={{ flex: 1 }}
-              value={form.totalValueINR} onChange={(e) => setForm({ ...form, totalValueINR: e.target.value })} />
-            <TextField margin="normal" type="number" label="Discount %" sx={{ flex: 1 }}
-              value={form.discountPercent} onChange={(e) => setForm({ ...form, discountPercent: e.target.value })} />
-          </Box>
-          <TextField margin="normal" type="number" fullWidth label="Seats (blank = unlimited)"
-            value={form.seats} onChange={(e) => setForm({ ...form, seats: e.target.value })} />
-          <TextField margin="normal" fullWidth multiline rows={2} label="Notes (deal terms, PO number, etc.)"
-            value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+            )}
+            <MobileStack gap={1} direction="row" flexWrap="wrap">
+              <MobileTextField fullWidth type="number" label="Total value for the term (₹, before discount)" value={form.totalValueINR} onChange={(e) => setForm({ ...form, totalValueINR: e.target.value })} />
+              <MobileTextField fullWidth type="number" label="Discount %" value={form.discountPercent} onChange={(e) => setForm({ ...form, discountPercent: e.target.value })} />
+            </MobileStack>
+            <MobileTextField fullWidth type="number" label="Seats (blank = unlimited)" value={form.seats} onChange={(e) => setForm({ ...form, seats: e.target.value })} />
+            <MobileTextField fullWidth label="Notes (deal terms, PO number, etc.)" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          </MobileFormGrid>
           {formError && <Alert severity="error" sx={{ mt: 1 }}>{formError}</Alert>}
           {formWarning && <Alert severity="warning" sx={{ mt: 1 }}>{formWarning}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateOpen(false)} disabled={saving}>{formWarning ? 'Close' : 'Cancel'}</Button>
-          {!formWarning && <Button variant="contained" onClick={handleCreate} disabled={saving}>{saving ? 'Creating…' : 'Create deal'}</Button>}
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setCreateOpen(false)} disabled={saving}>{formWarning ? 'Close' : 'Cancel'}</MobileButton>
+          {!formWarning && <MobileButton variant="contained" onClick={handleCreate} disabled={saving}>{saving ? 'Creating…' : 'Create deal'}</MobileButton>}
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

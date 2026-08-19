@@ -11,6 +11,18 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import StarIcon from '@mui/icons-material/Star';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const CAP_OPTIONS = ['✅', '❌', '⚠️', 'N'];
 const REGION_LABEL = { india: '🇮🇳 India', global: '🌍 Global' };
@@ -97,12 +109,13 @@ function Section({ title, children }) {
       <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em', mb: 1.5 }}>
         {title}
       </Typography>
-      <Grid container spacing={2}>{children}</Grid>
+      <MobileFormGrid>{children}</MobileFormGrid>
     </Box>
   );
 }
 
 export default function MarketingCompetitors() {
+  const isMobile = useMobile();
   const { staff } = useAuth();
   const [isMarketingHead, setIsMarketingHead] = useState(false);
   // Per request: add/edit/delete allowed for admin, Marketing HOD, and founder (owner) only.
@@ -172,50 +185,70 @@ export default function MarketingCompetitors() {
   };
 
   const capField = (label, key) => (
-    <Grid item xs={6} sm={4} md={3}>
-      <TextField fullWidth select size="small" label={label} value={form[key] || ''} onChange={set(key)}>
-        <MenuItem value="">—</MenuItem>
-        {CAP_OPTIONS.map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
-      </TextField>
-    </Grid>
+    <MobileTextField
+      fullWidth
+      select
+      size="small"
+      label={label}
+      value={form[key] || ''}
+      onChange={set(key)}
+      options={[{ value: '', label: '—' }, ...CAP_OPTIONS.map((o) => ({ value: o, label: o }))]}
+    >
+    </MobileTextField>
   );
+
   const textField = (label, key, opts = {}) => (
-    <Grid item xs={12} sm={opts.full ? 12 : 6}>
-      <TextField fullWidth size="small" label={label} value={form[key] || ''} onChange={set(key)} multiline={opts.multiline} rows={opts.multiline ? 2 : undefined} />
-    </Grid>
+    <MobileTextField
+      fullWidth
+      size="small"
+      label={label}
+      value={form[key] || ''}
+      onChange={set(key)}
+      multiline={opts.multiline}
+      rows={opts.multiline ? 2 : undefined}
+    >
+    </MobileTextField>
   );
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">Competitors</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>Competitors</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Full competitive intelligence — company overview, product capability, carbon market, commercial, strategic, and customer proof.
           </Typography>
         </Box>
-        {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add competitor</Button>}
-      </Box>
+        {canEdit && <MobileButton variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add competitor</MobileButton>}
+      </MobilePageHeader>
 
-      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 3, flexWrap: 'wrap' }}>
-        <TextField select size="small" label="Filter region" value={regionFilter} onChange={(e) => setRegionFilter(e.target.value)} sx={{ minWidth: 200 }}>
-          <MenuItem value="">All regions</MenuItem>
-          <MenuItem value="india">🇮🇳 India</MenuItem>
-          <MenuItem value="global">🌍 Global</MenuItem>
-        </TextField>
+      <MobileStack gap={2} direction="row" sx={{ mb: 3, flexWrap: 'wrap' }}>
+        <MobileTextField
+          select
+          size="small"
+          label="Filter region"
+          value={regionFilter}
+          onChange={(e) => setRegionFilter(e.target.value)}
+          options={[
+            { value: '', label: 'All regions' },
+            { value: 'india', label: '🇮🇳 India' },
+            { value: 'global', label: '🌍 Global' },
+          ]}
+        />
         <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>
           {loading ? 'Loading…' : `${competitors.length} compan${competitors.length === 1 ? 'y' : 'ies'} tracked`}
         </Typography>
-      </Box>
+      </MobileStack>
 
-      <Tabs
-        value={viewTab} onChange={(e, v) => setViewTab(v)} variant="scrollable" scrollButtons="auto"
-        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider', '& .MuiTab-root': { fontSize: '0.85rem', fontWeight: 600, px: 3, py: 1.5 } }}
-      >
-        {VIEW_SECTIONS.map((s) => <Tab key={s.label} label={s.label} />)}
-      </Tabs>
+      <MobilePaper sx={{ mb: 2 }}>
+        <Tabs value={viewTab} onChange={(e, v) => setViewTab(v)} variant="scrollable" scrollButtons="auto"
+          sx={{ mb: 2, borderBottom: 1, borderColor: 'divider', '& .MuiTab-root': { fontSize: isMobile ? '0.75rem' : '0.85rem', fontWeight: 600, px: 3, py: 1.5 } }}
+        >
+          {VIEW_SECTIONS.map((s) => <Tab key={s.label} label={s.label} />)}
+        </Tabs>
+      </MobilePaper>
 
-      <Paper
+      <MobilePaper
         variant="outlined"
         sx={{
           width: '100%', overflowX: 'auto', borderRadius: 2,
@@ -266,7 +299,7 @@ export default function MarketingCompetitors() {
                 >
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
                     {c.is_featured && <StarIcon sx={{ fontSize: 16, color: 'warning.main' }} />}
-                    <Typography sx={{ fontWeight: 600, fontSize: '0.85rem' }}>{c.company_name}</Typography>
+                    <Typography sx={{ fontWeight: 600, fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{c.company_name}</Typography>
                   </Box>
                   <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', mt: 0.25 }}>{REGION_LABEL[c.region]}</Typography>
                 </TableCell>
@@ -292,7 +325,7 @@ export default function MarketingCompetitors() {
                   </TableCell>
                 ))}
                 <TableCell align="right" sx={{ py: 1.75, px: 2.5, whiteSpace: 'nowrap' }}>
-                  <Button size="small" onClick={() => openEdit(c)}>{canEdit ? 'Edit' : 'View'}</Button>
+                  <MobileButton size="small" onClick={() => openEdit(c)}>{canEdit ? 'Edit' : 'View'}</MobileButton>
                   {canEdit && (
                     <Tooltip title="Delete">
                       <IconButton size="small" color="error" onClick={() => handleDelete(c)}><DeleteIcon sx={{ fontSize: 16 }} /></IconButton>
@@ -317,31 +350,58 @@ export default function MarketingCompetitors() {
             )}
           </TableBody>
         </Table>
-      </Paper>
+      </MobilePaper>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="md" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>{editingId ? (canEdit ? 'Edit' : 'View') : 'Add'} competitor</DialogTitle>
         <DialogContent>
-          <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
-            <TextField fullWidth label="Company name" size="small" margin="normal" value={form.company_name} onChange={set('company_name')} disabled={!canEdit} />
-            <TextField fullWidth select label="Region" size="small" margin="normal" value={form.region} onChange={set('region')} disabled={!canEdit} sx={{ minWidth: 160 }}>
-              <MenuItem value="india">🇮🇳 India</MenuItem>
-              <MenuItem value="global">🌍 Global</MenuItem>
-            </TextField>
-            <TextField fullWidth select label="Featured" size="small" margin="normal" value={form.is_featured ? 'yes' : 'no'} onChange={(e) => setForm({ ...form, is_featured: e.target.value === 'yes' })} disabled={!canEdit} sx={{ minWidth: 130 }}>
-              <MenuItem value="no">No</MenuItem>
-              <MenuItem value="yes">⭐ Yes</MenuItem>
-            </TextField>
-          </Box>
+          <MobileStack gap={2} direction="row" sx={{ mb: 1 }}>
+            <MobileTextField
+              fullWidth
+              label="Company name"
+              size="small"
+              margin="normal"
+              value={form.company_name}
+              onChange={set('company_name')}
+              disabled={!canEdit}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Region"
+              size="small"
+              margin="normal"
+              value={form.region}
+              onChange={set('region')}
+              disabled={!canEdit}
+              options={[
+                { value: 'india', label: '🇮🇳 India' },
+                { value: 'global', label: '🌍 Global' },
+              ]}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Featured"
+              size="small"
+              margin="normal"
+              value={form.is_featured ? 'yes' : 'no'}
+              onChange={(e) => setForm({ ...form, is_featured: e.target.value === 'yes' })}
+              disabled={!canEdit}
+              options={[
+                { value: 'no', label: 'No' },
+                { value: 'yes', label: '⭐ Yes' },
+              ]}
+            />
+          </MobileStack>
 
-          <Tabs value={tab} onChange={(e, v) => setTab(v)} variant="scrollable" scrollButtons="auto" sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
-            <Tab label="Overview" />
-            <Tab label="Product Capability" />
-            <Tab label="Carbon Market" />
-            <Tab label="Commercial" />
-            <Tab label="Strategic" />
-            <Tab label="Customer Proof" />
-          </Tabs>
+          <MobilePaper sx={{ mb: 2 }}>
+            <Tabs value={tab} onChange={(e, v) => setTab(v)} variant="scrollable" scrollButtons="auto"
+              sx={{ mb: 2, borderBottom: 1, borderColor: 'divider', '& .MuiTab-root': { fontSize: isMobile ? '0.75rem' : '0.85rem', fontWeight: 600, px: 3, py: 1.5 } }}
+            >
+              {VIEW_SECTIONS.map((s) => <Tab key={s.label} label={s.label} />)}
+            </Tabs>
+          </MobilePaper>
 
           <fieldset disabled={!canEdit} style={{ border: 'none', padding: 0, margin: 0 }}>
             {tab === 0 && (
@@ -355,9 +415,15 @@ export default function MarketingCompetitors() {
                 {textField('CEO / Founders', 'ceo_founders', { full: true })}
                 {textField('Source', 'overview_source', { multiline: true, full: true })}
                 {textField('Website', 'website')}
-                <Grid item xs={12} sm={6}>
-                  <TextField fullWidth size="small" type="date" label="Last reviewed" InputLabelProps={{ shrink: true }} value={form.last_reviewed_date} onChange={set('last_reviewed_date')} />
-                </Grid>
+                <MobileTextField
+                  fullWidth
+                  size="small"
+                  type="date"
+                  label="Last reviewed"
+                  InputLabelProps={{ shrink: true }}
+                  value={form.last_reviewed_date}
+                  onChange={set('last_reviewed_date')}
+                />
               </Section>
             )}
 
@@ -430,20 +496,20 @@ export default function MarketingCompetitors() {
             )}
 
             <Divider sx={{ my: 2 }} />
-            <TextField fullWidth label="General notes" multiline rows={2} size="small" value={form.notes || ''} onChange={set('notes')} />
+            <MobileTextField fullWidth label="General notes" multiline rows={2} size="small" value={form.notes || ''} onChange={set('notes')} />
           </fieldset>
 
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>{canEdit ? 'Cancel' : 'Close'}</Button>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>{canEdit ? 'Cancel' : 'Close'}</MobileButton>
           {canEdit && (
-            <Button variant="contained" onClick={handleSave} disabled={saving || !form.company_name}>
+            <MobileButton variant="contained" onClick={handleSave} disabled={saving || !form.company_name}>
               {saving ? 'Saving…' : 'Save'}
-            </Button>
+            </MobileButton>
           )}
-        </DialogActions>
-      </Dialog>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

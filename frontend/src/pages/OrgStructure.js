@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Box, Typography, Paper, Grid, Chip, Button, IconButton, Dialog, DialogTitle,
+  Box, Typography, Paper, Grid, Chip, IconButton, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, MenuItem, Alert, Collapse, Divider,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
@@ -11,32 +11,42 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileDialog,
+  MobileStack,
+  MobileCardGrid,
+  MobileButton,
+  MobileTextField,
+  useMobile,
+} from '../components/MobileResponsive';
 
-// Founder (owner) sits above CEO (admin) in the chart; HR is shown as its
-// own tier since HR logins aren't part of the department chain.
 const ROLE_LABELS = { owner: 'Founder (MD)', admin: 'CEO' };
 const roleLabel = (role) => ROLE_LABELS[role] || (role?.charAt(0).toUpperCase() + role?.slice(1));
 
-function TierRow({ title, people, color = 'primary.main' }) {
+function TierRow({ title, people, color = 'primary.main', isMobile }) {
   if (!people.length) return null;
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
-      <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 1 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: isMobile ? 2 : 3 }}>
+      <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 1 }}>
         {title}
       </Typography>
-      <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', justifyContent: 'center' }}>
+      <MobileStack gap={isMobile ? 1 : 1.5}>
         {people.map((p) => (
-          <Paper key={p.id} sx={{ px: 2, py: 1, borderLeft: '3px solid', borderColor: color, minWidth: 160 }}>
-            <Typography sx={{ fontSize: '0.85rem', fontWeight: 600 }}>{p.employee_name || p.email}</Typography>
-            <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>{p.email}</Typography>
-          </Paper>
+          <MobilePaper key={p.id} sx={{ px: isMobile ? 1.5 : 2, py: isMobile ? 1 : 1, borderLeft: '3px solid', borderColor: color, minWidth: isMobile ? 'auto' : 160, width: isMobile ? '100%' : 'auto' }}>
+            <Typography sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem', fontWeight: 600 }}>{p.employee_name || p.email}</Typography>
+            <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: 'text.secondary' }}>{p.email}</Typography>
+          </MobilePaper>
         ))}
-      </Box>
+      </MobileStack>
     </Box>
   );
 }
 
-function TeamRow({ team, canEdit, onEdit, onDelete }) {
+function TeamRow({ team, canEdit, onEdit, onDelete, isMobile }) {
   const [expanded, setExpanded] = useState(false);
   const [members, setMembers] = useState(null);
 
@@ -50,14 +60,14 @@ function TeamRow({ team, canEdit, onEdit, onDelete }) {
 
   return (
     <Box sx={{ borderTop: '1px solid', borderColor: 'divider', pt: 1, mt: 1 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
         <Box>
-          <Typography sx={{ fontSize: '0.82rem', fontWeight: 600 }}>{team.name}</Typography>
-          <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>
+          <Typography sx={{ fontSize: isMobile ? '0.75rem' : '0.82rem', fontWeight: 600 }}>{team.name}</Typography>
+          <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: 'text.secondary' }}>
             Team head: {team.head_name || 'Unassigned'} · {team.employee_count} employee{team.employee_count === 1 ? '' : 's'}
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {canEdit && (
             <>
               <IconButton size="small" onClick={() => onEdit(team)}><EditIcon fontSize="inherit" /></IconButton>
@@ -70,21 +80,21 @@ function TeamRow({ team, canEdit, onEdit, onDelete }) {
         </Box>
       </Box>
       <Collapse in={expanded}>
-        <Box sx={{ mt: 1, pl: 1 }}>
+        <Box sx={{ mt: 1, pl: isMobile ? 0.5 : 1 }}>
           {members?.map((m) => (
-            <Box key={m.id} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.4 }}>
-              <Typography sx={{ fontSize: '0.78rem' }}>{m.full_name}</Typography>
-              <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>{m.designation || '—'}</Typography>
+            <Box key={m.id} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.4, flexWrap: 'wrap', gap: 1 }}>
+              <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.78rem' }}>{m.full_name}</Typography>
+              <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: 'text.secondary' }}>{m.designation || '—'}</Typography>
             </Box>
           ))}
-          {members?.length === 0 && <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>No employees on this team yet.</Typography>}
+          {members?.length === 0 && <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.78rem', color: 'text.secondary' }}>No employees on this team yet.</Typography>}
         </Box>
       </Collapse>
     </Box>
   );
 }
 
-function DepartmentCard({ dept, teams, canEdit, onEditDept, onDeleteDept, onAddTeam, onEditTeam, onDeleteTeam }) {
+function DepartmentCard({ dept, teams, canEdit, onEditDept, onDeleteDept, onAddTeam, onEditTeam, onDeleteTeam, isMobile }) {
   const [expanded, setExpanded] = useState(false);
   const [members, setMembers] = useState(null);
 
@@ -97,50 +107,50 @@ function DepartmentCard({ dept, teams, canEdit, onEditDept, onDeleteDept, onAddT
   };
 
   return (
-    <Paper sx={{ p: 2.5, minWidth: 280, flex: '1 1 280px' }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+    <MobilePaper sx={{ minWidth: isMobile ? '100%' : 280, flex: isMobile ? '0 0 100%' : '1 1 280px' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 1 }}>
         <Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography sx={{ fontWeight: 600 }}>{dept.name}</Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            <Typography sx={{ fontWeight: 600, fontSize: isMobile ? '0.85rem' : '1rem' }}>{dept.name}</Typography>
             {dept.status !== 'active' && <Chip size="small" label={dept.status} variant="outlined" />}
           </Box>
-          <Box sx={{ display: 'flex', gap: 0.75, mt: 0.5, mb: 0.5 }}>
-            {dept.code && <Chip size="small" label={dept.code} className="figure" sx={{ fontSize: '0.7rem' }} />}
-            {dept.cost_center && <Chip size="small" label={`CC: ${dept.cost_center}`} variant="outlined" sx={{ fontSize: '0.7rem' }} />}
+          <Box sx={{ display: 'flex', gap: 0.75, mt: 0.5, mb: 0.5, flexWrap: 'wrap' }}>
+            {dept.code && <Chip size="small" label={dept.code} className="figure" sx={{ fontSize: isMobile ? '0.65rem' : '0.7rem' }} />}
+            {dept.cost_center && <Chip size="small" label={`CC: ${dept.cost_center}`} variant="outlined" sx={{ fontSize: isMobile ? '0.65rem' : '0.7rem' }} />}
           </Box>
-          {dept.description && <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', mb: 0.5 }}>{dept.description}</Typography>}
+          {dept.description && <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.75rem', color: 'text.secondary', mb: 0.5 }}>{dept.description}</Typography>}
         </Box>
         {canEdit && (
-          <Box>
+          <Box sx={{ display: 'flex', gap: 0.5 }}>
             <IconButton size="small" onClick={() => onEditDept(dept)}><EditIcon fontSize="small" /></IconButton>
             <IconButton size="small" onClick={() => onDeleteDept(dept)}><DeleteOutlineIcon fontSize="small" /></IconButton>
           </Box>
         )}
       </Box>
 
-      <Box sx={{ mt: 1.5, mb: 1 }}>
-        <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>Department Head</Typography>
-        <Typography sx={{ fontSize: '0.85rem' }}>{dept.head_name || 'Unassigned'}</Typography>
+      <Box sx={{ mt: isMobile ? 1 : 1.5, mb: 1 }}>
+        <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: 'text.secondary' }}>Department Head</Typography>
+        <Typography sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{dept.head_name || 'Unassigned'}</Typography>
       </Box>
 
       {(dept.location || dept.budget) && (
-        <Box sx={{ display: 'flex', gap: 3, mb: 1 }}>
+        <Box sx={{ display: 'flex', gap: isMobile ? 2 : 3, mb: 1, flexWrap: 'wrap' }}>
           {dept.location && (
             <Box>
-              <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>Location</Typography>
-              <Typography sx={{ fontSize: '0.8rem' }}>{dept.location}</Typography>
+              <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: 'text.secondary' }}>Location</Typography>
+              <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem' }}>{dept.location}</Typography>
             </Box>
           )}
           {dept.budget && (
             <Box>
-              <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>Budget</Typography>
-              <Typography sx={{ fontSize: '0.8rem' }} className="figure">₹{Number(dept.budget).toLocaleString('en-IN')}</Typography>
+              <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: 'text.secondary' }}>Budget</Typography>
+              <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem' }} className="figure">₹{Number(dept.budget).toLocaleString('en-IN')}</Typography>
             </Box>
           )}
         </Box>
       )}
 
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1.5 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: isMobile ? 1 : 1.5, flexWrap: 'wrap', gap: 1 }}>
         <Chip size="small" label={`${dept.employee_count} employee${dept.employee_count === 1 ? '' : 's'}`} variant="outlined" />
         <IconButton size="small" onClick={toggle}>
           {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
@@ -148,36 +158,37 @@ function DepartmentCard({ dept, teams, canEdit, onEditDept, onDeleteDept, onAddT
       </Box>
 
       <Collapse in={expanded}>
-        <Box sx={{ mt: 1.5, borderTop: '1px solid', borderColor: 'divider', pt: 1.5 }}>
-          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', mb: 0.5 }}>Employees in this department</Typography>
+        <Box sx={{ mt: isMobile ? 1 : 1.5, borderTop: '1px solid', borderColor: 'divider', pt: isMobile ? 1 : 1.5 }}>
+          <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.75rem', color: 'text.secondary', mb: 0.5 }}>Employees in this department</Typography>
           {members?.map((m) => (
-            <Box key={m.id} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5 }}>
-              <Typography sx={{ fontSize: '0.8rem' }}>{m.full_name}</Typography>
-              <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{m.designation || '—'}</Typography>
+            <Box key={m.id} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, flexWrap: 'wrap', gap: 1 }}>
+              <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem' }}>{m.full_name}</Typography>
+              <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>{m.designation || '—'}</Typography>
             </Box>
           ))}
-          {members?.length === 0 && <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>No employees assigned yet.</Typography>}
-        </Box>
+          {members?.length === 0 && <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem', color: 'text.secondary' }}>No employees assigned yet.</Typography>}
 
-        <Divider sx={{ mt: 1.5 }} />
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1.5, mb: 0.5 }}>
-          <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Teams
-          </Typography>
-          {canEdit && (
-            <IconButton size="small" onClick={() => onAddTeam(dept)}><GroupAddIcon fontSize="inherit" /></IconButton>
-          )}
+          <Divider sx={{ mt: 1.5 }} />
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1.5, mb: 0.5, flexWrap: 'wrap', gap: 1 }}>
+            <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.75rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Teams
+            </Typography>
+            {canEdit && (
+              <IconButton size="small" onClick={() => onAddTeam(dept)}><GroupAddIcon fontSize="inherit" /></IconButton>
+            )}
+          </Box>
+          {teams.map((t) => (
+            <TeamRow key={t.id} team={t} canEdit={canEdit} onEdit={onEditTeam} onDelete={onDeleteTeam} isMobile={isMobile} />
+          ))}
+          {!teams.length && <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.78rem', color: 'text.secondary' }}>No teams in this department yet.</Typography>}
         </Box>
-        {teams.map((t) => (
-          <TeamRow key={t.id} team={t} canEdit={canEdit} onEdit={onEditTeam} onDelete={onDeleteTeam} />
-        ))}
-        {!teams.length && <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>No teams in this department yet.</Typography>}
       </Collapse>
-    </Paper>
+    </MobilePaper>
   );
 }
 
 export default function OrgStructure() {
+  const isMobile = useMobile();
   const { staff: me } = useAuth();
   const canEdit = ['owner', 'admin'].includes(me?.role);
 
@@ -217,7 +228,6 @@ export default function OrgStructure() {
 
   const teamsForDept = (deptId) => teams.filter((t) => t.department_id === deptId);
 
-  // ── department dialog ──────────────────────────────────────────────────
   const openNewDept = () => {
     setDeptForm({ id: null, name: '', description: '', head_employee_id: '', granted_roles: [], code: '', cost_center: '', location: '', budget: '', status: 'active', parent_department_id: '' });
     setError('');
@@ -274,7 +284,6 @@ export default function OrgStructure() {
     }
   };
 
-  // ── team dialog ─────────────────────────────────────────────────────────
   const openNewTeam = (dept) => {
     setTeamForm({ id: null, name: '', department_id: dept.id, team_head_id: '' });
     setTeamError('');
@@ -323,146 +332,148 @@ export default function OrgStructure() {
     }
   };
 
-  // Candidate employees for a team head — anyone in the team's department
-  // (or anyone at all if the department isn't picked yet).
   const teamHeadCandidates = teamForm.department_id
     ? employees.filter((e) => e.department_id === teamForm.department_id)
     : employees;
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">Org Structure</Typography>
-        {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openNewDept}>Add department</Button>}
-      </Box>
+      <MobilePageHeader>
+        <Typography variant={isMobile ? 'h6' : 'h5'}>Org Structure</Typography>
+        {canEdit && <MobileButton variant="contained" size="small" startIcon={<AddIcon />} onClick={openNewDept}>Add department</MobileButton>}
+      </MobilePageHeader>
 
       {message && <Alert severity={message.severity} sx={{ mb: 3 }}>{message.text}</Alert>}
 
       {/* Founder → CEO → HR — the top of the chart, above any department */}
-      <Paper sx={{ p: 4, mb: 4 }}>
-        <TierRow title={roleLabel('owner')} people={staffByRole.owner} color="primary.main" />
-        <TierRow title={roleLabel('admin')} people={staffByRole.admin} color="secondary.main" />
-        <TierRow title="HR" people={staffByRole.hr} color="info.main" />
+      <MobilePaper sx={{ mb: isMobile ? 2 : 4 }}>
+        <TierRow title={roleLabel('owner')} people={staffByRole.owner} color="primary.main" isMobile={isMobile} />
+        <TierRow title={roleLabel('admin')} people={staffByRole.admin} color="secondary.main" isMobile={isMobile} />
+        <TierRow title="HR" people={staffByRole.hr} color="info.main" isMobile={isMobile} />
 
         {(staffByRole.owner.length + staffByRole.admin.length + staffByRole.hr.length === 0) && (
-          <Typography sx={{ textAlign: 'center', color: 'text.secondary', fontSize: '0.85rem' }}>
+          <Typography sx={{ textAlign: 'center', color: 'text.secondary', fontSize: isMobile ? '0.75rem' : '0.85rem' }}>
             No Founder/CEO/HR logins found yet.
           </Typography>
         )}
-      </Paper>
+      </MobilePaper>
 
-      {/* Departments, each with a head, and — expanded — its teams with team
-          heads, and employees below that. */}
-      <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 1.5, textAlign: 'center' }}>
+      {/* Departments, each with a head, and — expanded — its teams with team heads, and employees below that. */}
+      <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 1.5, textAlign: 'center' }}>
         Departments
       </Typography>
-      <Box sx={{ display: 'flex', gap: 2.5, flexWrap: 'wrap' }}>
+      <MobileCardGrid sx={{ gap: isMobile ? 1.5 : 2.5 }}>
         {departments.map((d) => (
           <DepartmentCard
             key={d.id} dept={d} teams={teamsForDept(d.id)} canEdit={canEdit}
             onEditDept={openEditDept} onDeleteDept={deleteDept}
             onAddTeam={openNewTeam} onEditTeam={openEditTeam} onDeleteTeam={deleteTeam}
+            isMobile={isMobile}
           />
         ))}
         {!departments.length && (
-          <Typography sx={{ color: 'text.secondary', fontSize: '0.85rem', width: '100%', textAlign: 'center', py: 4 }}>
-            No departments yet.{canEdit ? ' Click "Add department" to create your first one.' : ''}
-          </Typography>
+          <MobilePaper sx={{ width: '100%' }}>
+            <Typography sx={{ color: 'text.secondary', fontSize: isMobile ? '0.75rem' : '0.85rem', width: '100%', textAlign: 'center', py: 4 }}>
+              No departments yet.{canEdit ? ' Click "Add department" to create your first one.' : ''}
+            </Typography>
+          </MobilePaper>
         )}
-      </Box>
+      </MobileCardGrid>
 
       {/* ── department dialog ──────────────────────────────────────────── */}
-      <Dialog open={deptDialogOpen} onClose={() => setDeptDialogOpen(false)} maxWidth="sm" fullWidth>
+      <MobileDialog open={deptDialogOpen} onClose={() => setDeptDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>{deptForm.id ? 'Edit department' : 'New department'}</DialogTitle>
         <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 0.5 }}>
-            <Grid item xs={12} sm={7}>
-              <TextField fullWidth label="Name" value={deptForm.name} onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })} />
-            </Grid>
-            <Grid item xs={6} sm={5}>
-              <TextField fullWidth label="Code" value={deptForm.code} onChange={(e) => setDeptForm({ ...deptForm, code: e.target.value.toUpperCase() })} helperText="e.g. ENGTECH" />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField fullWidth label="Description" multiline rows={2} value={deptForm.description} onChange={(e) => setDeptForm({ ...deptForm, description: e.target.value })} />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField fullWidth select label="Department head" value={deptForm.head_employee_id} onChange={(e) => setDeptForm({ ...deptForm, head_employee_id: e.target.value })}>
-                <MenuItem value="">Unassigned</MenuItem>
-                {employees.map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
-              </TextField>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField fullWidth select label="Parent department" value={deptForm.parent_department_id} onChange={(e) => setDeptForm({ ...deptForm, parent_department_id: e.target.value })} helperText="Optional — for a sub-team under another department">
-                <MenuItem value="">None (top-level)</MenuItem>
-                {departments.filter((d) => d.id !== deptForm.id).map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
-              </TextField>
-            </Grid>
-            <Grid item xs={6} sm={4}>
-              <TextField fullWidth label="Cost center" value={deptForm.cost_center} onChange={(e) => setDeptForm({ ...deptForm, cost_center: e.target.value.toUpperCase() })} helperText="e.g. ENG" />
-            </Grid>
-            <Grid item xs={6} sm={4}>
-              <TextField fullWidth label="Location" value={deptForm.location} onChange={(e) => setDeptForm({ ...deptForm, location: e.target.value })} />
-            </Grid>
-            <Grid item xs={6} sm={4}>
-              <TextField fullWidth select label="Status" value={deptForm.status} onChange={(e) => setDeptForm({ ...deptForm, status: e.target.value })}>
-                {['active', 'inactive', 'planned'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-              </TextField>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField fullWidth type="number" label="Annual budget (₹)" value={deptForm.budget} onChange={(e) => setDeptForm({ ...deptForm, budget: e.target.value })} />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth select label="Grants access to" value={deptForm.granted_roles}
-                SelectProps={{ multiple: true }}
-                onChange={(e) => setDeptForm({ ...deptForm, granted_roles: typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value })}
-                helperText="Every employee in this department gets these modules automatically — same as if their login had that role, without changing their actual role."
-              >
-                <MenuItem value="finance">Finance (Sales, Accounting, Invoices, Payroll expenses, Finance)</MenuItem>
-                <MenuItem value="accounting_hod">Accounting — HOD tier (Accounting module only, no Sales/Finance)</MenuItem>
-                <MenuItem value="hr">HR (People, Attendance, Org Structure, leave approvals for this dept)</MenuItem>
-                <MenuItem value="legal_hod">Legal — HOD tier (Registrations, Compliance)</MenuItem>
-                <MenuItem value="compliance_hod">Compliance — HOD tier (Registrations, Compliance)</MenuItem>
-                <MenuItem value="marketing_hod">Marketing — HOD tier (Socials, Campaigns, Content, Leads, etc.)</MenuItem>
-                <MenuItem value="sales_hod">Sales — HOD tier (CRM, Sales, Invoices, Partner Firms, Follow-ups)</MenuItem>
-                <MenuItem value="product_hod">Product — HOD tier (Roadmap, Releases, Feedback, Beta Users)</MenuItem>
-              </TextField>
-            </Grid>
-          </Grid>
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField fullWidth label="Name" value={deptForm.name} onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })} />
+            <MobileTextField fullWidth label="Code" value={deptForm.code} onChange={(e) => setDeptForm({ ...deptForm, code: e.target.value.toUpperCase() })} helperText="e.g. ENGTECH" />
+            <MobileTextField fullWidth label="Description" multiline rows={2} value={deptForm.description} onChange={(e) => setDeptForm({ ...deptForm, description: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Department head"
+              value={deptForm.head_employee_id}
+              onChange={(e) => setDeptForm({ ...deptForm, head_employee_id: e.target.value })}
+              options={[{ value: '', label: 'Unassigned' }, ...employees.map((e) => ({ value: e.id, label: e.full_name }))]}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Parent department"
+              value={deptForm.parent_department_id}
+              onChange={(e) => setDeptForm({ ...deptForm, parent_department_id: e.target.value })}
+              helperText="Optional — for a sub-team under another department"
+              options={[{ value: '', label: 'None (top-level)' }, ...departments.filter((d) => d.id !== deptForm.id).map((d) => ({ value: d.id, label: d.name }))]}
+            />
+            <MobileTextField fullWidth label="Cost center" value={deptForm.cost_center} onChange={(e) => setDeptForm({ ...deptForm, cost_center: e.target.value.toUpperCase() })} helperText="e.g. ENG" />
+            <MobileTextField fullWidth label="Location" value={deptForm.location} onChange={(e) => setDeptForm({ ...deptForm, location: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Status"
+              value={deptForm.status}
+              onChange={(e) => setDeptForm({ ...deptForm, status: e.target.value })}
+              options={['active', 'inactive', 'planned'].map((s) => ({ value: s, label: s }))}
+            />
+            <MobileTextField fullWidth type="number" label="Annual budget (₹)" value={deptForm.budget} onChange={(e) => setDeptForm({ ...deptForm, budget: e.target.value })} />
+            <TextField
+              fullWidth select label="Grants access to" value={deptForm.granted_roles}
+              SelectProps={{ multiple: true }}
+              onChange={(e) => setDeptForm({ ...deptForm, granted_roles: typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value })}
+              helperText="Every employee in this department gets these modules automatically"
+            >
+              <MenuItem value="finance">Finance (Sales, Accounting, Invoices, Payroll expenses, Finance)</MenuItem>
+              <MenuItem value="accounting_hod">Accounting — HOD tier</MenuItem>
+              <MenuItem value="hr">HR (People, Attendance, Org Structure, leave approvals)</MenuItem>
+              <MenuItem value="legal_hod">Legal — HOD tier (Registrations, Compliance)</MenuItem>
+              <MenuItem value="compliance_hod">Compliance — HOD tier</MenuItem>
+              <MenuItem value="marketing_hod">Marketing — HOD tier</MenuItem>
+              <MenuItem value="sales_hod">Sales — HOD tier</MenuItem>
+              <MenuItem value="product_hod">Product — HOD tier</MenuItem>
+            </TextField>
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeptDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={saveDept} disabled={saving || !deptForm.name}>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setDeptDialogOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={saveDept} disabled={saving || !deptForm.name}>
             {saving ? 'Saving…' : 'Save'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
 
       {/* ── team dialog ────────────────────────────────────────────────── */}
-      <Dialog open={teamDialogOpen} onClose={() => setTeamDialogOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={teamDialogOpen} onClose={() => setTeamDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{teamForm.id ? 'Edit team' : 'New team'}</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="Team name" margin="normal" value={teamForm.name} onChange={(e) => setTeamForm({ ...teamForm, name: e.target.value })} />
-          <TextField
-            fullWidth select label="Department" margin="normal" value={teamForm.department_id}
-            onChange={(e) => setTeamForm({ ...teamForm, department_id: e.target.value, team_head_id: '' })}
-          >
-            {departments.map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth select label="Team head" margin="normal" value={teamForm.team_head_id} onChange={(e) => setTeamForm({ ...teamForm, team_head_id: e.target.value })}>
-            <MenuItem value="">Unassigned</MenuItem>
-            {teamHeadCandidates.map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
-          </TextField>
+          <MobileFormGrid>
+            <MobileTextField fullWidth label="Team name" value={teamForm.name} onChange={(e) => setTeamForm({ ...teamForm, name: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Department"
+              value={teamForm.department_id}
+              onChange={(e) => setTeamForm({ ...teamForm, department_id: e.target.value, team_head_id: '' })}
+              options={departments.map((d) => ({ value: d.id, label: d.name }))}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Team head"
+              value={teamForm.team_head_id}
+              onChange={(e) => setTeamForm({ ...teamForm, team_head_id: e.target.value })}
+              options={[{ value: '', label: 'Unassigned' }, ...teamHeadCandidates.map((e) => ({ value: e.id, label: e.full_name }))]}
+            />
+          </MobileFormGrid>
           {teamError && <Alert severity="error" sx={{ mt: 1 }}>{teamError}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setTeamDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={saveTeam} disabled={teamSaving || !teamForm.name || !teamForm.department_id}>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setTeamDialogOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={saveTeam} disabled={teamSaving || !teamForm.name || !teamForm.department_id}>
             {teamSaving ? 'Saving…' : 'Save'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

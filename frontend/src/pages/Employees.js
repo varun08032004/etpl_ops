@@ -20,6 +20,18 @@ import StatusChip from '../components/StatusChip';
 import Money from '../components/Money';
 import { useAuth } from '../context/AuthContext';
 import { Checkbox } from '@mui/material';
+import {
+  MobilePageHeader,
+  MobileButton,
+  MobilePaper,
+  MobileTextField,
+  MobileDialog,
+  MobileActionButtons,
+  MobileFormGrid,
+  MobileStack,
+  ResponsiveTableContainer,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const STEPS = ['Personal', 'Employment', 'Compensation', 'Documents'];
 const INDIAN_STATES = ['Maharashtra', 'Karnataka', 'Delhi', 'Tamil Nadu', 'Telangana', 'Gujarat', 'Uttar Pradesh', 'West Bengal', 'Other'];
@@ -59,11 +71,8 @@ function EmployeeList() {
   const [quickTeamOpen, setQuickTeamOpen] = useState(false);
   const [quickTeamName, setQuickTeamName] = useState('');
   const [quickTeamSaving, setQuickTeamSaving] = useState(false);
-  // Off by default — exited employees have real payroll/leave history that's
-  // never deleted, but there's no reason to clutter the day-to-day People
-  // list with people who no longer work here. Their record is one toggle
-  // away, not gone.
   const [showExited, setShowExited] = useState(false);
+  const isMobile = useMobile();
 
   const load = async (q, includeExited = showExited) => {
     const params = q ? { search: q } : {};
@@ -91,9 +100,6 @@ function EmployeeList() {
     setError('');
   };
 
-  // Department picked first → Team dropdown scopes to that department →
-  // Designation is a free-typed / existing-title field. Changing department
-  // clears whatever team was picked, since a team belongs to exactly one department.
   const handleDepartmentChange = (e) => {
     setForm({ ...form, department_id: e.target.value, team_id: '' });
   };
@@ -172,60 +178,65 @@ function EmployeeList() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">People</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { resetForm(); setOpen(true); }}>Add employee</Button>
-      </Box>
+      <MobilePageHeader>
+        <Typography variant={isMobile ? 'h6' : 'h5'}>People</Typography>
+        <MobileButton variant="contained" startIcon={<AddIcon />} onClick={() => { resetForm(); setOpen(true); }}>Add employee</MobileButton>
+      </MobilePageHeader>
 
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-        <TextField
-          placeholder="Search by name, code, or email" value={search} onChange={handleSearch}
-          size="small" sx={{ maxWidth: 360, flex: 1 }}
-          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
-        />
-        <FormControlLabel
-          control={<Switch size="small" checked={showExited} onChange={(e) => { setShowExited(e.target.checked); load(search, e.target.checked); }} />}
-          label={<Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>Show exited employees</Typography>}
-        />
-      </Box>
+      <MobilePaper sx={{ mb: 2 }}>
+        <MobileStack direction="column" gap={2} sx={{ mb: 2 }}>
+          <MobileTextField
+            placeholder="Search by name, code, or email"
+            value={search}
+            onChange={handleSearch}
+            InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+          />
+          <FormControlLabel
+            control={<Switch size="small" checked={showExited} onChange={(e) => { setShowExited(e.target.checked); load(search, e.target.checked); }} />}
+            label={<Typography sx={{ fontSize: '0.85rem', color: 'text.secondary' }}>Show exited employees</Typography>}
+          />
+        </MobileStack>
+      </MobilePaper>
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Employee</TableCell>
-              <TableCell>Code</TableCell>
-              <TableCell>Department</TableCell>
-              <TableCell>Team</TableCell>
-              <TableCell>Designation</TableCell>
-              <TableCell>Joined</TableCell>
-              <TableCell>Status</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {employees.map((e) => (
-              <TableRow key={e.id} component={Link} to={`/employees/${e.id}`}
-                sx={{ cursor: 'pointer', textDecoration: 'none', '&:hover': { bgcolor: 'rgba(255,255,255,0.02)' } }}>
-                <TableCell>
-                  <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{e.full_name}</Typography>
-                  <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{e.work_email}</Typography>
-                </TableCell>
-                <TableCell className="figure">{e.employee_code}</TableCell>
-                <TableCell>{e.department || '—'}</TableCell>
-                <TableCell>{e.team || '—'}</TableCell>
-                <TableCell>{e.designation || '—'}</TableCell>
-                <TableCell className="figure">{e.date_of_joining?.slice(0, 10)}</TableCell>
-                <TableCell><StatusChip status={e.status} /></TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Employee</TableCell>
+                <TableCell>Code</TableCell>
+                <TableCell>Department</TableCell>
+                <TableCell>Team</TableCell>
+                <TableCell>Designation</TableCell>
+                <TableCell>Joined</TableCell>
+                <TableCell>Status</TableCell>
               </TableRow>
-            ))}
-            {!employees.length && (
-              <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No employees yet.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {employees.map((e) => (
+                <TableRow key={e.id} component={Link} to={`/employees/${e.id}`}
+                  sx={{ cursor: 'pointer', textDecoration: 'none', '&:hover': { bgcolor: 'rgba(255,255,255,0.02)' } }}>
+                  <TableCell>
+                    <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{e.full_name}</Typography>
+                    <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{e.work_email}</Typography>
+                  </TableCell>
+                  <TableCell className="figure">{e.employee_code}</TableCell>
+                  <TableCell>{e.department || '—'}</TableCell>
+                  <TableCell>{e.team || '—'}</TableCell>
+                  <TableCell>{e.designation || '—'}</TableCell>
+                  <TableCell className="figure">{e.date_of_joining?.slice(0, 10)}</TableCell>
+                  <TableCell><StatusChip status={e.status} /></TableCell>
+                </TableRow>
+              ))}
+              {!employees.length && (
+                <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No employees yet.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Add employee</DialogTitle>
         <DialogContent>
           <Stepper activeStep={step} sx={{ mb: 3, mt: 1 }}>
@@ -233,167 +244,174 @@ function EmployeeList() {
           </Stepper>
 
           {step === 0 && (
-            <Grid container spacing={2}>
-              <Grid item xs={12}><TextField fullWidth label="Full name" value={form.full_name} onChange={set('full_name')} required /></Grid>
-              <Grid item xs={6}><TextField fullWidth label="Personal email" value={form.personal_email} onChange={set('personal_email')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth label="Work email" value={form.work_email} onChange={set('work_email')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth label="Phone" value={form.phone} onChange={set('phone')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth type="date" label="Date of birth" InputLabelProps={{ shrink: true }} value={form.date_of_birth} onChange={set('date_of_birth')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth label="City" value={form.city} onChange={set('city')} /></Grid>
-              <Grid item xs={6}>
-                <TextField fullWidth select label="State (for Professional Tax)" value={form.state} onChange={set('state')}>
-                  {INDIAN_STATES.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-                </TextField>
-              </Grid>
-              <Grid item xs={12}><TextField fullWidth label="PAN number" value={form.pan_number} onChange={set('pan_number')} /></Grid>
-            </Grid>
+            <MobileFormGrid>
+              <MobileTextField fullWidth label="Full name" value={form.full_name} onChange={set('full_name')} required />
+              <MobileTextField fullWidth label="Personal email" value={form.personal_email} onChange={set('personal_email')} />
+              <MobileTextField fullWidth label="Work email" value={form.work_email} onChange={set('work_email')} />
+              <MobileTextField fullWidth label="Phone" value={form.phone} onChange={set('phone')} />
+              <MobileTextField fullWidth type="date" label="Date of birth" InputLabelProps={{ shrink: true }} value={form.date_of_birth} onChange={set('date_of_birth')} />
+              <MobileTextField fullWidth label="City" value={form.city} onChange={set('city')} />
+              <MobileTextField
+                fullWidth
+                select
+                label="State (for Professional Tax)"
+                value={form.state}
+                onChange={set('state')}
+                options={INDIAN_STATES.map((s) => ({ value: s, label: s }))}
+              />
+              <MobileTextField fullWidth label="PAN number" value={form.pan_number} onChange={set('pan_number')} />
+            </MobileFormGrid>
           )}
 
           {step === 1 && (
-            <Grid container spacing={2}>
-              <Grid item xs={6}>
-                <TextField fullWidth type="date" label="Date of joining" InputLabelProps={{ shrink: true }}
-                  value={form.date_of_joining} onChange={set('date_of_joining')} required />
-              </Grid>
-              <Grid item xs={6}>
-                <TextField fullWidth select label="Employment type" value={form.employment_type} onChange={set('employment_type')}>
-                  {['full_time', 'part_time', 'contract', 'intern'].map((t) => <MenuItem key={t} value={t}>{t.replace('_', ' ')}</MenuItem>)}
-                </TextField>
-              </Grid>
-
-              {/* Ordering intentionally mirrors the org chart: Department first,
-                  then Team (scoped to that department), then Designation. */}
-              <Grid item xs={12}>
-                <TextField fullWidth select label="Department" value={form.department_id} onChange={handleDepartmentChange}>
-                  <MenuItem value="">Unassigned</MenuItem>
-                  {departments.map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
-                </TextField>
-              </Grid>
-              <Grid item xs={6}>
-                <TextField
-                  fullWidth select label="Team" value={form.team_id} onChange={set('team_id')}
-                  disabled={!form.department_id}
-                  helperText={!form.department_id ? 'Pick a department first' : (teamsInDepartment.find((t) => t.id === form.team_id)?.head_name ? `Team head: ${teamsInDepartment.find((t) => t.id === form.team_id).head_name}` : undefined)}
-                >
-                  <MenuItem value="">No team / department-level</MenuItem>
-                  {teamsInDepartment.map((t) => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
-                </TextField>
-              </Grid>
-
+            <MobileFormGrid>
+              <MobileTextField fullWidth type="date" label="Date of joining" InputLabelProps={{ shrink: true }} value={form.date_of_joining} onChange={set('date_of_joining')} required />
+              <MobileTextField
+                fullWidth
+                select
+                label="Employment type"
+                value={form.employment_type}
+                onChange={set('employment_type')}
+                options={['full_time', 'part_time', 'contract', 'intern'].map((t) => ({ value: t, label: t.replace('_', ' ') }))}
+              />
+              <MobileTextField
+                fullWidth
+                select
+                label="Department"
+                value={form.department_id}
+                onChange={handleDepartmentChange}
+                options={[{ value: '', label: 'Unassigned' }, ...departments.map((d) => ({ value: d.id, label: d.name }))]}
+              />
+              <MobileTextField
+                fullWidth
+                select
+                label="Team"
+                value={form.team_id}
+                onChange={set('team_id')}
+                disabled={!form.department_id}
+                options={[{ value: '', label: 'No team / department-level' }, ...teamsInDepartment.map((t) => ({ value: t.id, label: t.name }))]}
+              />
               {showNoTeamsPrompt && (
-                <Grid item xs={12}>
-                  <Alert severity="info" action={<Button size="small" onClick={() => setQuickTeamOpen(true)}>Create a team</Button>}>
+                <Box sx={{ gridColumn: '1 / -1' }}>
+                  <Alert severity="info" action={<MobileButton size="small" onClick={() => setQuickTeamOpen(true)}>Create a team</MobileButton>}>
                     {selectedDepartment?.name} has no teams yet. You can add {form.full_name || 'this employee'} directly
                     at the department level (leave Team blank), or create a team now.
                   </Alert>
-                </Grid>
+                </Box>
               )}
               {showNoModuleAccessHint && (
-                <Grid item xs={12}>
+                <Box sx={{ gridColumn: '1 / -1' }}>
                   <Alert severity="warning">
                     {selectedDepartment?.name} doesn't grant self-service access to any extra modules yet (Finance/HR/Legal
                     pages) — everyone in it currently only sees their own self-service portal. Set this once, for the
                     whole department, in <strong>Org Structure → Edit department → "Grants access to"</strong> — it'll
                     apply to every employee here automatically, including this one.
                   </Alert>
-                </Grid>
+                </Box>
               )}
-              <Grid item xs={6}>
-                <Autocomplete
-                  freeSolo
-                  options={designations.map((d) => d.title)}
-                  value={form.designation_title}
-                  onInputChange={(e, val) => setForm({ ...form, designation_title: val })}
-                  renderInput={(params) => <TextField {...params} fullWidth label="Designation" helperText="Type a new title or pick an existing one" />}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField fullWidth select label="Reports to (manager)" value={form.manager_id} onChange={set('manager_id')}>
-                  <MenuItem value="">No manager set</MenuItem>
-                  {employees.map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
-                </TextField>
-              </Grid>
-              <Grid item xs={6}><TextField fullWidth label="Bank account number" value={form.bank_account_number} onChange={set('bank_account_number')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth label="Bank IFSC" value={form.bank_ifsc} onChange={set('bank_ifsc')} /></Grid>
-            </Grid>
+              <MobileTextField
+                freeSolo
+                fullWidth
+                label="Designation"
+                value={form.designation_title}
+                onChange={(e, val) => setForm({ ...form, designation_title: val })}
+                options={designations.map((d) => d.title)}
+                helperText="Type a new title or pick an existing one"
+              />
+              <MobileTextField
+                fullWidth
+                select
+                label="Reports to (manager)"
+                value={form.manager_id}
+                onChange={set('manager_id')}
+                options={[{ value: '', label: 'No manager set' }, ...employees.map((e) => ({ value: e.id, label: e.full_name }))]}
+              />
+              <MobileTextField fullWidth label="Bank account number" value={form.bank_account_number} onChange={set('bank_account_number')} />
+              <MobileTextField fullWidth label="Bank IFSC" value={form.bank_ifsc} onChange={set('bank_ifsc')} />
+            </MobileFormGrid>
           )}
 
           {step === 2 && (
-            <Grid container spacing={2}>
-              <Grid item xs={12}>
+            <MobileFormGrid>
+              <Box sx={{ gridColumn: '1 / -1' }}>
                 <Alert severity="info" sx={{ mb: 1 }}>This drives payroll — leave blank only for contractors paid outside payroll.</Alert>
-              </Grid>
-              <Grid item xs={6}><TextField fullWidth type="number" label="Annual CTC (₹)" value={form.ctc_annual} onChange={set('ctc_annual')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth type="number" label="Monthly Basic (₹)" value={form.basic_monthly} onChange={set('basic_monthly')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth type="number" label="Monthly DA (₹)" value={form.da_monthly} onChange={set('da_monthly')} helperText="Dearness Allowance — used in the 50% wage cap check" /></Grid>
-              <Grid item xs={6}><TextField fullWidth type="number" label="Monthly HRA (₹)" value={form.hra_monthly} onChange={set('hra_monthly')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth type="number" label="Other allowances (₹)" value={form.other_allowances_monthly} onChange={set('other_allowances_monthly')} /></Grid>
-              <Grid item xs={6}>
-                <TextField fullWidth select label="Tax regime" value={form.tax_regime} onChange={set('tax_regime')}>
-                  <MenuItem value="new">New regime</MenuItem>
-                  <MenuItem value="old">Old regime</MenuItem>
-                </TextField>
-              </Grid>
-              <Grid item xs={12}>
+              </Box>
+              <MobileTextField fullWidth type="number" label="Annual CTC (₹)" value={form.ctc_annual} onChange={set('ctc_annual')} />
+              <MobileTextField fullWidth type="number" label="Monthly Basic (₹)" value={form.basic_monthly} onChange={set('basic_monthly')} />
+              <MobileTextField fullWidth type="number" label="Monthly DA (₹)" value={form.da_monthly} onChange={set('da_monthly')} helperText="Dearness Allowance — used in the 50% wage cap check" />
+              <MobileTextField fullWidth type="number" label="Monthly HRA (₹)" value={form.hra_monthly} onChange={set('hra_monthly')} />
+              <MobileTextField fullWidth type="number" label="Other allowances (₹)" value={form.other_allowances_monthly} onChange={set('other_allowances_monthly')} />
+              <MobileTextField
+                fullWidth
+                select
+                label="Tax regime"
+                value={form.tax_regime}
+                onChange={set('tax_regime')}
+                options={[{ value: 'new', label: 'New regime' }, { value: 'old', label: 'Old regime' }]}
+              />
+              <Box sx={{ gridColumn: '1 / -1' }}>
                 <FormControlLabel control={<Switch checked={form.pf_applicable} onChange={(e) => setForm({ ...form, pf_applicable: e.target.checked })} />} label="EPF applicable for this employee" />
-              </Grid>
-            </Grid>
+              </Box>
+            </MobileFormGrid>
           )}
 
           {step === 3 && (
-            <Box>
-              <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mb: 2 }}>
+            <MobileFormGrid>
+              <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mb: 2, gridColumn: '1 / -1' }}>
                 Optional at this stage — you can also attach these later from the employee's profile or the Documents page.
               </Typography>
-              <Box sx={{ mb: 2 }}>
+              <Box sx={{ gridColumn: '1 / -1', mb: 2 }}>
                 <Button component="label" variant="outlined" startIcon={<UploadFileIcon />} fullWidth>
                   {resumeFile ? resumeFile.name : 'Upload resume'}
                   <input type="file" hidden onChange={(e) => setResumeFile(e.target.files[0])} />
                 </Button>
               </Box>
-              <Box>
+              <Box sx={{ gridColumn: '1 / -1' }}>
                 <Button component="label" variant="outlined" startIcon={<UploadFileIcon />} fullWidth>
                   {offerLetterFile ? offerLetterFile.name : 'Upload offer letter'}
                   <input type="file" hidden onChange={(e) => setOfferLetterFile(e.target.files[0])} />
                 </Button>
               </Box>
-            </Box>
+            </MobileFormGrid>
           )}
 
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          {step > 0 && <Button onClick={() => setStep(step - 1)}>Back</Button>}
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          {step > 0 && <MobileButton onClick={() => setStep(step - 1)}>Back</MobileButton>}
           {step < STEPS.length - 1 && (
-            <Button variant="contained" onClick={() => setStep(step + 1)} disabled={step === 0 && !form.full_name}>
+            <MobileButton variant="contained" onClick={() => setStep(step + 1)} disabled={step === 0 && !form.full_name}>
               Next
-            </Button>
+            </MobileButton>
           )}
           {step === STEPS.length - 1 && (
-            <Button variant="contained" onClick={handleCreate} disabled={saving || !form.full_name || !form.date_of_joining}>
+            <MobileButton variant="contained" onClick={handleCreate} disabled={saving || !form.full_name || !form.date_of_joining}>
               {saving ? 'Creating…' : 'Create employee'}
-            </Button>
+            </MobileButton>
           )}
-        </DialogActions>
-      </Dialog>
+        </MobileActionButtons>
+      </MobileDialog>
 
-      <Dialog open={quickTeamOpen} onClose={() => setQuickTeamOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={quickTeamOpen} onClose={() => setQuickTeamOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>New team in {selectedDepartment?.name}</DialogTitle>
         <DialogContent>
-          <TextField
-            fullWidth autoFocus label="Team name" margin="normal" value={quickTeamName}
+          <MobileTextField
+            fullWidth
+            autoFocus
+            label="Team name"
+            value={quickTeamName}
             onChange={(e) => setQuickTeamName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') createQuickTeam(); }}
           />
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setQuickTeamOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={createQuickTeam} disabled={quickTeamSaving || !quickTeamName.trim()}>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setQuickTeamOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={createQuickTeam} disabled={quickTeamSaving || !quickTeamName.trim()}>
             {quickTeamSaving ? 'Creating…' : 'Create & select'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }
@@ -416,22 +434,18 @@ function EmployeeDetail() {
   const [designations, setDesignations] = useState([]);
   const [allEmployees, setAllEmployees] = useState([]);
   const [message, setMessage] = useState(null);
+  const isMobile = useMobile();
 
   const [exitOpen, setExitOpen] = useState(false);
   const [exitForm, setExitForm] = useState({ exit_date: '', reason: '' });
   const [exiting, setExiting] = useState(false);
   const [reinstating, setReinstating] = useState(false);
 
-  // Frontend visibility is a convenience gate (owner/admin) — the backend is
-  // the real authority and additionally allows the actual HR department
-  // head, which this button can't easily detect client-side without another
-  // round trip. If a plain HR employee who isn't the HOD clicks this and
-  // somehow saw it, the backend correctly 403s them.
   const canPermanentDelete = ['owner', 'admin'].includes(staff?.role);
   const [permDeleteOpen, setPermDeleteOpen] = useState(false);
   const [permDeleteConfirmText, setPermDeleteConfirmText] = useState('');
   const [permDeleteError, setPermDeleteError] = useState('');
-  const [permDeleteBlocked, setPermDeleteBlocked] = useState(null); // { blocking, counts, error } from a 409
+  const [permDeleteBlocked, setPermDeleteBlocked] = useState(null);
   const [permDeleting, setPermDeleting] = useState(false);
 
   const [loginOpen, setLoginOpen] = useState(false);
@@ -620,44 +634,44 @@ function EmployeeDetail() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">{employee.full_name}</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>{employee.full_name}</Typography>
           <Typography sx={{ color: 'text.secondary' }}>{employee.employee_code} · {employee.work_email}</Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <MobileStack gap={1} direction="row">
           {employee.status === 'exited' ? (
             <>
               {canReinstate && (
-                <Button variant="outlined" color="success" startIcon={<RestoreIcon />} onClick={handleReinstate} disabled={reinstating}>
+                <MobileButton variant="outlined" color="success" startIcon={<RestoreIcon />} onClick={handleReinstate} disabled={reinstating}>
                   {reinstating ? 'Reinstating…' : 'Reinstate'}
-                </Button>
+                </MobileButton>
               )}
               {canPermanentDelete && (
-                <Button variant="outlined" color="error" startIcon={<DeleteForeverIcon />} onClick={openPermDelete}>
+                <MobileButton variant="outlined" color="error" startIcon={<DeleteForeverIcon />} onClick={openPermDelete}>
                   Permanently delete
-                </Button>
+                </MobileButton>
               )}
             </>
           ) : (
             <>
               {canEdit && (
                 employee.linked_staff_account
-                  ? <Button size="small" variant="outlined" disabled sx={{ fontSize: '0.75rem' }}>
+                  ? <MobileButton size="small" variant="outlined" disabled sx={{ fontSize: '0.75rem' }}>
                       Login linked: {employee.linked_staff_account.email}
-                    </Button>
-                  : <Button size="small" variant="outlined" startIcon={<PersonAddIcon />} onClick={openCreateLogin}>Create login</Button>
+                    </MobileButton>
+                  : <MobileButton size="small" variant="outlined" startIcon={<PersonAddIcon />} onClick={openCreateLogin}>Create login</MobileButton>
               )}
-              {canEdit && <Button variant="outlined" startIcon={<EditIcon />} onClick={openEdit}>Edit</Button>}
+              {canEdit && <MobileButton variant="outlined" startIcon={<EditIcon />} onClick={openEdit}>Edit</MobileButton>}
               {canExit && (
-                <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={() => { setExitForm({ exit_date: '', reason: '' }); setExitOpen(true); }}>
+                <MobileButton variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={() => { setExitForm({ exit_date: '', reason: '' }); setExitOpen(true); }}>
                   Exit
-                </Button>
+                </MobileButton>
               )}
             </>
           )}
-        </Box>
-      </Box>
+        </MobileStack>
+      </MobilePageHeader>
 
       {message && <Alert severity={message.severity} sx={{ mb: 2.5 }}>{message.text}</Alert>}
       {employee.status === 'exited' && (
@@ -667,25 +681,54 @@ function EmployeeDetail() {
         </Alert>
       )}
 
-      <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: 3, borderBottom: '1px solid', borderColor: 'divider' }}>
-        <Tab label="Overview" />
-        <Tab label="Compensation" />
-        <Tab label="Documents" />
-      </Tabs>
+      <MobilePaper sx={{ mb: 2 }}>
+        <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ borderBottom: '1px solid', borderColor: 'divider' }} variant="scrollable" scrollButtons="auto">
+          <Tab label="Overview" />
+          <Tab label="Compensation" />
+          <Tab label="Documents" />
+        </Tabs>
+      </MobilePaper>
 
       {tab === 0 && (
-        <Paper sx={{ p: 3, maxWidth: 560 }}>
-          <Grid container spacing={2}>
-            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Status</Typography><StatusChip status={employee.status} /></Grid>
-            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Employment type</Typography><Typography sx={{ textTransform: 'capitalize' }}>{employee.employment_type?.replace('_', ' ')}</Typography></Grid>
-            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Department</Typography><Typography>{departments.find((d) => d.id === employee.department_id)?.name || '—'}</Typography></Grid>
-            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Team</Typography><Typography>{teams.find((t) => t.id === employee.team_id)?.name || '—'}</Typography></Grid>
-            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Designation</Typography><Typography>{designations.find((d) => d.id === employee.designation_id)?.title || '—'}</Typography></Grid>
-            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Reports to</Typography><Typography>{allEmployees.find((e) => e.id === employee.manager_id)?.full_name || '—'}</Typography></Grid>
-            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Date of joining</Typography><Typography className="figure">{employee.date_of_joining?.slice(0, 10)}</Typography></Grid>
-            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Phone</Typography><Typography>{employee.phone || '—'}</Typography></Grid>
-            <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>State</Typography><Typography>{employee.state || '—'}</Typography></Grid>
-          </Grid>
+        <MobilePaper sx={{ maxWidth: 560 }}>
+          <MobileFormGrid>
+            <Box>
+              <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Status</Typography>
+              <StatusChip status={employee.status} />
+            </Box>
+            <Box>
+              <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Employment type</Typography>
+              <Typography sx={{ textTransform: 'capitalize' }}>{employee.employment_type?.replace('_', ' ')}</Typography>
+            </Box>
+            <Box>
+              <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Department</Typography>
+              <Typography>{departments.find((d) => d.id === employee.department_id)?.name || '—'}</Typography>
+            </Box>
+            <Box>
+              <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Team</Typography>
+              <Typography>{teams.find((t) => t.id === employee.team_id)?.name || '—'}</Typography>
+            </Box>
+            <Box>
+              <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Designation</Typography>
+              <Typography>{designations.find((d) => d.id === employee.designation_id)?.title || '—'}</Typography>
+            </Box>
+            <Box>
+              <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Reports to</Typography>
+              <Typography>{allEmployees.find((e) => e.id === employee.manager_id)?.full_name || '—'}</Typography>
+            </Box>
+            <Box>
+              <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Date of joining</Typography>
+              <Typography className="figure">{employee.date_of_joining?.slice(0, 10)}</Typography>
+            </Box>
+            <Box>
+              <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Phone</Typography>
+              <Typography>{employee.phone || '—'}</Typography>
+            </Box>
+            <Box>
+              <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>State</Typography>
+              <Typography>{employee.state || '—'}</Typography>
+            </Box>
+          </MobileFormGrid>
 
           {checklist.length > 0 && (
             <Box sx={{ mt: 3 }}>
@@ -702,42 +745,63 @@ function EmployeeDetail() {
               ))}
             </Box>
           )}
-        </Paper>
+        </MobilePaper>
       )}
 
       {tab === 1 && (
-        <Paper sx={{ p: 3, maxWidth: 560 }}>
+        <MobilePaper sx={{ maxWidth: 560 }}>
           {employee.ctc_annual ? (
-            <Grid container spacing={2}>
-              <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Annual CTC</Typography><Money amount={employee.ctc_annual} size="1.1rem" /></Grid>
-              <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Monthly basic</Typography><Money amount={employee.basic_monthly} /></Grid>
-              <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Monthly DA</Typography><Money amount={employee.da_monthly} /></Grid>
-              <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Monthly HRA</Typography><Money amount={employee.hra_monthly} /></Grid>
-              <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Other allowances</Typography><Money amount={employee.other_allowances_monthly} /></Grid>
-              <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Tax regime</Typography><Typography sx={{ textTransform: 'capitalize' }}>{employee.tax_regime}</Typography></Grid>
-              <Grid item xs={6}><Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>EPF applicable</Typography><Typography>{employee.pf_applicable ? 'Yes' : 'No'}</Typography></Grid>
-            </Grid>
+            <MobileFormGrid>
+              <Box>
+                <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Annual CTC</Typography>
+                <Money amount={employee.ctc_annual} size="1.1rem" />
+              </Box>
+              <Box>
+                <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Monthly basic</Typography>
+                <Money amount={employee.basic_monthly} />
+              </Box>
+              <Box>
+                <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Monthly DA</Typography>
+                <Money amount={employee.da_monthly} />
+              </Box>
+              <Box>
+                <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Monthly HRA</Typography>
+                <Money amount={employee.hra_monthly} />
+              </Box>
+              <Box>
+                <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Other allowances</Typography>
+                <Money amount={employee.other_allowances_monthly} />
+              </Box>
+              <Box>
+                <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>Tax regime</Typography>
+                <Typography sx={{ textTransform: 'capitalize' }}>{employee.tax_regime}</Typography>
+              </Box>
+              <Box>
+                <Typography sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>EPF applicable</Typography>
+                <Typography>{employee.pf_applicable ? 'Yes' : 'No'}</Typography>
+              </Box>
+            </MobileFormGrid>
           ) : (
             <Alert severity="warning">
               No compensation on file — this employee won't be included correctly in payroll runs until this is filled in via Edit.
             </Alert>
           )}
-        </Paper>
+        </MobilePaper>
       )}
 
       {tab === 2 && (
-        <Box>
-          <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-            <Button component="label" variant="outlined" startIcon={<UploadFileIcon />} disabled={uploading}>
+        <MobilePaper>
+          <MobileStack gap={2} direction="row" sx={{ mb: 3 }}>
+            <MobileButton component="label" variant="outlined" startIcon={<UploadFileIcon />} disabled={uploading}>
               Upload resume
               <input type="file" hidden onChange={(e) => handleQuickUpload(e, 'resume')} />
-            </Button>
-            <Button component="label" variant="outlined" startIcon={<UploadFileIcon />} disabled={uploading}>
+            </MobileButton>
+            <MobileButton component="label" variant="outlined" startIcon={<UploadFileIcon />} disabled={uploading}>
               Upload offer letter
               <input type="file" hidden onChange={(e) => handleQuickUpload(e, 'offer_letter')} />
-            </Button>
-          </Box>
-          <Paper>
+            </MobileButton>
+          </MobileStack>
+          <ResponsiveTableContainer>
             <Table size="small">
               <TableHead>
                 <TableRow><TableCell>Title</TableCell><TableCell>Type</TableCell><TableCell>Uploaded</TableCell><TableCell align="right"></TableCell></TableRow>
@@ -749,99 +813,119 @@ function EmployeeDetail() {
                     <TableCell><StatusChip status={d.doc_type} /></TableCell>
                     <TableCell className="figure">{new Date(d.created_at).toLocaleDateString()}</TableCell>
                     <TableCell align="right">
-                      <Button size="small" startIcon={<DownloadIcon fontSize="small" />} onClick={() => handleDownload(d)}>Download</Button>
+                      <MobileButton size="small" startIcon={<DownloadIcon fontSize="small" />} onClick={() => handleDownload(d)}>Download</MobileButton>
                     </TableCell>
                   </TableRow>
                 ))}
                 {!docs.length && <TableRow><TableCell colSpan={4} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No documents yet.</TableCell></TableRow>}
               </TableBody>
             </Table>
-          </Paper>
-        </Box>
+          </ResponsiveTableContainer>
+        </MobilePaper>
       )}
 
       {editForm && (
-        <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth>
+        <MobileDialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth>
           <DialogTitle>Edit {employee.full_name}</DialogTitle>
           <DialogContent>
             <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', mt: 1, mb: 1 }}>Personal & employment</Typography>
-            <Grid container spacing={2}>
-              <Grid item xs={6}><TextField fullWidth label="Full name" value={editForm.full_name} onChange={setEdit('full_name')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth label="Work email" value={editForm.work_email} onChange={setEdit('work_email')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth label="Phone" value={editForm.phone} onChange={setEdit('phone')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth label="City" value={editForm.city} onChange={setEdit('city')} /></Grid>
-              <Grid item xs={6}>
-                <TextField fullWidth select label="State" value={editForm.state} onChange={setEdit('state')}>
-                  {INDIAN_STATES.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-                </TextField>
-              </Grid>
-              <Grid item xs={6}><TextField fullWidth label="PAN number" value={editForm.pan_number} onChange={setEdit('pan_number')} /></Grid>
-              <Grid item xs={6}>
-                <TextField fullWidth select label="Employment type" value={editForm.employment_type} onChange={setEdit('employment_type')}>
-                  {['full_time', 'part_time', 'contract', 'intern'].map((t) => <MenuItem key={t} value={t}>{t.replace('_', ' ')}</MenuItem>)}
-                </TextField>
-              </Grid>
-              <Grid item xs={6}>
-                <TextField fullWidth select label="Status" value={editForm.status || employee.status} onChange={setEdit('status')}>
-                  {['active', 'on_leave', 'notice_period'].map((s) => <MenuItem key={s} value={s}>{s.replace('_', ' ')}</MenuItem>)}
-                </TextField>
-              </Grid>
-              <Grid item xs={6}>
-                <TextField fullWidth select label="Department" value={editForm.department_id} onChange={setEditDepartment}>
-                  <MenuItem value="">Unassigned</MenuItem>
-                  {departments.map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
-                </TextField>
-              </Grid>
-              <Grid item xs={6}>
-                <TextField fullWidth select label="Team" value={editForm.team_id} onChange={setEdit('team_id')} disabled={!editForm.department_id}>
-                  <MenuItem value="">No team / department-level</MenuItem>
-                  {editTeamsInDepartment.map((t) => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
-                </TextField>
-              </Grid>
-              <Grid item xs={6}>
-                <TextField fullWidth select label="Designation" value={editForm.designation_id} onChange={setEdit('designation_id')}>
-                  <MenuItem value="">Unassigned</MenuItem>
-                  {designations.map((d) => <MenuItem key={d.id} value={d.id}>{d.title}</MenuItem>)}
-                </TextField>
-              </Grid>
-              <Grid item xs={6}>
-                <TextField fullWidth select label="Reports to (manager)" value={editForm.manager_id} onChange={setEdit('manager_id')}>
-                  <MenuItem value="">No manager set</MenuItem>
-                  {allEmployees.filter((e) => e.id !== id).map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
-                </TextField>
-              </Grid>
-              <Grid item xs={6}><TextField fullWidth label="Bank account number" value={editForm.bank_account_number} onChange={setEdit('bank_account_number')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth label="Bank IFSC" value={editForm.bank_ifsc} onChange={setEdit('bank_ifsc')} /></Grid>
-            </Grid>
+            <MobileFormGrid>
+              <MobileTextField fullWidth label="Full name" value={editForm.full_name} onChange={setEdit('full_name')} />
+              <MobileTextField fullWidth label="Work email" value={editForm.work_email} onChange={setEdit('work_email')} />
+              <MobileTextField fullWidth label="Phone" value={editForm.phone} onChange={setEdit('phone')} />
+              <MobileTextField fullWidth label="City" value={editForm.city} onChange={setEdit('city')} />
+              <MobileTextField
+                fullWidth
+                select
+                label="State"
+                value={editForm.state}
+                onChange={setEdit('state')}
+                options={INDIAN_STATES.map((s) => ({ value: s, label: s }))}
+              />
+              <MobileTextField fullWidth label="PAN number" value={editForm.pan_number} onChange={setEdit('pan_number')} />
+              <MobileTextField
+                fullWidth
+                select
+                label="Employment type"
+                value={editForm.employment_type}
+                onChange={setEdit('employment_type')}
+                options={['full_time', 'part_time', 'contract', 'intern'].map((t) => ({ value: t, label: t.replace('_', ' ') }))}
+              />
+              <MobileTextField
+                fullWidth
+                select
+                label="Status"
+                value={editForm.status || employee.status}
+                onChange={setEdit('status')}
+                options={['active', 'on_leave', 'notice_period'].map((s) => ({ value: s, label: s.replace('_', ' ') }))}
+              />
+              <MobileTextField
+                fullWidth
+                select
+                label="Department"
+                value={editForm.department_id}
+                onChange={setEditDepartment}
+                options={[{ value: '', label: 'Unassigned' }, ...departments.map((d) => ({ value: d.id, label: d.name }))]}
+              />
+              <MobileTextField
+                fullWidth
+                select
+                label="Team"
+                value={editForm.team_id}
+                onChange={setEdit('team_id')}
+                disabled={!editForm.department_id}
+                options={[{ value: '', label: 'No team / department-level' }, ...editTeamsInDepartment.map((t) => ({ value: t.id, label: t.name }))]}
+              />
+              <MobileTextField
+                fullWidth
+                select
+                label="Designation"
+                value={editForm.designation_id}
+                onChange={setEdit('designation_id')}
+                options={[{ value: '', label: 'Unassigned' }, ...designations.map((d) => ({ value: d.id, label: d.title }))]}
+              />
+              <MobileTextField
+                fullWidth
+                select
+                label="Reports to (manager)"
+                value={editForm.manager_id}
+                onChange={setEdit('manager_id')}
+                options={[{ value: '', label: 'No manager set' }, ...allEmployees.filter((e) => e.id !== id).map((e) => ({ value: e.id, label: e.full_name }))]}
+              />
+              <MobileTextField fullWidth label="Bank account number" value={editForm.bank_account_number} onChange={setEdit('bank_account_number')} />
+              <MobileTextField fullWidth label="Bank IFSC" value={editForm.bank_ifsc} onChange={setEdit('bank_ifsc')} />
+            </MobileFormGrid>
 
             <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', mt: 3, mb: 1 }}>Compensation</Typography>
-            <Grid container spacing={2}>
-              <Grid item xs={6}><TextField fullWidth type="number" label="Annual CTC (₹)" value={editForm.ctc_annual} onChange={setEdit('ctc_annual')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth type="number" label="Monthly Basic (₹)" value={editForm.basic_monthly} onChange={setEdit('basic_monthly')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth type="number" label="Monthly DA (₹)" value={editForm.da_monthly} onChange={setEdit('da_monthly')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth type="number" label="Monthly HRA (₹)" value={editForm.hra_monthly} onChange={setEdit('hra_monthly')} /></Grid>
-              <Grid item xs={6}><TextField fullWidth type="number" label="Other allowances (₹)" value={editForm.other_allowances_monthly} onChange={setEdit('other_allowances_monthly')} /></Grid>
-              <Grid item xs={6}>
-                <TextField fullWidth select label="Tax regime" value={editForm.tax_regime} onChange={setEdit('tax_regime')}>
-                  <MenuItem value="new">New regime</MenuItem>
-                  <MenuItem value="old">Old regime</MenuItem>
-                </TextField>
-              </Grid>
-              <Grid item xs={12}>
+            <MobileFormGrid>
+              <MobileTextField fullWidth type="number" label="Annual CTC (₹)" value={editForm.ctc_annual} onChange={setEdit('ctc_annual')} />
+              <MobileTextField fullWidth type="number" label="Monthly Basic (₹)" value={editForm.basic_monthly} onChange={setEdit('basic_monthly')} />
+              <MobileTextField fullWidth type="number" label="Monthly DA (₹)" value={editForm.da_monthly} onChange={setEdit('da_monthly')} />
+              <MobileTextField fullWidth type="number" label="Monthly HRA (₹)" value={editForm.hra_monthly} onChange={setEdit('hra_monthly')} />
+              <MobileTextField fullWidth type="number" label="Other allowances (₹)" value={editForm.other_allowances_monthly} onChange={setEdit('other_allowances_monthly')} />
+              <MobileTextField
+                fullWidth
+                select
+                label="Tax regime"
+                value={editForm.tax_regime}
+                onChange={setEdit('tax_regime')}
+                options={[{ value: 'new', label: 'New regime' }, { value: 'old', label: 'Old regime' }]}
+              />
+              <Box sx={{ gridColumn: '1 / -1' }}>
                 <FormControlLabel control={<Switch checked={editForm.pf_applicable} onChange={(e) => setEditForm({ ...editForm, pf_applicable: e.target.checked })} />} label="EPF applicable" />
-              </Grid>
-            </Grid>
+              </Box>
+            </MobileFormGrid>
 
             {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setEditOpen(false)}>Cancel</Button>
-            <Button variant="contained" onClick={handleSaveEdit} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>
-          </DialogActions>
-        </Dialog>
+          <MobileActionButtons>
+            <MobileButton onClick={() => setEditOpen(false)}>Cancel</MobileButton>
+            <MobileButton variant="contained" onClick={handleSaveEdit} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</MobileButton>
+          </MobileActionButtons>
+        </MobileDialog>
       )}
 
-      <Dialog open={permDeleteOpen} onClose={() => setPermDeleteOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={permDeleteOpen} onClose={() => setPermDeleteOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Permanently delete {employee.full_name}?</DialogTitle>
         <DialogContent>
           <Alert severity="error" sx={{ mb: 2 }}>
@@ -855,9 +939,12 @@ function EmployeeDetail() {
               <Typography sx={{ fontSize: '0.85rem', mb: 1 }}>
                 Type <strong>{employee.full_name}</strong> to confirm.
               </Typography>
-              <TextField
-                fullWidth value={permDeleteConfirmText} onChange={(e) => setPermDeleteConfirmText(e.target.value)}
-                placeholder={employee.full_name} autoFocus
+              <MobileTextField
+                fullWidth
+                value={permDeleteConfirmText}
+                onChange={(e) => setPermDeleteConfirmText(e.target.value)}
+                placeholder={employee.full_name}
+                autoFocus
               />
             </>
           )}
@@ -872,24 +959,26 @@ function EmployeeDetail() {
 
           {permDeleteError && <Alert severity="error" sx={{ mt: 2 }}>{permDeleteError}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPermDeleteOpen(false)}>Cancel</Button>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setPermDeleteOpen(false)}>Cancel</MobileButton>
           {permDeleteBlocked?.blocking === 'other' ? (
-            <Button variant="contained" color="error" onClick={() => attemptPermanentDelete(true)} disabled={permDeleting}>
+            <MobileButton variant="contained" color="error" onClick={() => attemptPermanentDelete(true)} disabled={permDeleting}>
               {permDeleting ? 'Deleting…' : 'I understand — delete anyway'}
-            </Button>
+            </MobileButton>
           ) : permDeleteBlocked?.blocking !== 'payroll' && (
-            <Button
-              variant="contained" color="error" onClick={() => attemptPermanentDelete(false)}
+            <MobileButton
+              variant="contained"
+              color="error"
+              onClick={() => attemptPermanentDelete(false)}
               disabled={permDeleting || permDeleteConfirmText !== employee.full_name}
             >
               {permDeleting ? 'Deleting…' : 'Permanently delete'}
-            </Button>
+            </MobileButton>
           )}
-        </DialogActions>
-      </Dialog>
+        </MobileActionButtons>
+      </MobileDialog>
 
-      <Dialog open={exitOpen} onClose={() => setExitOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={exitOpen} onClose={() => setExitOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Exit {employee.full_name}</DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 1 }}>
@@ -897,36 +986,41 @@ function EmployeeDetail() {
             payroll and leave history are preserved, and it can be undone with "Reinstate" if it was a mistake.
             {staff?.role === 'admin' && ' As Admin, this will be sent to the Founder for approval before it takes effect.'}
           </Alert>
-          <TextField fullWidth type="date" label="Exit date" InputLabelProps={{ shrink: true }} margin="normal"
-            value={exitForm.exit_date} onChange={(e) => setExitForm({ ...exitForm, exit_date: e.target.value })} />
-          <TextField fullWidth label="Reason" multiline rows={2} margin="normal"
-            value={exitForm.reason} onChange={(e) => setExitForm({ ...exitForm, reason: e.target.value })} />
+          <MobileTextField fullWidth type="date" label="Exit date" InputLabelProps={{ shrink: true }} value={exitForm.exit_date} onChange={(e) => setExitForm({ ...exitForm, exit_date: e.target.value })} />
+          <MobileTextField fullWidth label="Reason" multiline rows={2} value={exitForm.reason} onChange={(e) => setExitForm({ ...exitForm, reason: e.target.value })} />
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setExitOpen(false)}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={handleExit} disabled={exiting || !exitForm.exit_date}>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setExitOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" color="error" onClick={handleExit} disabled={exiting || !exitForm.exit_date}>
             {exiting ? 'Processing…' : 'Confirm exit'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
 
-      <Dialog open={loginOpen} onClose={() => setLoginOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={loginOpen} onClose={() => setLoginOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Create login for {employee.full_name}</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="Email" margin="normal" value={loginForm.email} onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })} />
-          <TextField fullWidth label="Temporary password" margin="normal" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} helperText="Share this with them securely." />
-          <TextField fullWidth select label="Role" margin="normal" value={loginForm.role} onChange={(e) => setLoginForm({ ...loginForm, role: e.target.value })}>
-            {['admin', 'hr', 'finance', 'manager', 'employee'].map((r) => <MenuItem key={r} value={r}>{r}</MenuItem>)}
-          </TextField>
+          <MobileFormGrid>
+            <MobileTextField fullWidth label="Email" value={loginForm.email} onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })} />
+            <MobileTextField fullWidth label="Temporary password" type="password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} helperText="Share this with them securely." />
+            <MobileTextField
+              fullWidth
+              select
+              label="Role"
+              value={loginForm.role}
+              onChange={(e) => setLoginForm({ ...loginForm, role: e.target.value })}
+              options={['admin', 'hr', 'finance', 'manager', 'employee'].map((r) => ({ value: r, label: r }))}
+            />
+          </MobileFormGrid>
           {loginError && <Alert severity="error" sx={{ mt: 1 }}>{loginError}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setLoginOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleCreateLogin} disabled={creatingLogin || !loginForm.email || !loginForm.password}>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setLoginOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleCreateLogin} disabled={creatingLogin || !loginForm.email || !loginForm.password}>
             {creatingLogin ? 'Creating…' : 'Create login'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

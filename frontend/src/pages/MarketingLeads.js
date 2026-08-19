@@ -1,11 +1,23 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
-  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip,
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const STATUS_COLOR = { new: 'info', contacted: 'warning', qualified: 'primary', converted: 'success', disqualified: 'error' };
 const SOURCES = ['website_form', 'demo_request', 'event', 'referral', 'social', 'email', 'ad', 'organic_search', 'other'];
@@ -16,6 +28,7 @@ const emptyForm = {
 };
 
 export default function MarketingLeads() {
+  const isMobile = useMobile();
   const { staff } = useAuth();
   const [isMarketingHead, setIsMarketingHead] = useState(false);
   const canEdit = ['owner', 'admin'].includes(staff?.role) || isMarketingHead;
@@ -35,7 +48,7 @@ export default function MarketingLeads() {
     const params = statusFilter ? { status: statusFilter } : {};
     client.get('/marketing/leads', { params }).then(({ data }) => setLeads(data.leads)).catch(() => setLeads([]));
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [statusFilter]);
+  useEffect(() => { load(); }, [statusFilter]);
 
   useEffect(() => {
     client.get('/marketing/campaigns').then(({ data }) => setCampaigns(data.campaigns)).catch(() => setCampaigns([]));
@@ -111,108 +124,134 @@ export default function MarketingLeads() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">Leads</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>Leads</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Inbound interest from ethertrack.in — demo requests, website forms, events. Convert qualified ones straight into the CRM.
           </Typography>
         </Box>
-        {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add lead</Button>}
-      </Box>
+        {canEdit && <MobileButton variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add lead</MobileButton>}
+      </MobilePageHeader>
 
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
-        <Paper sx={{ p: 2, minWidth: 140 }}>
-          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Total leads</Typography>
-          <Typography sx={{ fontSize: '1.3rem', fontWeight: 700 }} className="figure">{totals.total}</Typography>
-        </Paper>
-        <Paper sx={{ p: 2, minWidth: 140 }}>
-          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>New</Typography>
-          <Typography sx={{ fontSize: '1.3rem', fontWeight: 700 }} className="figure">{totals.new}</Typography>
-        </Paper>
-        <Paper sx={{ p: 2, minWidth: 140 }}>
-          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Converted</Typography>
-          <Typography sx={{ fontSize: '1.3rem', fontWeight: 700 }} className="figure">{totals.converted}</Typography>
-        </Paper>
-      </Box>
+      <MobileStack gap={2} direction="row" sx={{ mb: 3, flexWrap: 'wrap' }}>
+        <MobilePaper>
+          <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>Total leads</Typography>
+          <Typography sx={{ fontSize: isMobile ? '1rem' : '1.3rem', fontWeight: 700 }} className="figure">{totals.total}</Typography>
+        </MobilePaper>
+        <MobilePaper>
+          <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>New</Typography>
+          <Typography sx={{ fontSize: isMobile ? '1rem' : '1.3rem', fontWeight: 700 }} className="figure">{totals.new}</Typography>
+        </MobilePaper>
+        <MobilePaper>
+          <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>Converted</Typography>
+          <Typography sx={{ fontSize: isMobile ? '1rem' : '1.3rem', fontWeight: 700 }} className="figure">{totals.converted}</Typography>
+        </MobilePaper>
+      </MobileStack>
 
-      <TextField select size="small" label="Filter status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} sx={{ mb: 2, minWidth: 180 }}>
-        <MenuItem value="">All statuses</MenuItem>
-        {Object.keys(STATUS_COLOR).map((s) => <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s}</MenuItem>)}
-      </TextField>
+      <MobilePaper sx={{ mb: 2 }}>
+        <MobileTextField
+          select
+          size="small"
+          label="Filter status"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          options={[{ value: '', label: 'All statuses' }, ...Object.keys(STATUS_COLOR).map((s) => ({ value: s, label: s.replace('_', ' ') }))]}
+        />
+      </MobilePaper>
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Received</TableCell>
-              <TableCell>Name / company</TableCell>
-              <TableCell>Contact</TableCell>
-              <TableCell>Source</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell align="right">Action</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {leads.map((l) => (
-              <TableRow key={l.id}>
-                <TableCell className="figure" sx={{ fontSize: '0.85rem' }}>{l.received_at?.slice(0, 10) || '—'}</TableCell>
-                <TableCell>
-                  <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{l.full_name}</Typography>
-                  {l.company_name && <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{l.company_name}</Typography>}
-                </TableCell>
-                <TableCell sx={{ fontSize: '0.8rem' }}>
-                  {l.email && <div>{l.email}</div>}
-                  {l.phone && <div>{l.phone}</div>}
-                </TableCell>
-                <TableCell sx={{ fontSize: '0.8rem', textTransform: 'capitalize' }}>{l.source?.replace('_', ' ')}</TableCell>
-                <TableCell>
-                  <Chip size="small" label={l.status} color={STATUS_COLOR[l.status]} sx={{ textTransform: 'capitalize' }} />
-                  {l.converted_party_name && <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', mt: 0.5 }}>→ {l.converted_party_name}</Typography>}
-                </TableCell>
-                <TableCell align="right">
-                  {canConvert && l.status !== 'converted' && <Button size="small" onClick={() => handleConvert(l)}>Convert</Button>}
-                  {canEdit && <Button size="small" onClick={() => openEdit(l)}>Edit</Button>}
-                  {canDelete && <Button size="small" color="error" onClick={() => handleDelete(l)}>Delete</Button>}
-                </TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Received</TableCell>
+                <TableCell>Name / company</TableCell>
+                <TableCell>Contact</TableCell>
+                <TableCell>Source</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell align="right">Action</TableCell>
               </TableRow>
-            ))}
-            {!leads.length && (
-              <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No leads logged yet.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {leads.map((l) => (
+                <TableRow key={l.id}>
+                  <TableCell className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{l.received_at?.slice(0, 10) || '—'}</TableCell>
+                  <TableCell>
+                    <Typography sx={{ fontWeight: 600, fontSize: isMobile ? '0.75rem' : '0.875rem' }}>{l.full_name}</Typography>
+                    {l.company_name && <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>{l.company_name}</Typography>}
+                  </TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem' }}>
+                    {l.email && <div>{l.email}</div>}
+                    {l.phone && <div>{l.phone}</div>}
+                  </TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem', textTransform: 'capitalize' }}>{l.source?.replace('_', ' ')}</TableCell>
+                  <TableCell>
+                    <Chip size="small" label={l.status} color={STATUS_COLOR[l.status]} sx={{ textTransform: 'capitalize' }} />
+                    {l.converted_party_name && <Typography sx={{ fontSize: isMobile ? '0.6rem' : '0.7rem', color: 'text.secondary', mt: 0.5 }}>→ {l.converted_party_name}</Typography>}
+                  </TableCell>
+                  <TableCell align="right">
+                    <MobileStack gap={1} direction="row">
+                      {canConvert && l.status !== 'converted' && <MobileButton size="small" onClick={() => handleConvert(l)}>Convert</MobileButton>}
+                      {canEdit && <MobileButton size="small" onClick={() => openEdit(l)}>Edit</MobileButton>}
+                      {canDelete && <MobileButton size="small" color="error" onClick={() => handleDelete(l)}>Delete</MobileButton>}
+                    </MobileStack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!leads.length && (
+                <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No leads logged yet.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{editingId ? 'Edit' : 'Add'} lead</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="Full name" margin="normal" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
-          <TextField fullWidth label="Company name" margin="normal" value={form.company_name} onChange={(e) => setForm({ ...form, company_name: e.target.value })} />
-          <TextField fullWidth label="Email" margin="normal" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <TextField fullWidth label="Phone" margin="normal" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          <TextField fullWidth select label="Source" margin="normal" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}>
-            {SOURCES.map((s) => <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s.replace('_', ' ')}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth select label="Campaign" margin="normal" value={form.campaign_id} onChange={(e) => setForm({ ...form, campaign_id: e.target.value })}>
-            <MenuItem value="">—</MenuItem>
-            {campaigns.map((c) => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth select label="Status" margin="normal" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-            {Object.keys(STATUS_COLOR).map((s) => <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth type="date" label="Received on" InputLabelProps={{ shrink: true }} margin="normal" value={form.received_at} onChange={(e) => setForm({ ...form, received_at: e.target.value })} />
-          <TextField fullWidth label="Message" margin="normal" multiline rows={2} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} />
-          <TextField fullWidth label="Notes" margin="normal" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField fullWidth label="Full name" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
+            <MobileTextField fullWidth label="Company name" value={form.company_name} onChange={(e) => setForm({ ...form, company_name: e.target.value })} />
+            <MobileTextField fullWidth label="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <MobileTextField fullWidth label="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Source"
+              value={form.source}
+              onChange={(e) => setForm({ ...form, source: e.target.value })}
+              options={SOURCES.map((s) => ({ value: s, label: s.replace('_', ' ') }))}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Campaign"
+              value={form.campaign_id}
+              onChange={(e) => setForm({ ...form, campaign_id: e.target.value })}
+              options={[{ value: '', label: '—' }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Status"
+              value={form.status}
+              onChange={(e) => setForm({ ...form, status: e.target.value })}
+              options={Object.keys(STATUS_COLOR).map((s) => ({ value: s, label: s }))}
+            />
+            <MobileTextField fullWidth type="date" label="Received on" InputLabelProps={{ shrink: true }} value={form.received_at} onChange={(e) => setForm({ ...form, received_at: e.target.value })} />
+            <MobileTextField fullWidth label="Message" multiline rows={2} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} />
+            <MobileTextField fullWidth label="Notes" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving || !form.full_name}>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleSave} disabled={saving || !form.full_name}>
             {saving ? 'Saving…' : 'Save'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

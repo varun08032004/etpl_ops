@@ -1,18 +1,31 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
-  Button, Dialog, DialogTitle, DialogContent, DialogActions, Grid, TextField, MenuItem, Alert, IconButton,
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, IconButton,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import client from '../api/client';
 import StatusChip from '../components/StatusChip';
 import Money from '../components/Money';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileDialog,
+  ResponsiveTableContainer,
+  MobileStack,
+  MobileButton,
+  MobileTextField,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const PAYOUT_MODES = ['IMPS', 'NEFT', 'RTGS'];
 
 export default function Payroll() {
+  const isMobile = useMobile();
   const [runs, setRuns] = useState([]);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -26,7 +39,6 @@ export default function Payroll() {
   const [disburseError, setDisburseError] = useState('');
   const [syncingRunId, setSyncingRunId] = useState(null);
 
-  // Add/remove employee on a draft run.
   const [allEmployees, setAllEmployees] = useState([]);
   const [addEmployeeOpen, setAddEmployeeOpen] = useState(false);
   const [employeeToAdd, setEmployeeToAdd] = useState('');
@@ -93,8 +105,6 @@ export default function Payroll() {
     setDetail(data);
   };
 
-  // Only offer employees not already on this run — the backend would reject
-  // a duplicate anyway, but filtering here saves a wasted round trip.
   const employeesNotOnRun = detail
     ? allEmployees.filter((e) => !detail.items.some((it) => it.employee_id === e.id))
     : [];
@@ -136,180 +146,197 @@ export default function Payroll() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">Payroll</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpen(true)}>New payroll run</Button>
-      </Box>
+      <MobilePageHeader>
+        <Typography variant={isMobile ? 'h6' : 'h5'}>Payroll</Typography>
+        <MobileButton variant="contained" size="small" startIcon={<AddIcon />} onClick={() => setOpen(true)}>New payroll run</MobileButton>
+      </MobilePageHeader>
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Period</TableCell>
-              <TableCell align="right">Gross</TableCell>
-              <TableCell align="right">Deductions</TableCell>
-              <TableCell align="right">Net</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell align="right">Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {runs.map((r) => (
-              <TableRow key={r.id} hover onClick={() => openDetail(r.id)} sx={{ cursor: 'pointer' }}>
-                <TableCell>{MONTHS[r.period_month - 1]} {r.period_year}</TableCell>
-                <TableCell align="right"><Money amount={r.total_gross} /></TableCell>
-                <TableCell align="right"><Money amount={r.total_deductions} /></TableCell>
-                <TableCell align="right"><Money amount={r.total_net} /></TableCell>
-                <TableCell>
-                  <StatusChip status={r.status} />
-                  {r.status === 'disbursal_error' && (
-                    <Typography sx={{ fontSize: '0.7rem', color: 'error.main', mt: 0.25 }}>
-                      Some payouts may have gone out before this failed — check payslip statuses below, don't re-disburse.
-                    </Typography>
-                  )}
-                </TableCell>
-                <TableCell align="right">
-                  {r.status === 'draft' && (
-                    <Button size="small" onClick={(e) => openDisburseDialog(r, e)}>Disburse</Button>
-                  )}
-                  {(r.status === 'processing' || r.status === 'paid') && (
-                    <Button size="small" disabled={syncingRunId === r.id} onClick={(e) => syncPayoutStatus(r.id, e)}>
-                      {syncingRunId === r.id ? 'Syncing…' : 'Sync status'}
-                    </Button>
-                  )}
-                </TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Period</TableCell>
+                <TableCell align="right">Gross</TableCell>
+                <TableCell align="right">Deductions</TableCell>
+                <TableCell align="right">Net</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell align="right">Actions</TableCell>
               </TableRow>
-            ))}
-            {!runs.length && (
-              <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
-                No payroll runs yet.
-              </TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {runs.map((r) => (
+                <TableRow key={r.id} hover onClick={() => openDetail(r.id)} sx={{ cursor: 'pointer' }}>
+                  <TableCell>{MONTHS[r.period_month - 1]} {r.period_year}</TableCell>
+                  <TableCell align="right"><Money amount={r.total_gross} size={isMobile ? '0.75rem' : '0.875rem'} /></TableCell>
+                  <TableCell align="right"><Money amount={r.total_deductions} size={isMobile ? '0.75rem' : '0.875rem'} /></TableCell>
+                  <TableCell align="right"><Money amount={r.total_net} size={isMobile ? '0.75rem' : '0.875rem'} /></TableCell>
+                  <TableCell>
+                    <StatusChip status={r.status} />
+                    {r.status === 'disbursal_error' && (
+                      <Typography sx={{ fontSize: isMobile ? '0.6rem' : '0.7rem', color: 'error.main', mt: 0.25 }}>
+                        Some payouts may have gone out before this failed — check payslip statuses below, don't re-disburse.
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell align="right">
+                    <MobileStack gap={1} direction="row">
+                      {r.status === 'draft' && (
+                        <MobileButton size="small" onClick={(e) => openDisburseDialog(r, e)}>Disburse</MobileButton>
+                      )}
+                      {(r.status === 'processing' || r.status === 'paid') && (
+                        <MobileButton size="small" variant="outlined" disabled={syncingRunId === r.id} onClick={(e) => syncPayoutStatus(r.id, e)}>
+                          {syncingRunId === r.id ? 'Syncing…' : 'Sync status'}
+                        </MobileButton>
+                      )}
+                    </MobileStack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!runs.length && (
+                <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>
+                  No payroll runs yet.
+                </TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
       {detail && (
-        <Paper sx={{ p: 3, mt: 3 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography sx={{ fontWeight: 600 }}>{MONTHS[detail.run.period_month - 1]} {detail.run.period_year} — breakdown</Typography>
-            <Box sx={{ display: 'flex', gap: 1 }}>
+        <MobilePaper sx={{ mt: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
+            <Typography sx={{ fontWeight: 600, fontSize: isMobile ? '0.85rem' : '1rem' }}>{MONTHS[detail.run.period_month - 1]} {detail.run.period_year} — breakdown</Typography>
+            <MobileStack gap={1} direction="row">
               {detail.run.status === 'draft' && (
-                <Button size="small" variant="outlined" startIcon={<AddIcon fontSize="small" />} onClick={openAddEmployee}>
+                <MobileButton size="small" variant="outlined" startIcon={<AddIcon fontSize="small" />} onClick={openAddEmployee}>
                   Add employee
-                </Button>
+                </MobileButton>
               )}
-              <Button size="small" variant="outlined" onClick={() => window.open(`/api/payroll/runs/${detail.run.id}/payslips.zip`, '_blank')}>
+              <MobileButton size="small" variant="outlined" onClick={() => window.open(`/api/payroll/runs/${detail.run.id}/payslips.zip`, '_blank')}>
                 Download all payslips (.zip)
-              </Button>
-            </Box>
+              </MobileButton>
+            </MobileStack>
           </Box>
           {detail.run.status === 'draft' && (
             <Alert severity="info" sx={{ mb: 2 }}>
               This run is still a draft — you can add or remove employees until it's disbursed.
             </Alert>
           )}
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Employee</TableCell><TableCell align="right">Gross</TableCell><TableCell align="right">PF</TableCell>
-                <TableCell align="right">PT</TableCell><TableCell align="right">LOP days</TableCell><TableCell align="right">Net</TableCell>
-                <TableCell>Status</TableCell><TableCell align="right">Payslip</TableCell>
-                {detail.run.status === 'draft' && <TableCell align="right"></TableCell>}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {detail.items.map((it) => (
-                <TableRow key={it.id}>
-                  <TableCell>{it.full_name}</TableCell>
-                  <TableCell align="right"><Money amount={it.gross_pay} /></TableCell>
-                  <TableCell align="right"><Money amount={it.pf_deduction} /></TableCell>
-                  <TableCell align="right"><Money amount={it.professional_tax} /></TableCell>
-                  <TableCell align="right" className="figure">{it.loss_of_pay_days}</TableCell>
-                  <TableCell align="right"><Money amount={it.net_pay} /></TableCell>
-                  <TableCell>
-                    <StatusChip status={it.status} />
-                    {it.status === 'failed' && it.failure_reason && (
-                      <Typography sx={{ fontSize: '0.7rem', color: 'error.main', mt: 0.25 }}>{it.failure_reason}</Typography>
-                    )}
-                  </TableCell>
-                  <TableCell align="right">
-                    <Button size="small" onClick={() => window.open(`/api/payroll/runs/${detail.run.id}/items/${it.id}/payslip.pdf`, '_blank')}>PDF</Button>
-                  </TableCell>
-                  {detail.run.status === 'draft' && (
-                    <TableCell align="right">
-                      <IconButton size="small" disabled={removingItemId === it.id} onClick={() => removeEmployee(it.id, it.full_name)}>
-                        <DeleteOutlineIcon fontSize="small" />
-                      </IconButton>
-                    </TableCell>
-                  )}
+          <ResponsiveTableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Employee</TableCell><TableCell align="right">Gross</TableCell><TableCell align="right">PF</TableCell>
+                  <TableCell align="right">PT</TableCell><TableCell align="right">LOP days</TableCell><TableCell align="right">Net</TableCell>
+                  <TableCell>Status</TableCell><TableCell align="right">Payslip</TableCell>
+                  {detail.run.status === 'draft' && <TableCell align="right"></TableCell>}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Paper>
+              </TableHead>
+              <TableBody>
+                {detail.items.map((it) => (
+                  <TableRow key={it.id}>
+                    <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.875rem' }}>{it.full_name}</TableCell>
+                    <TableCell align="right"><Money amount={it.gross_pay} size={isMobile ? '0.75rem' : '0.875rem'} /></TableCell>
+                    <TableCell align="right"><Money amount={it.pf_deduction} size={isMobile ? '0.75rem' : '0.875rem'} /></TableCell>
+                    <TableCell align="right"><Money amount={it.professional_tax} size={isMobile ? '0.75rem' : '0.875rem'} /></TableCell>
+                    <TableCell align="right" className="figure">{it.loss_of_pay_days}</TableCell>
+                    <TableCell align="right"><Money amount={it.net_pay} size={isMobile ? '0.75rem' : '0.875rem'} /></TableCell>
+                    <TableCell>
+                      <StatusChip status={it.status} />
+                      {it.status === 'failed' && it.failure_reason && (
+                        <Typography sx={{ fontSize: isMobile ? '0.6rem' : '0.7rem', color: 'error.main', mt: 0.25 }}>{it.failure_reason}</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell align="right">
+                      <MobileButton size="small" onClick={() => window.open(`/api/payroll/runs/${detail.run.id}/items/${it.id}/payslip.pdf`, '_blank')}>PDF</MobileButton>
+                    </TableCell>
+                    {detail.run.status === 'draft' && (
+                      <TableCell align="right">
+                        <IconButton size="small" disabled={removingItemId === it.id} onClick={() => removeEmployee(it.id, it.full_name)}>
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </ResponsiveTableContainer>
+        </MobilePaper>
       )}
 
-      <Dialog open={open} onClose={() => setOpen(false)}>
+      <MobileDialog open={open} onClose={() => setOpen(false)}>
         <DialogTitle>New payroll run</DialogTitle>
         <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 0.5, width: 320 }}>
-            <Grid item xs={6}>
-              <TextField fullWidth select label="Month" value={form.month} onChange={(e) => setForm({ ...form, month: Number(e.target.value) })}>
-                {MONTHS.map((m, i) => <MenuItem key={m} value={i + 1}>{m}</MenuItem>)}
-              </TextField>
-            </Grid>
-            <Grid item xs={6}>
-              <TextField fullWidth type="number" label="Year" value={form.year} onChange={(e) => setForm({ ...form, year: Number(e.target.value) })} />
-            </Grid>
-          </Grid>
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField
+              select
+              label="Month"
+              value={form.month}
+              onChange={(e) => setForm({ ...form, month: Number(e.target.value) })}
+              options={MONTHS.map((m, i) => ({ value: i + 1, label: m }))}
+              placeholder="Select month"
+            />
+            <MobileTextField type="number" label="Year" value={form.year} onChange={(e) => setForm({ ...form, year: Number(e.target.value) })} />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
           <Alert severity="info" sx={{ mt: 2 }}>Computed from attendance + each employee's CTC breakup on file. Review before disbursing — disbursal triggers real payouts.</Alert>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleCreate} disabled={saving}>{saving ? 'Creating…' : 'Create run'}</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleCreate} disabled={saving}>{saving ? 'Creating…' : 'Create run'}</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
 
-      <Dialog open={addEmployeeOpen} onClose={() => setAddEmployeeOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={addEmployeeOpen} onClose={() => setAddEmployeeOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Add employee to {detail && `${MONTHS[detail.run.period_month - 1]} ${detail.run.period_year}`}</DialogTitle>
         <DialogContent>
-          <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mb: 2 }}>
+          <Typography sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: 'text.secondary', mb: 2 }}>
             Computed the same way as everyone else on this run — attendance, CTC breakup, and statutory deductions all apply.
           </Typography>
-          <TextField fullWidth select label="Employee" value={employeeToAdd} onChange={(e) => setEmployeeToAdd(e.target.value)}>
-            {employeesNotOnRun.map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
-            {!employeesNotOnRun.length && <MenuItem value="" disabled>Every active employee is already on this run</MenuItem>}
-          </TextField>
+          <MobileTextField
+            select
+            label="Employee"
+            value={employeeToAdd}
+            onChange={(e) => setEmployeeToAdd(e.target.value)}
+            options={employeesNotOnRun.map((e) => ({ value: e.id, label: e.full_name }))}
+            placeholder="Select employee"
+            disabled={!employeesNotOnRun.length}
+          />
+          {!employeesNotOnRun.length && <Typography sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: 'text.secondary', mt: 1 }}>Every active employee is already on this run</Typography>}
           {addEmployeeError && <Alert severity="error" sx={{ mt: 2 }}>{addEmployeeError}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAddEmployeeOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={confirmAddEmployee} disabled={addingEmployee || !employeeToAdd}>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setAddEmployeeOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={confirmAddEmployee} disabled={addingEmployee || !employeeToAdd}>
             {addingEmployee ? 'Adding…' : 'Add'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
 
-      <Dialog open={!!disburseDialog} onClose={() => !disbursing && setDisburseDialog(null)} maxWidth="xs" fullWidth>
+      <MobileDialog open={!!disburseDialog} onClose={() => !disbursing && setDisburseDialog(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Disburse {disburseDialog && `${MONTHS[disburseDialog.period_month - 1]} ${disburseDialog.period_year}`}</DialogTitle>
         <DialogContent>
-          <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mb: 2 }}>
+          <Typography sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: 'text.secondary', mb: 2 }}>
             This sends real bank transfers via Axis Bank to every employee on this run. This cannot be undone by clicking again — the button disables once submitted.
           </Typography>
-          <TextField fullWidth select label="Transfer mode" value={payoutMode} onChange={(e) => setPayoutMode(e.target.value)}>
-            {PAYOUT_MODES.map((m) => <MenuItem key={m} value={m}>{m}</MenuItem>)}
-          </TextField>
+          <MobileTextField
+            select
+            label="Transfer mode"
+            value={payoutMode}
+            onChange={(e) => setPayoutMode(e.target.value)}
+            options={PAYOUT_MODES.map((m) => ({ value: m, label: m }))}
+          />
           {disburseError && <Alert severity="error" sx={{ mt: 2 }}>{disburseError}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDisburseDialog(null)} disabled={disbursing}>Cancel</Button>
-          <Button variant="contained" color="warning" onClick={confirmDisburse} disabled={disbursing}>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setDisburseDialog(null)} disabled={disbursing}>Cancel</MobileButton>
+          <MobileButton variant="contained" color="warning" onClick={confirmDisburse} disabled={disbursing}>
             {disbursing ? 'Disbursing…' : 'Confirm disburse'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

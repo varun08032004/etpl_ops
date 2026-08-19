@@ -1,11 +1,23 @@
 import { useEffect, useState } from 'react';
 import {
-  Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
-  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip, Tabs, Tab,
+  Box, Typography, Table, TableHead, TableRow, TableCell, TableBody,
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip, Tabs, Tab,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const STATUS_COLOR = {
   filed: 'default', examination: 'info', opposed: 'warning',
@@ -19,6 +31,7 @@ const emptyForm = {
 
 export default function IPAssets() {
   const { staff } = useAuth();
+  const isMobile = useMobile();
   const [isComplianceHead, setIsComplianceHead] = useState(false);
   const canEdit = ['owner', 'admin'].includes(staff?.role) || isComplianceHead;
   const canDelete = staff?.role === 'owner';
@@ -94,86 +107,109 @@ export default function IPAssets() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">Intellectual Property</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>Intellectual Property</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Trademark and patent applications, status, and renewal dates.
           </Typography>
         </Box>
-        {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add {tab}</Button>}
-      </Box>
+        {canEdit && <MobileButton variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Add {tab}</MobileButton>}
+      </MobilePageHeader>
 
-      <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: 2 }}>
-        <Tab label="Trademarks" value="trademark" />
-        <Tab label="Patents" value="patent" />
-      </Tabs>
+      <MobilePaper sx={{ mb: 2 }}>
+        <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ borderBottom: '1px solid', borderColor: 'divider' }} variant="scrollable" scrollButtons="auto">
+          <Tab label="Trademarks" value="trademark" />
+          <Tab label="Patents" value="patent" />
+        </Tabs>
+      </MobilePaper>
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Title</TableCell>
-              <TableCell>Application #</TableCell>
-              <TableCell>Registration #</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Next renewal</TableCell>
-              <TableCell align="right">Action</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {filtered.map((asset) => (
-              <TableRow key={asset.id}>
-                <TableCell sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{asset.title}</TableCell>
-                <TableCell sx={{ fontSize: '0.85rem' }}>{asset.application_number || '—'}</TableCell>
-                <TableCell sx={{ fontSize: '0.85rem' }}>{asset.registration_number || '—'}</TableCell>
-                <TableCell><Chip size="small" label={asset.status} color={STATUS_COLOR[asset.status]} /></TableCell>
-                <TableCell className="figure" sx={{ fontSize: '0.85rem' }}>{asset.next_renewal_date?.slice(0, 10) || '—'}</TableCell>
-                <TableCell align="right">
-                  {canEdit && <Button size="small" onClick={() => openEdit(asset)}>Edit</Button>}
-                  {canDelete && <Button size="small" color="error" onClick={() => handleDelete(asset)}>Delete</Button>}
-                </TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Title</TableCell>
+                <TableCell>Application #</TableCell>
+                <TableCell>Registration #</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Next renewal</TableCell>
+                <TableCell align="right">Action</TableCell>
               </TableRow>
-            ))}
-            {!filtered.length && (
-              <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No {tab}s tracked yet.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {filtered.map((asset) => (
+                <TableRow key={asset.id}>
+                  <TableCell sx={{ fontWeight: 600, fontSize: isMobile ? '0.75rem' : '0.875rem' }}>{asset.title}</TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{asset.application_number || '—'}</TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{asset.registration_number || '—'}</TableCell>
+                  <TableCell><Chip size="small" label={asset.status} color={STATUS_COLOR[asset.status]} /></TableCell>
+                  <TableCell className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{asset.next_renewal_date?.slice(0, 10) || '—'}</TableCell>
+                  <TableCell align="right">
+                    <MobileStack gap={1} direction="row">
+                      {canEdit && <MobileButton size="small" onClick={() => openEdit(asset)}>Edit</MobileButton>}
+                      {canDelete && <MobileButton size="small" color="error" onClick={() => handleDelete(asset)}>Delete</MobileButton>}
+                    </MobileStack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!filtered.length && (
+                <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No {tab}s tracked yet.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{editingId ? 'Edit' : 'Add'} {form.ip_type}</DialogTitle>
         <DialogContent>
-          <TextField fullWidth select label="Type" margin="normal" value={form.ip_type} disabled={!!editingId} onChange={(e) => setForm({ ...form, ip_type: e.target.value })}>
-            <MenuItem value="trademark">Trademark</MenuItem>
-            <MenuItem value="patent">Patent</MenuItem>
-          </TextField>
-          <TextField fullWidth label={form.ip_type === 'trademark' ? 'Mark name' : 'Invention title'} margin="normal" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          <TextField fullWidth label="Application number" margin="normal" value={form.application_number} onChange={(e) => setForm({ ...form, application_number: e.target.value })} />
-          <TextField fullWidth label="Registration number" margin="normal" value={form.registration_number} onChange={(e) => setForm({ ...form, registration_number: e.target.value })} />
-          <TextField fullWidth select label="Status" margin="normal" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-            <MenuItem value="filed">Filed</MenuItem>
-            <MenuItem value="examination">Examination</MenuItem>
-            <MenuItem value="opposed">Opposed</MenuItem>
-            <MenuItem value="granted">Granted</MenuItem>
-            <MenuItem value="registered">Registered</MenuItem>
-            <MenuItem value="abandoned">Abandoned</MenuItem>
-            <MenuItem value="expired">Expired</MenuItem>
-          </TextField>
-          <TextField fullWidth type="date" label="Filing date" InputLabelProps={{ shrink: true }} margin="normal" value={form.filing_date} onChange={(e) => setForm({ ...form, filing_date: e.target.value })} />
-          <TextField fullWidth type="date" label="Grant date" InputLabelProps={{ shrink: true }} margin="normal" value={form.grant_date} onChange={(e) => setForm({ ...form, grant_date: e.target.value })} />
-          <TextField fullWidth type="date" label="Next renewal date" InputLabelProps={{ shrink: true }} margin="normal" value={form.next_renewal_date} onChange={(e) => setForm({ ...form, next_renewal_date: e.target.value })} />
-          <TextField fullWidth label="Notes" margin="normal" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField
+              fullWidth
+              select
+              label="Type"
+              value={form.ip_type}
+              disabled={!!editingId}
+              onChange={(e) => setForm({ ...form, ip_type: e.target.value })}
+              options={[
+                { value: 'trademark', label: 'Trademark' },
+                { value: 'patent', label: 'Patent' },
+              ]}
+            />
+            <MobileTextField fullWidth label={form.ip_type === 'trademark' ? 'Mark name' : 'Invention title'} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+            <MobileTextField fullWidth label="Application number" value={form.application_number} onChange={(e) => setForm({ ...form, application_number: e.target.value })} />
+            <MobileTextField fullWidth label="Registration number" value={form.registration_number} onChange={(e) => setForm({ ...form, registration_number: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Status"
+              value={form.status}
+              onChange={(e) => setForm({ ...form, status: e.target.value })}
+              options={[
+                { value: 'filed', label: 'Filed' },
+                { value: 'examination', label: 'Examination' },
+                { value: 'opposed', label: 'Opposed' },
+                { value: 'granted', label: 'Granted' },
+                { value: 'registered', label: 'Registered' },
+                { value: 'abandoned', label: 'Abandoned' },
+                { value: 'expired', label: 'Expired' },
+              ]}
+            />
+            <MobileTextField fullWidth type="date" label="Filing date" InputLabelProps={{ shrink: true }} value={form.filing_date} onChange={(e) => setForm({ ...form, filing_date: e.target.value })} />
+            <MobileTextField fullWidth type="date" label="Grant date" InputLabelProps={{ shrink: true }} value={form.grant_date} onChange={(e) => setForm({ ...form, grant_date: e.target.value })} />
+            <MobileTextField fullWidth type="date" label="Next renewal date" InputLabelProps={{ shrink: true }} value={form.next_renewal_date} onChange={(e) => setForm({ ...form, next_renewal_date: e.target.value })} />
+            <MobileTextField fullWidth label="Notes" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving || !form.title}>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleSave} disabled={saving || !form.title}>
             {saving ? 'Saving…' : 'Save'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

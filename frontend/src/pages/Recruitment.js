@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
-  Button, Dialog, DialogTitle, DialogContent, DialogActions, Grid, TextField,
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   MenuItem, Alert, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
@@ -9,6 +9,19 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import client from '../api/client';
 import StatusChip from '../components/StatusChip';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileDialog,
+  ResponsiveTableContainer,
+  MobileCardGrid,
+  MobileButton,
+  MobileTextField,
+  MobileStack,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contract', 'intern'];
 const STAGES = ['applied', 'screening', 'interview', 'offer', 'hired', 'rejected'];
@@ -21,6 +34,7 @@ const emptyJobForm = {
 };
 
 function JobList({ onOpenJob }) {
+  const isMobile = useMobile();
   const [jobs, setJobs] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [open, setOpen] = useState(false);
@@ -57,86 +71,96 @@ function JobList({ onOpenJob }) {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">Recruitment</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpen(true)}>New job posting</Button>
-      </Box>
+      <MobilePageHeader>
+        <Typography variant={isMobile ? 'h6' : 'h5'}>Recruitment</Typography>
+        <MobileButton variant="contained" size="small" startIcon={<AddIcon />} onClick={() => setOpen(true)}>New job posting</MobileButton>
+      </MobilePageHeader>
 
-      <Alert severity="info" sx={{ mb: 2.5 }}>
-        LinkedIn and Naukri don't offer open self-serve posting APIs — post the role there manually, then paste the
-        listing URL here so it's one click away, and tag each candidate's <code>source</code> so you can see which
-        channel actually converts.
-      </Alert>
+      <MobilePaper sx={{ mb: 2 }}>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          LinkedIn and Naukri don't offer open self-serve posting APIs — post the role there manually, then paste the
+          listing URL here so it's one click away, and tag each candidate's <code>source</code> so you can see which
+          channel actually converts.
+        </Alert>
+      </MobilePaper>
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Role</TableCell><TableCell>Department</TableCell><TableCell>Type</TableCell>
-              <TableCell align="right">Applicants</TableCell><TableCell align="right">Openings</TableCell><TableCell>Status</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {jobs.map((j) => (
-              <TableRow key={j.id} hover sx={{ cursor: 'pointer' }} onClick={() => onOpenJob(j.id)}>
-                <TableCell>{j.title}</TableCell>
-                <TableCell>{j.department_name || '—'}</TableCell>
-                <TableCell sx={{ textTransform: 'capitalize' }}>{j.employment_type?.replace('_', ' ')}</TableCell>
-                <TableCell align="right" className="figure">{j.applicant_count}</TableCell>
-                <TableCell align="right" className="figure">{j.filled_count}/{j.openings_count}</TableCell>
-                <TableCell><StatusChip status={j.status} /></TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Role</TableCell><TableCell>Department</TableCell><TableCell>Type</TableCell>
+                <TableCell align="right">Applicants</TableCell><TableCell align="right">Openings</TableCell><TableCell>Status</TableCell>
               </TableRow>
-            ))}
-            {!jobs.length && <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No job postings yet.</TableCell></TableRow>}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {jobs.map((j) => (
+                <TableRow key={j.id} hover sx={{ cursor: 'pointer' }} onClick={() => onOpenJob(j.id)}>
+                  <TableCell>{j.title}</TableCell>
+                  <TableCell>{j.department_name || '—'}</TableCell>
+                  <TableCell sx={{ textTransform: 'capitalize' }}>{j.employment_type?.replace('_', ' ')}</TableCell>
+                  <TableCell align="right" className="figure">{j.applicant_count}</TableCell>
+                  <TableCell align="right" className="figure">{j.filled_count}/{j.openings_count}</TableCell>
+                  <TableCell><StatusChip status={j.status} /></TableCell>
+                </TableRow>
+              ))}
+              {!jobs.length && <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No job postings yet.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>New job posting</DialogTitle>
         <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 0.5 }}>
-            <Grid item xs={12}><TextField fullWidth label="Role title" value={form.title} onChange={set('title')} /></Grid>
-            <Grid item xs={6}>
-              <TextField fullWidth select label="Department" value={form.department_id} onChange={set('department_id')}>
-                <MenuItem value="">Unassigned</MenuItem>
-                {departments.map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
-              </TextField>
-            </Grid>
-            <Grid item xs={6}>
-              <TextField fullWidth select label="Employment type" value={form.employment_type} onChange={set('employment_type')}>
-                {EMPLOYMENT_TYPES.map((t) => <MenuItem key={t} value={t}>{t.replace('_', ' ')}</MenuItem>)}
-              </TextField>
-            </Grid>
-            <Grid item xs={6}><TextField fullWidth label="Location" value={form.location} onChange={set('location')} /></Grid>
-            <Grid item xs={6}><TextField fullWidth type="number" label="Openings" value={form.openings_count} onChange={set('openings_count')} /></Grid>
-            <Grid item xs={6}><TextField fullWidth type="number" label="Experience min (yrs)" value={form.experience_min_years} onChange={set('experience_min_years')} /></Grid>
-            <Grid item xs={6}><TextField fullWidth type="number" label="Experience max (yrs)" value={form.experience_max_years} onChange={set('experience_max_years')} /></Grid>
-            <Grid item xs={6}><TextField fullWidth type="number" label="Salary min (₹/yr)" value={form.salary_range_min} onChange={set('salary_range_min')} /></Grid>
-            <Grid item xs={6}><TextField fullWidth type="number" label="Salary max (₹/yr)" value={form.salary_range_max} onChange={set('salary_range_max')} /></Grid>
-            <Grid item xs={12}><TextField fullWidth multiline rows={3} label="Description" value={form.description} onChange={set('description')} /></Grid>
-            <Grid item xs={6}><TextField fullWidth label="LinkedIn posting URL" value={form.linkedin_url} onChange={set('linkedin_url')} /></Grid>
-            <Grid item xs={6}><TextField fullWidth label="Naukri posting URL" value={form.naukri_url} onChange={set('naukri_url')} /></Grid>
-          </Grid>
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField fullWidth label="Role title" value={form.title} onChange={set('title')} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Department"
+              value={form.department_id}
+              onChange={set('department_id')}
+              options={[{ value: '', label: 'Unassigned' }, ...departments.map((d) => ({ value: d.id, label: d.name }))]}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Employment type"
+              value={form.employment_type}
+              onChange={set('employment_type')}
+              options={EMPLOYMENT_TYPES.map((t) => ({ value: t, label: t.replace('_', ' ') }))}
+            />
+            <MobileTextField fullWidth label="Location" value={form.location} onChange={set('location')} />
+            <MobileTextField fullWidth type="number" label="Openings" value={form.openings_count} onChange={set('openings_count')} />
+            <MobileTextField fullWidth type="number" label="Experience min (yrs)" value={form.experience_min_years} onChange={set('experience_min_years')} />
+            <MobileTextField fullWidth type="number" label="Experience max (yrs)" value={form.experience_max_years} onChange={set('experience_max_years')} />
+            <MobileTextField fullWidth type="number" label="Salary min (₹/yr)" value={form.salary_range_min} onChange={set('salary_range_min')} />
+            <MobileTextField fullWidth type="number" label="Salary max (₹/yr)" value={form.salary_range_max} onChange={set('salary_range_max')} />
+            <MobileTextField fullWidth multiline rows={3} label="Description" value={form.description} onChange={set('description')} />
+            <MobileTextField fullWidth label="LinkedIn posting URL" value={form.linkedin_url} onChange={set('linkedin_url')} />
+            <MobileTextField fullWidth label="Naukri posting URL" value={form.naukri_url} onChange={set('naukri_url')} />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleCreate} disabled={saving || !form.title}>{saving ? 'Creating…' : 'Create'}</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleCreate} disabled={saving || !form.title}>{saving ? 'Creating…' : 'Create'}</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }
 
 function JobDetail({ jobId, onBack }) {
+  const isMobile = useMobile();
   const [job, setJob] = useState(null);
   const [applications, setApplications] = useState([]);
   const [addOpen, setAddOpen] = useState(false);
   const [candidateForm, setCandidateForm] = useState({ full_name: '', email: '', phone: '', source: 'linkedin', current_company: '', expected_ctc: '', notice_period_days: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [hireOpen, setHireOpen] = useState(null); // application object being hired
+  const [hireOpen, setHireOpen] = useState(null);
   const [hireDate, setHireDate] = useState('');
   const [message, setMessage] = useState(null);
 
@@ -186,90 +210,103 @@ function JobDetail({ jobId, onBack }) {
 
   return (
     <Box>
-      <Button startIcon={<ArrowBackIcon />} onClick={onBack} sx={{ mb: 2 }}>All job postings</Button>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+      <MobileButton startIcon={<ArrowBackIcon />} onClick={onBack} sx={{ mb: 2 }} variant="text">All job postings</MobileButton>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">{job.title}</Typography>
-          <Typography sx={{ color: 'text.secondary', fontSize: '0.85rem' }}>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>{job.title}</Typography>
+          <Typography sx={{ color: 'text.secondary', fontSize: isMobile ? '0.75rem' : '0.85rem' }}>
             {job.department_name || 'Unassigned'} · {job.filled_count}/{job.openings_count} filled
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <MobileStack gap={1} direction="row">
           {job.external_links?.linkedin && (
-            <Button size="small" variant="outlined" endIcon={<OpenInNewIcon fontSize="small" />} component={MuiLink} href={job.external_links.linkedin} target="_blank">LinkedIn</Button>
+            <MobileButton size="small" variant="outlined" endIcon={<OpenInNewIcon fontSize="small" />} component={MuiLink} href={job.external_links.linkedin} target="_blank">LinkedIn</MobileButton>
           )}
           {job.external_links?.naukri && (
-            <Button size="small" variant="outlined" endIcon={<OpenInNewIcon fontSize="small" />} component={MuiLink} href={job.external_links.naukri} target="_blank">Naukri</Button>
+            <MobileButton size="small" variant="outlined" endIcon={<OpenInNewIcon fontSize="small" />} component={MuiLink} href={job.external_links.naukri} target="_blank">Naukri</MobileButton>
           )}
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>Add candidate</Button>
-        </Box>
-      </Box>
+          <MobileButton variant="contained" size="small" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>Add candidate</MobileButton>
+        </MobileStack>
+      </MobilePageHeader>
 
-      {message && <Alert severity={message.severity} sx={{ mb: 2.5 }}>{message.text}</Alert>}
+      {message && <Alert severity={message.severity} sx={{ mb: 2 }}>{message.text}</Alert>}
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Candidate</TableCell><TableCell>Source</TableCell><TableCell>Current company</TableCell>
-              <TableCell align="right">Expected CTC</TableCell><TableCell align="right">Notice (days)</TableCell>
-              <TableCell>Stage</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {applications.map((a) => (
-              <TableRow key={a.id}>
-                <TableCell>
-                  <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{a.full_name}</Typography>
-                  <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>{a.email}</Typography>
-                </TableCell>
-                <TableCell><Chip size="small" label={a.source} variant="outlined" /></TableCell>
-                <TableCell>{a.current_company || '—'}</TableCell>
-                <TableCell align="right" className="figure">{a.expected_ctc ? `₹${Number(a.expected_ctc).toLocaleString('en-IN')}` : '—'}</TableCell>
-                <TableCell align="right" className="figure">{a.notice_period_days ?? '—'}</TableCell>
-                <TableCell>
-                  <TextField select size="small" value={a.stage} onChange={(e) => moveStage(a, e.target.value)} sx={{ minWidth: 130 }}>
-                    {STAGES.map((s) => <MenuItem key={s} value={s} disabled={a.stage === 'hired' && s !== 'hired'}>{s}</MenuItem>)}
-                  </TextField>
-                </TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Candidate</TableCell><TableCell>Source</TableCell><TableCell>Current company</TableCell>
+                <TableCell align="right">Expected CTC</TableCell><TableCell align="right">Notice (days)</TableCell>
+                <TableCell>Stage</TableCell>
               </TableRow>
-            ))}
-            {!applications.length && <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No candidates yet.</TableCell></TableRow>}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {applications.map((a) => (
+                <TableRow key={a.id}>
+                  <TableCell>
+                    <Typography sx={{ fontWeight: 600, fontSize: isMobile ? '0.8rem' : '0.875rem' }}>{a.full_name}</Typography>
+                    <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: 'text.secondary' }}>{a.email}</Typography>
+                  </TableCell>
+                  <TableCell><Chip size="small" label={a.source} variant="outlined" /></TableCell>
+                  <TableCell>{a.current_company || '—'}</TableCell>
+                  <TableCell align="right" className="figure">{a.expected_ctc ? `₹${Number(a.expected_ctc).toLocaleString('en-IN')}` : '—'}</TableCell>
+                  <TableCell align="right" className="figure">{a.notice_period_days ?? '—'}</TableCell>
+                  <TableCell>
+                    <MobileTextField
+                      select
+                      size="small"
+                      value={a.stage}
+                      onChange={(e) => moveStage(a, e.target.value)}
+                      options={STAGES.map((s) => ({ value: s, label: s, disabled: a.stage === 'hired' && s !== 'hired' }))}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!applications.length && <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No candidates yet.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Add candidate</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="Full name" margin="normal" value={candidateForm.full_name} onChange={(e) => setCandidateForm({ ...candidateForm, full_name: e.target.value })} />
-          <TextField fullWidth label="Email" margin="normal" value={candidateForm.email} onChange={(e) => setCandidateForm({ ...candidateForm, email: e.target.value })} />
-          <TextField fullWidth label="Phone" margin="normal" value={candidateForm.phone} onChange={(e) => setCandidateForm({ ...candidateForm, phone: e.target.value })} />
-          <TextField fullWidth select label="Source" margin="normal" value={candidateForm.source} onChange={(e) => setCandidateForm({ ...candidateForm, source: e.target.value })}>
-            {SOURCES.map((s) => <MenuItem key={s} value={s}>{s.replace('_', ' ')}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth label="Current company" margin="normal" value={candidateForm.current_company} onChange={(e) => setCandidateForm({ ...candidateForm, current_company: e.target.value })} />
-          <TextField fullWidth type="number" label="Expected CTC (₹/yr)" margin="normal" value={candidateForm.expected_ctc} onChange={(e) => setCandidateForm({ ...candidateForm, expected_ctc: e.target.value })} />
-          <TextField fullWidth type="number" label="Notice period (days)" margin="normal" value={candidateForm.notice_period_days} onChange={(e) => setCandidateForm({ ...candidateForm, notice_period_days: e.target.value })} />
+          <MobileFormGrid>
+            <MobileTextField fullWidth label="Full name" value={candidateForm.full_name} onChange={(e) => setCandidateForm({ ...candidateForm, full_name: e.target.value })} />
+            <MobileTextField fullWidth label="Email" value={candidateForm.email} onChange={(e) => setCandidateForm({ ...candidateForm, email: e.target.value })} />
+            <MobileTextField fullWidth label="Phone" value={candidateForm.phone} onChange={(e) => setCandidateForm({ ...candidateForm, phone: e.target.value })} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Source"
+              value={candidateForm.source}
+              onChange={(e) => setCandidateForm({ ...candidateForm, source: e.target.value })}
+              options={SOURCES.map((s) => ({ value: s, label: s.replace('_', ' ') }))}
+            />
+            <MobileTextField fullWidth label="Current company" value={candidateForm.current_company} onChange={(e) => setCandidateForm({ ...candidateForm, current_company: e.target.value })} />
+            <MobileTextField fullWidth type="number" label="Expected CTC (₹/yr)" value={candidateForm.expected_ctc} onChange={(e) => setCandidateForm({ ...candidateForm, expected_ctc: e.target.value })} />
+            <MobileTextField fullWidth type="number" label="Notice period (days)" value={candidateForm.notice_period_days} onChange={(e) => setCandidateForm({ ...candidateForm, notice_period_days: e.target.value })} />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAddOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={addCandidate} disabled={saving || !candidateForm.full_name}>{saving ? 'Adding…' : 'Add'}</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setAddOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={addCandidate} disabled={saving || !candidateForm.full_name}>{saving ? 'Adding…' : 'Add'}</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
 
-      <Dialog open={Boolean(hireOpen)} onClose={() => setHireOpen(null)} maxWidth="xs" fullWidth>
+      <MobileDialog open={Boolean(hireOpen)} onClose={() => setHireOpen(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Hire {hireOpen?.full_name}</DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 1 }}>Creates an employee record from this candidate. Finish compensation and bank details afterwards via Edit.</Alert>
-          <TextField fullWidth type="date" label="Date of joining" InputLabelProps={{ shrink: true }} margin="normal" value={hireDate} onChange={(e) => setHireDate(e.target.value)} />
+          <MobileTextField fullWidth type="date" label="Date of joining" InputLabelProps={{ shrink: true }} value={hireDate} onChange={(e) => setHireDate(e.target.value)} />
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setHireOpen(null)}>Cancel</Button>
-          <Button variant="contained" onClick={confirmHire} disabled={!hireDate}>Confirm hire</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setHireOpen(null)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={confirmHire} disabled={!hireDate}>Confirm hire</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

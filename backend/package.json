@@ -10,7 +10,27 @@
     "db:seed": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/seed_chart_of_accounts.sql",
     "db:migrate:platform-sync": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/002_platform_sync.sql",
     "db:migrate:document-engine": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/004_document_engine.sql",
-    "db:seed:document-templates": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/seed_document_templates.sql"
+    "db:seed:document-templates": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/seed_document_templates.sql",
+    "db:migrate:rag": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/rag_schema.sql",
+    "db:migrate:accrual": "psql \"$INTERNAL_OPS_DATABASE_URL\" -f db/010_deferred_revenue_prepaid.sql",
+    "rag:ingest": "node scripts/rag-ingest.js",
+    "rag:ingest:full": "node scripts/rag-ingest.js full",
+    "rag:ingest:templates": "node scripts/rag-ingest.js templates",
+    "rag:ingest:generated": "node scripts/rag-ingest.js generated",
+    "rag:ingest:documents": "node scripts/rag-ingest.js documents",
+    "rag:ingest:compliance": "node scripts/rag-ingest.js compliance",
+    "rag:ingest:appsettings": "node scripts/rag-ingest.js appsettings",
+    "rag:ingest:tax": "node scripts/rag-ingest.js tax",
+    "rag:ingest:pt": "node scripts/rag-ingest.js pt",
+    "rag:ingest:company": "node scripts/rag-ingest.js company",
+    "rag:health": "node scripts/rag-ingest.js health",
+    "accrual:monthly": "node scripts/run-monthly-accrual.js",
+    "cleanup:duplicates": "node scripts/cleanup-duplicate-bills.js",
+    "cleanup:duplicates:execute": "node scripts/cleanup-duplicate-bills.js --execute",
+    "fix:subscription-revenue": "node scripts/fix-subscription-revenue.js",
+    "fix:subscription-revenue:execute": "node scripts/fix-subscription-revenue.js --execute",
+    "fix:domain-prepaid": "node scripts/fix-domain-prepaid.js",
+    "fix:domain-prepaid:execute": "node scripts/fix-domain-prepaid.js --execute"
   },
   "dependencies": {
     "archiver": "^8.0.0",
@@ -32,10 +52,12 @@
     "qrcode": "^1.5.4",
     "razorpay": "^2.9.6",
     "sharp": "^0.35.3",
-    "speakeasy": "^2.0.0"
+    "speakeasy": "^2.0.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "supertest": "^7.2.2"
   },
   "overrides": {
     "archiver": "^8.0.0",

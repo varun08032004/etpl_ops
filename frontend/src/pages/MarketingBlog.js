@@ -9,6 +9,19 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import SyncIcon from '@mui/icons-material/Sync';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileFormGrid,
+  MobileActionButtons,
+  MobileStack,
+  ResponsiveTableContainer,
+  MobileCardGrid,
+  useMobile,
+} from '../components/MobileResponsive';
 
 const STATUS_COLOR = { draft: 'default', in_review: 'warning', scheduled: 'info', published: 'success', archived: 'default' };
 const STATUSES = ['draft', 'in_review', 'scheduled', 'published', 'archived'];
@@ -29,6 +42,7 @@ function slugify(title) {
 }
 
 export default function MarketingBlog() {
+  const isMobile = useMobile();
   const { staff } = useAuth();
   const [isMarketingHead, setIsMarketingHead] = useState(false);
   const canEdit = ['owner', 'admin'].includes(staff?.role) || isMarketingHead;
@@ -42,7 +56,7 @@ export default function MarketingBlog() {
   const [slugTouched, setSlugTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState('write'); // 'write' | 'seo'
+  const [tab, setTab] = useState('write');
   const [syncingId, setSyncingId] = useState(null);
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncError, setSyncError] = useState('');
@@ -161,106 +175,118 @@ export default function MarketingBlog() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <MobilePageHeader>
         <Box>
-          <Typography variant="h5">Blog</Typography>
+          <Typography variant={isMobile ? 'h6' : 'h5'}>Blog</Typography>
           <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5 }}>
             Write and manage ethertrack.in blog posts — BRSR/GHG/TCFD/CDP/GRI explainers, product updates, company news.
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <MobileStack gap={1} direction="row" flexWrap="wrap">
           {canEdit && (
-            <Button
-              variant="outlined" startIcon={syncingAll ? <CircularProgress size={16} /> : <SyncIcon />}
-              onClick={handleSyncAllAnalytics} disabled={syncingAll}
+            <MobileButton
+              variant="outlined"
+              startIcon={syncingAll ? <CircularProgress size={16} /> : <SyncIcon />}
+              onClick={handleSyncAllAnalytics}
+              disabled={syncingAll}
             >
               {syncingAll ? 'Syncing…' : 'Sync analytics'}
-            </Button>
+            </MobileButton>
           )}
-          {canEdit && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>New post</Button>}
-        </Box>
-      </Box>
+          {canEdit && <MobileButton variant="contained" startIcon={<AddIcon />} onClick={openCreate}>New post</MobileButton>}
+        </MobileStack>
+      </MobilePageHeader>
 
       {syncError && <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setSyncError('')}>{syncError}</Alert>}
 
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
-        <Paper sx={{ p: 2, minWidth: 140 }}>
-          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Total posts</Typography>
-          <Typography sx={{ fontSize: '1.3rem', fontWeight: 700 }} className="figure">{totals.total}</Typography>
-        </Paper>
-        <Paper sx={{ p: 2, minWidth: 140 }}>
-          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Published</Typography>
-          <Typography sx={{ fontSize: '1.3rem', fontWeight: 700 }} className="figure">{totals.published}</Typography>
-        </Paper>
-        <Paper sx={{ p: 2, minWidth: 140 }}>
-          <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>In progress</Typography>
-          <Typography sx={{ fontSize: '1.3rem', fontWeight: 700 }} className="figure">{totals.inProgress}</Typography>
-        </Paper>
-      </Box>
+      <MobileCardGrid sx={{ mb: 3 }}>
+        <MobilePaper>
+          <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>Total posts</Typography>
+          <Typography sx={{ fontSize: isMobile ? '1rem' : '1.3rem', fontWeight: 700 }} className="figure">{totals.total}</Typography>
+        </MobilePaper>
+        <MobilePaper>
+          <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>Published</Typography>
+          <Typography sx={{ fontSize: isMobile ? '1rem' : '1.3rem', fontWeight: 700 }} className="figure">{totals.published}</Typography>
+        </MobilePaper>
+        <MobilePaper>
+          <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>In progress</Typography>
+          <Typography sx={{ fontSize: isMobile ? '1rem' : '1.3rem', fontWeight: 700 }} className="figure">{totals.inProgress}</Typography>
+        </MobilePaper>
+      </MobileCardGrid>
 
-      <TextField select size="small" label="Filter status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} sx={{ mb: 2, minWidth: 180 }}>
-        <MenuItem value="">All statuses</MenuItem>
-        {STATUSES.map((s) => <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s.replace('_', ' ')}</MenuItem>)}
-      </TextField>
+      <MobilePaper sx={{ mb: 2 }}>
+        <MobileTextField
+          select
+          size="small"
+          label="Filter status"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          options={[{ value: '', label: 'All statuses' }, ...STATUSES.map((s) => ({ value: s, label: s.replace('_', ' ') }))]}
+        />
+      </MobilePaper>
 
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Title</TableCell>
-              <TableCell>Category</TableCell>
-              <TableCell>Author</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Date</TableCell>
-              <TableCell align="right">Clicks</TableCell>
-              <TableCell align="right">Impressions</TableCell>
-              <TableCell align="right">Views</TableCell>
-              <TableCell align="right">Action</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {posts.map((p) => (
-              <TableRow key={p.id}>
-                <TableCell>
-                  <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{p.title}</Typography>
-                  {p.published_url && (
-                    <Link href={p.published_url} target="_blank" rel="noopener noreferrer" sx={{ fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: 0.3 }}>
-                      View live <OpenInNewIcon sx={{ fontSize: 12 }} />
-                    </Link>
-                  )}
-                </TableCell>
-                <TableCell><Chip size="small" label={CATEGORY_LABEL[p.category] || p.category} /></TableCell>
-                <TableCell sx={{ fontSize: '0.8rem' }}>{p.author_name || '—'}</TableCell>
-                <TableCell><Chip size="small" label={p.status.replace('_', ' ')} color={STATUS_COLOR[p.status]} sx={{ textTransform: 'capitalize' }} /></TableCell>
-                <TableCell className="figure" sx={{ fontSize: '0.8rem' }}>
-                  {(p.published_at || p.scheduled_date)?.slice(0, 10) || '—'}
-                </TableCell>
-                <TableCell align="right" className="figure">{p.clicks ?? '—'}</TableCell>
-                <TableCell align="right" className="figure">{p.impressions ?? '—'}</TableCell>
-                <TableCell align="right" className="figure">{p.pageviews ?? '—'}</TableCell>
-                <TableCell align="right">
-                  {canEdit && p.status === 'published' && (
-                    <Tooltip title={p.analytics_as_of ? `Last synced ${p.analytics_as_of.slice(0, 10)}` : 'Sync analytics'}>
-                      <span>
-                        <IconButton size="small" onClick={() => handleSyncAnalytics(p)} disabled={syncingId === p.id}>
-                          {syncingId === p.id ? <CircularProgress size={16} /> : <SyncIcon sx={{ fontSize: 16 }} />}
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                  )}
-                  {canEdit && <Button size="small" onClick={() => openEdit(p)}>Edit</Button>}
-                  {canEdit && <Button size="small" color="error" onClick={() => handleDelete(p)}>Delete</Button>}
-                </TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Title</TableCell>
+                <TableCell>Category</TableCell>
+                <TableCell>Author</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Date</TableCell>
+                <TableCell align="right">Clicks</TableCell>
+                <TableCell align="right">Impressions</TableCell>
+                <TableCell align="right">Views</TableCell>
+                <TableCell align="right">Action</TableCell>
               </TableRow>
-            ))}
-            {!posts.length && (
-              <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No blog posts yet.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {posts.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell>
+                    <Typography sx={{ fontWeight: 600, fontSize: isMobile ? '0.75rem' : '0.875rem' }}>{p.title}</Typography>
+                    {p.published_url && (
+                      <Link href={p.published_url} target="_blank" rel="noopener noreferrer" sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', display: 'inline-flex', alignItems: 'center', gap: 0.3 }}>
+                        View live <OpenInNewIcon sx={{ fontSize: 12 }} />
+                      </Link>
+                    )}
+                  </TableCell>
+                  <TableCell><Chip size="small" label={CATEGORY_LABEL[p.category] || p.category} /></TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.8rem' }}>{p.author_name || '—'}</TableCell>
+                  <TableCell><Chip size="small" label={p.status.replace('_', ' ')} color={STATUS_COLOR[p.status]} sx={{ textTransform: 'capitalize' }} /></TableCell>
+                  <TableCell className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.8rem' }}>
+                    {(p.published_at || p.scheduled_date)?.slice(0, 10) || '—'}
+                  </TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem' }}>{p.clicks ?? '—'}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem' }}>{p.impressions ?? '—'}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem' }}>{p.pageviews ?? '—'}</TableCell>
+                  <TableCell align="right">
+                    <MobileStack gap={1} direction="row">
+                      {canEdit && p.status === 'published' && (
+                        <Tooltip title={p.analytics_as_of ? `Last synced ${p.analytics_as_of.slice(0, 10)}` : 'Sync analytics'}>
+                          <span>
+                            <IconButton size="small" onClick={() => handleSyncAnalytics(p)} disabled={syncingId === p.id}>
+                              {syncingId === p.id ? <CircularProgress size={16} /> : <SyncIcon sx={{ fontSize: 16 }} />}
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      )}
+                      {canEdit && <MobileButton size="small" onClick={() => openEdit(p)}>Edit</MobileButton>}
+                      {canEdit && <MobileButton size="small" color="error" onClick={() => handleDelete(p)}>Delete</MobileButton>}
+                    </MobileStack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!posts.length && (
+                <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No blog posts yet.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="md" fullWidth>
+      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>{editingId ? 'Edit' : 'New'} blog post</DialogTitle>
         <DialogContent>
           <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: 2 }}>
@@ -270,73 +296,93 @@ export default function MarketingBlog() {
 
           {tab === 'write' && (
             <>
-              <TextField fullWidth label="Title" margin="normal" value={form.title} onChange={(e) => handleTitleChange(e.target.value)} />
-              <TextField
-                fullWidth label="Slug" margin="normal" value={form.slug}
+              <MobileTextField fullWidth label="Title" value={form.title} onChange={(e) => handleTitleChange(e.target.value)} />
+              <MobileTextField
+                fullWidth
+                label="Slug"
+                value={form.slug}
                 onChange={(e) => { setSlugTouched(true); setForm({ ...form, slug: slugify(e.target.value) }); }}
                 helperText={`ethertrack.in/blog/${form.slug || 'your-slug-here'}`}
               />
-              <TextField fullWidth label="Excerpt" margin="normal" multiline rows={2} value={form.excerpt} onChange={(e) => setForm({ ...form, excerpt: e.target.value })} helperText="Short summary shown on the blog listing page and social shares" />
-              <TextField
-                fullWidth label="Content" margin="normal" multiline rows={14} value={form.content}
+              <MobileTextField fullWidth label="Excerpt" multiline rows={2} value={form.excerpt} onChange={(e) => setForm({ ...form, excerpt: e.target.value })} helperText="Short summary shown on the blog listing page and social shares" />
+              <MobileTextField
+                fullWidth
+                label="Content"
+                multiline
+                rows={14}
+                value={form.content}
                 onChange={(e) => setForm({ ...form, content: e.target.value })}
                 helperText="Markdown or HTML — whatever your publishing pipeline expects"
                 sx={{ '& textarea': { fontFamily: 'monospace', fontSize: '0.85rem' } }}
               />
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6}>
-                  <TextField fullWidth select label="Category" margin="normal" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-                    {CATEGORIES.map((c) => <MenuItem key={c} value={c}>{CATEGORY_LABEL[c]}</MenuItem>)}
-                  </TextField>
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <TextField fullWidth select label="Author" margin="normal" value={form.author_employee_id} onChange={(e) => setForm({ ...form, author_employee_id: e.target.value })}>
-                    <MenuItem value="">— Unassigned —</MenuItem>
-                    {employees.map((e) => <MenuItem key={e.id} value={e.id}>{e.full_name}</MenuItem>)}
-                  </TextField>
-                </Grid>
-              </Grid>
-              <TextField fullWidth label="Tags (comma separated)" margin="normal" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} />
-              <TextField fullWidth label="Cover image URL" margin="normal" value={form.cover_image_url} onChange={(e) => setForm({ ...form, cover_image_url: e.target.value })} />
+              <MobileStack gap={1.5} direction="row" flexWrap="wrap">
+                <MobileTextField
+                  fullWidth
+                  select
+                  label="Category"
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  options={CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABEL[c] }))}
+                />
+                <MobileTextField
+                  fullWidth
+                  select
+                  label="Author"
+                  value={form.author_employee_id}
+                  onChange={(e) => setForm({ ...form, author_employee_id: e.target.value })}
+                  options={[{ value: '', label: '— Unassigned —' }, ...employees.map((e) => ({ value: e.id, label: e.full_name }))]}
+                />
+              </MobileStack>
+              <MobileTextField fullWidth label="Tags (comma separated)" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} />
+              <MobileTextField fullWidth label="Cover image URL" value={form.cover_image_url} onChange={(e) => setForm({ ...form, cover_image_url: e.target.value })} />
             </>
           )}
 
           {tab === 'seo' && (
             <>
-              <TextField fullWidth select label="Status" margin="normal" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                {STATUSES.map((s) => <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>{s.replace('_', ' ')}</MenuItem>)}
-              </TextField>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6}>
-                  <TextField fullWidth type="date" label="Scheduled date" InputLabelProps={{ shrink: true }} margin="normal" value={form.scheduled_date} onChange={(e) => setForm({ ...form, scheduled_date: e.target.value })} />
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <TextField fullWidth type="date" label="Published date" InputLabelProps={{ shrink: true }} margin="normal" value={form.published_at} onChange={(e) => setForm({ ...form, published_at: e.target.value })} helperText="Leave blank to auto-set when you mark it Published" />
-                </Grid>
-              </Grid>
-              <TextField fullWidth label="Published URL" margin="normal" value={form.published_url} onChange={(e) => setForm({ ...form, published_url: e.target.value })} />
-              <TextField fullWidth type="number" label="View count (manual, from GA4)" margin="normal" value={form.view_count} onChange={(e) => setForm({ ...form, view_count: e.target.value })} />
-              <TextField
-                fullWidth label="SEO title" margin="normal" value={form.seo_title}
+              <MobileTextField
+                fullWidth
+                select
+                label="Status"
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value })}
+                options={STATUSES.map((s) => ({ value: s, label: s.replace('_', ' ') }))}
+              />
+              <MobileStack gap={1.5} direction="row" flexWrap="wrap">
+                <MobileTextField fullWidth type="date" label="Scheduled date" InputLabelProps={{ shrink: true }} value={form.scheduled_date} onChange={(e) => setForm({ ...form, scheduled_date: e.target.value })} />
+                <MobileTextField fullWidth type="date" label="Published date" InputLabelProps={{ shrink: true }} value={form.published_at} onChange={(e) => setForm({ ...form, published_at: e.target.value })} helperText="Leave blank to auto-set when you mark it Published" />
+              </MobileStack>
+              <MobileTextField fullWidth label="Published URL" value={form.published_url} onChange={(e) => setForm({ ...form, published_url: e.target.value })} />
+              <MobileTextField fullWidth type="number" label="View count (manual, from GA4)" value={form.view_count} onChange={(e) => setForm({ ...form, view_count: e.target.value })} />
+              <MobileTextField
+                fullWidth
+                label="SEO title"
+                value={form.seo_title}
                 onChange={(e) => setForm({ ...form, seo_title: e.target.value.slice(0, 70) })}
                 helperText={`${form.seo_title.length}/70 characters — Google truncates beyond ~60-70`}
               />
-              <TextField
-                fullWidth label="SEO description" margin="normal" multiline rows={2} value={form.seo_description}
+              <MobileTextField
+                fullWidth
+                label="SEO description"
+                multiline
+                rows={2}
+                value={form.seo_description}
                 onChange={(e) => setForm({ ...form, seo_description: e.target.value.slice(0, 160) })}
                 helperText={`${form.seo_description.length}/160 characters`}
               />
-              <TextField fullWidth label="Internal notes" margin="normal" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+              <MobileTextField fullWidth label="Internal notes" multiline rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </>
           )}
 
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving || !form.title}>{saving ? 'Saving…' : 'Save'}</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleSave} disabled={saving || !form.title}>
+            {saving ? 'Saving…' : 'Save'}
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }

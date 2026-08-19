@@ -47,7 +47,7 @@ export default function SignDocument() {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default', p: 2 }}>
+    <Box sx={{ height: '100vh', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default', p: 2 }}>
       <Paper sx={{ width: 440, p: 4 }}>
         <Typography sx={{ fontWeight: 700, fontSize: '1.05rem', mb: 3 }}>
           ETPL <Box component="span" sx={{ color: 'primary.main' }}>Ops</Box> — Sign document

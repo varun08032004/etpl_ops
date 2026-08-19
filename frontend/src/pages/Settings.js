@@ -1,19 +1,32 @@
 import { useEffect, useState } from 'react';
 import {
-  Box, Typography, Paper, Tabs, Tab, Table, TableHead, TableRow, TableCell, TableBody,
-  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, IconButton, Chip, Tooltip,
+  Box, Typography, Tabs, Tab, Table, TableHead, TableRow, TableCell, TableBody,
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, IconButton, Chip, Tooltip,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddIcon from '@mui/icons-material/Add';
 import VerifiedIcon from '@mui/icons-material/Verified';
 import client from '../api/client';
+import {
+  MobilePaper,
+  MobilePageHeader,
+  MobileButton,
+  MobileTextField,
+  MobileDialog,
+  MobileActionButtons,
+  MobileStack,
+  MobileFormGrid,
+  ResponsiveTableContainer,
+  useMobile,
+} from '../components/MobileResponsive';
 
 function ComplianceRatesTab() {
   const [settings, setSettings] = useState([]);
   const [editing, setEditing] = useState(null);
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
+  const isMobile = useMobile();
 
   const load = () => client.get('/settings/compliance').then(({ data }) => setSettings(data.settings)).catch(() => setSettings([]));
   useEffect(() => { load(); }, []);
@@ -42,63 +55,67 @@ function ComplianceRatesTab() {
         Changing one changes every downstream calculation from this point forward — verify with your CA before editing, and use "Mark verified" once confirmed against the cited source.
         Editing a value clears its verified status; it needs re-confirming.
       </Alert>
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Setting</TableCell><TableCell>Value</TableCell><TableCell>Note / source</TableCell>
-              <TableCell>Status</TableCell><TableCell align="right"></TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {settings.map((s) => (
-              <TableRow key={s.key}>
-                <TableCell className="figure">{s.key}</TableCell>
-                <TableCell className="figure" sx={{ fontWeight: 600 }}>{s.value}</TableCell>
-                <TableCell sx={{ fontSize: '0.8rem', color: 'text.secondary', maxWidth: 420 }}>
-                  {s.note}
-                  {s.source_reference && (
-                    <Typography sx={{ fontSize: '0.75rem', color: 'text.disabled', mt: 0.5, fontStyle: 'italic' }}>
-                      Source to check: {s.source_reference}
-                    </Typography>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {s.verified_by ? (
-                    <Tooltip title={`Verified by ${s.verified_by_email || 'a staff member'} on ${new Date(s.verified_at).toLocaleDateString('en-IN')}`}>
-                      <Chip size="small" color="success" icon={<VerifiedIcon />} label="Verified" />
-                    </Tooltip>
-                  ) : (
-                    <Chip size="small" color="warning" variant="outlined" label="Unverified — confirm with CA" />
-                  )}
-                </TableCell>
-                <TableCell align="right">
-                  {!s.verified_by && (
-                    <Button size="small" onClick={() => markVerified(s.key)} sx={{ mr: 1 }}>Mark verified</Button>
-                  )}
-                  <IconButton size="small" onClick={() => { setEditing(s); setValue(s.value); setError(''); }}><EditIcon fontSize="small" /></IconButton>
-                </TableCell>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Setting</TableCell><TableCell>Value</TableCell><TableCell>Note / source</TableCell>
+                <TableCell>Status</TableCell><TableCell align="right"></TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {settings.map((s) => (
+                <TableRow key={s.key}>
+                  <TableCell className="figure" sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem' }}>{s.key}</TableCell>
+                  <TableCell className="figure" sx={{ fontWeight: 600, fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.value}</TableCell>
+                  <TableCell sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem', color: 'text.secondary', maxWidth: isMobile ? '100%' : 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.note}
+                    {s.source_reference && (
+                      <Typography sx={{ fontSize: '0.7rem', color: 'text.disabled', mt: 0.5, fontStyle: 'italic' }}>
+                        Source to check: {s.source_reference}
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {s.verified_by ? (
+                      <Tooltip title={`Verified by ${s.verified_by_email || 'a staff member'} on ${new Date(s.verified_at).toLocaleDateString('en-IN')}`}>
+                        <Chip size="small" color="success" icon={<VerifiedIcon />} label="Verified" />
+                      </Tooltip>
+                    ) : (
+                      <Chip size="small" color="warning" variant="outlined" label="Unverified — confirm with CA" />
+                    )}
+                  </TableCell>
+                  <TableCell align="right">
+                    <MobileStack gap={1} direction="row">
+                      {!s.verified_by && (
+                        <MobileButton size="small" onClick={() => markVerified(s.key)}>Mark verified</MobileButton>
+                      )}
+                      <IconButton size="small" onClick={() => { setEditing(s); setValue(s.value); setError(''); }}><EditIcon fontSize="small" /></IconButton>
+                    </MobileStack>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={!!editing} onClose={() => setEditing(null)} maxWidth="xs" fullWidth>
+      <MobileDialog open={!!editing} onClose={() => setEditing(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Edit {editing?.key}</DialogTitle>
         <DialogContent>
           <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', mb: 1 }}>{editing?.note}</Typography>
           {editing?.source_reference && (
             <Alert severity="info" sx={{ mb: 2, fontSize: '0.8rem' }}>{editing.source_reference}</Alert>
           )}
-          <TextField fullWidth label="Value" value={value} onChange={(e) => setValue(e.target.value)} margin="normal" autoFocus />
+          <MobileTextField fullWidth label="Value" value={value} onChange={(e) => setValue(e.target.value)} margin="normal" autoFocus />
           {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEditing(null)}>Cancel</Button>
-          <Button variant="contained" onClick={save}>Save</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setEditing(null)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={save}>Save</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }
@@ -108,6 +125,7 @@ function PTSlabsTab() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ id: null, state: '', gross_from: '', gross_to: '', monthly_amount: '', applies_in_february_override: '' });
   const [error, setError] = useState('');
+  const isMobile = useMobile();
 
   const load = () => client.get('/settings/pt-slabs').then(({ data }) => setSlabs(data.slabs)).catch(() => setSlabs([]));
   useEffect(() => { load(); }, []);
@@ -137,48 +155,55 @@ function PTSlabsTab() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={openNew}>Add PT slab</Button>
-      </Box>
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow><TableCell>State</TableCell><TableCell align="right">Gross from</TableCell><TableCell align="right">Gross to</TableCell><TableCell align="right">Monthly PT</TableCell><TableCell align="right">Feb override</TableCell><TableCell align="right"></TableCell></TableRow>
-          </TableHead>
-          <TableBody>
-            {slabs.map((s) => (
-              <TableRow key={s.id}>
-                <TableCell>{s.state}</TableCell>
-                <TableCell align="right" className="figure">₹{Number(s.gross_from).toLocaleString('en-IN')}</TableCell>
-                <TableCell align="right" className="figure">{s.gross_to ? `₹${Number(s.gross_to).toLocaleString('en-IN')}` : '—'}</TableCell>
-                <TableCell align="right" className="figure">₹{Number(s.monthly_amount).toLocaleString('en-IN')}</TableCell>
-                <TableCell align="right" className="figure">{s.applies_in_february_override ? `₹${Number(s.applies_in_february_override).toLocaleString('en-IN')}` : '—'}</TableCell>
-                <TableCell align="right">
-                  <IconButton size="small" onClick={() => openEdit(s)}><EditIcon fontSize="small" /></IconButton>
-                  <IconButton size="small" onClick={() => remove(s.id)}><DeleteOutlineIcon fontSize="small" /></IconButton>
-                </TableCell>
-              </TableRow>
-            ))}
-            {!slabs.length && <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No PT slabs configured yet.</TableCell></TableRow>}
-          </TableBody>
-        </Table>
-      </Paper>
+      <MobilePageHeader>
+        <Typography variant={isMobile ? 'h6' : 'h5'} sx={{ mb: 0 }}>Professional Tax slabs</Typography>
+        <MobileButton variant="contained" startIcon={<AddIcon />} onClick={openNew}>Add PT slab</MobileButton>
+      </MobilePageHeader>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow><TableCell>State</TableCell><TableCell align="right">Gross from</TableCell><TableCell align="right">Gross to</TableCell><TableCell align="right">Monthly PT</TableCell><TableCell align="right">Feb override</TableCell><TableCell align="right"></TableCell></TableRow>
+            </TableHead>
+            <TableBody>
+              {slabs.map((s) => (
+                <TableRow key={s.id}>
+                  <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.state}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>₹{Number(s.gross_from).toLocaleString('en-IN')}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.gross_to ? `₹${Number(s.gross_to).toLocaleString('en-IN')}` : '—'}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>₹{Number(s.monthly_amount).toLocaleString('en-IN')}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.applies_in_february_override ? `₹${Number(s.applies_in_february_override).toLocaleString('en-IN')}` : '—'}</TableCell>
+                  <TableCell align="right">
+                    <MobileStack gap={1} direction="row">
+                      <IconButton size="small" onClick={() => openEdit(s)}><EditIcon fontSize="small" /></IconButton>
+                      <IconButton size="small" onClick={() => remove(s.id)}><DeleteOutlineIcon fontSize="small" /></IconButton>
+                    </MobileStack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!slabs.length && <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No PT slabs configured yet.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{form.id ? 'Edit' : 'New'} PT slab</DialogTitle>
         <DialogContent>
-          <TextField fullWidth label="State" margin="normal" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} />
-          <TextField fullWidth type="number" label="Gross from (₹/month)" margin="normal" value={form.gross_from} onChange={(e) => setForm({ ...form, gross_from: e.target.value })} />
-          <TextField fullWidth type="number" label="Gross to (blank = no upper limit)" margin="normal" value={form.gross_to} onChange={(e) => setForm({ ...form, gross_to: e.target.value })} />
-          <TextField fullWidth type="number" label="Monthly PT amount (₹)" margin="normal" value={form.monthly_amount} onChange={(e) => setForm({ ...form, monthly_amount: e.target.value })} />
-          <TextField fullWidth type="number" label="February override (optional)" margin="normal" value={form.applies_in_february_override} onChange={(e) => setForm({ ...form, applies_in_february_override: e.target.value })} />
+          <MobileFormGrid sx={{ mt: 1 }}>
+            <MobileTextField fullWidth label="State" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} margin="normal" />
+            <MobileTextField fullWidth type="number" label="Gross from (₹/month)" value={form.gross_from} onChange={(e) => setForm({ ...form, gross_from: e.target.value })} margin="normal" />
+            <MobileTextField fullWidth type="number" label="Gross to (blank = no upper limit)" value={form.gross_to} onChange={(e) => setForm({ ...form, gross_to: e.target.value })} margin="normal" />
+            <MobileTextField fullWidth type="number" label="Monthly PT amount (₹)" value={form.monthly_amount} onChange={(e) => setForm({ ...form, monthly_amount: e.target.value })} margin="normal" />
+            <MobileTextField fullWidth type="number" label="February override (optional)" value={form.applies_in_february_override} onChange={(e) => setForm({ ...form, applies_in_february_override: e.target.value })} margin="normal" />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={save}>Save</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setDialogOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={save}>Save</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }
@@ -188,6 +213,7 @@ function TaxSlabsTab() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ id: null, regime: 'new', fiscal_year: '', income_from: '', income_to: '', rate_percent: '', standard_deduction: '', cess_percent: '' });
   const [error, setError] = useState('');
+  const isMobile = useMobile();
 
   const load = () => client.get('/settings/tax-slabs').then(({ data }) => setSlabs(data.slabs)).catch(() => setSlabs([]));
   useEffect(() => { load(); }, []);
@@ -217,58 +243,62 @@ function TaxSlabsTab() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={openNew}>Add tax slab</Button>
-      </Box>
-      <Paper>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>FY</TableCell><TableCell>Regime</TableCell><TableCell align="right">From</TableCell><TableCell align="right">To</TableCell>
-              <TableCell align="right">Rate</TableCell><TableCell align="right">Std deduction</TableCell><TableCell align="right">Cess</TableCell><TableCell align="right"></TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {slabs.map((s) => (
-              <TableRow key={s.id}>
-                <TableCell className="figure">{s.fiscal_year}</TableCell>
-                <TableCell sx={{ textTransform: 'capitalize' }}>{s.regime}</TableCell>
-                <TableCell align="right" className="figure">₹{Number(s.income_from).toLocaleString('en-IN')}</TableCell>
-                <TableCell align="right" className="figure">{s.income_to ? `₹${Number(s.income_to).toLocaleString('en-IN')}` : '—'}</TableCell>
-                <TableCell align="right" className="figure">{s.rate_percent}%</TableCell>
-                <TableCell align="right" className="figure">₹{Number(s.standard_deduction).toLocaleString('en-IN')}</TableCell>
-                <TableCell align="right" className="figure">{s.cess_percent}%</TableCell>
-                <TableCell align="right">
-                  <IconButton size="small" onClick={() => openEdit(s)}><EditIcon fontSize="small" /></IconButton>
-                  <IconButton size="small" onClick={() => remove(s.id)}><DeleteOutlineIcon fontSize="small" /></IconButton>
-                </TableCell>
+      <MobilePageHeader>
+        <Typography variant={isMobile ? 'h6' : 'h5'} sx={{ mb: 0 }}>Income Tax slabs</Typography>
+        <MobileButton variant="contained" startIcon={<AddIcon />} onClick={openNew}>Add tax slab</MobileButton>
+      </MobilePageHeader>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>FY</TableCell><TableCell>Regime</TableCell><TableCell align="right">From</TableCell><TableCell align="right">To</TableCell>
+                <TableCell align="right">Rate</TableCell><TableCell align="right">Std deduction</TableCell><TableCell align="right">Cess</TableCell><TableCell align="right"></TableCell>
               </TableRow>
-            ))}
-            {!slabs.length && <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No tax slabs configured yet.</TableCell></TableRow>}
-          </TableBody>
-        </Table>
-      </Paper>
+            </TableHead>
+            <TableBody>
+              {slabs.map((s) => (
+                <TableRow key={s.id}>
+                  <TableCell className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.fiscal_year}</TableCell>
+                  <TableCell sx={{ textTransform: 'capitalize', fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.regime}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>₹{Number(s.income_from).toLocaleString('en-IN')}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.income_to ? `₹${Number(s.income_to).toLocaleString('en-IN')}` : '—'}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.rate_percent}%</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>₹{Number(s.standard_deduction).toLocaleString('en-IN')}</TableCell>
+                  <TableCell align="right" className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.cess_percent}%</TableCell>
+                  <TableCell align="right">
+                    <MobileStack gap={1} direction="row">
+                      <IconButton size="small" onClick={() => openEdit(s)}><EditIcon fontSize="small" /></IconButton>
+                      <IconButton size="small" onClick={() => remove(s.id)}><DeleteOutlineIcon fontSize="small" /></IconButton>
+                    </MobileStack>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!slabs.length && <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No tax slabs configured yet.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="xs" fullWidth>
+      <MobileDialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{form.id ? 'Edit' : 'New'} tax slab</DialogTitle>
         <DialogContent>
-          <TextField fullWidth select label="Regime" margin="normal" value={form.regime} onChange={(e) => setForm({ ...form, regime: e.target.value })}>
-            <MenuItem value="new">New regime</MenuItem>
-            <MenuItem value="old">Old regime</MenuItem>
-          </TextField>
-          <TextField fullWidth label="Fiscal year (e.g. FY2026-27)" margin="normal" value={form.fiscal_year} onChange={(e) => setForm({ ...form, fiscal_year: e.target.value })} />
-          <TextField fullWidth type="number" label="Income from (₹)" margin="normal" value={form.income_from} onChange={(e) => setForm({ ...form, income_from: e.target.value })} />
-          <TextField fullWidth type="number" label="Income to (blank = no upper limit)" margin="normal" value={form.income_to} onChange={(e) => setForm({ ...form, income_to: e.target.value })} />
-          <TextField fullWidth type="number" label="Rate (%)" margin="normal" value={form.rate_percent} onChange={(e) => setForm({ ...form, rate_percent: e.target.value })} />
-          <TextField fullWidth type="number" label="Standard deduction (₹)" margin="normal" value={form.standard_deduction} onChange={(e) => setForm({ ...form, standard_deduction: e.target.value })} />
-          <TextField fullWidth type="number" label="Cess (%)" margin="normal" value={form.cess_percent} onChange={(e) => setForm({ ...form, cess_percent: e.target.value })} />
+          <MobileFormGrid sx={{ mt: 1 }}>
+            <MobileTextField fullWidth select label="Regime" value={form.regime} onChange={(e) => setForm({ ...form, regime: e.target.value })} margin="normal" options={[{ value: 'new', label: 'New regime' }, { value: 'old', label: 'Old regime' }]} />
+            <MobileTextField fullWidth label="Fiscal year (e.g. FY2026-27)" value={form.fiscal_year} onChange={(e) => setForm({ ...form, fiscal_year: e.target.value })} margin="normal" />
+            <MobileTextField fullWidth type="number" label="Income from (₹)" value={form.income_from} onChange={(e) => setForm({ ...form, income_from: e.target.value })} margin="normal" />
+            <MobileTextField fullWidth type="number" label="Income to (blank = no upper limit)" value={form.income_to} onChange={(e) => setForm({ ...form, income_to: e.target.value })} margin="normal" />
+            <MobileTextField fullWidth type="number" label="Rate (%)" value={form.rate_percent} onChange={(e) => setForm({ ...form, rate_percent: e.target.value })} margin="normal" />
+            <MobileTextField fullWidth type="number" label="Standard deduction (₹)" value={form.standard_deduction} onChange={(e) => setForm({ ...form, standard_deduction: e.target.value })} margin="normal" />
+            <MobileTextField fullWidth type="number" label="Cess (%)" value={form.cess_percent} onChange={(e) => setForm({ ...form, cess_percent: e.target.value })} margin="normal" />
+          </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={save}>Save</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setDialogOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={save}>Save</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }
@@ -278,6 +308,7 @@ function GeneralTab() {
   const [editing, setEditing] = useState(null);
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
+  const isMobile = useMobile();
 
   const load = () => client.get('/settings/app').then(({ data }) => setSettings(data.settings)).catch(() => setSettings([]));
   useEffect(() => { load(); }, []);
@@ -295,55 +326,61 @@ function GeneralTab() {
 
   return (
     <Box>
-      <Paper>
-        <Table>
-          <TableHead><TableRow><TableCell>Setting</TableCell><TableCell>Value</TableCell><TableCell align="right"></TableCell></TableRow></TableHead>
-          <TableBody>
-            {settings.map((s) => (
-              <TableRow key={s.key}>
-                <TableCell>{s.label}</TableCell>
-                <TableCell className="figure" sx={{ fontWeight: 600 }}>{s.value ?? '—'}</TableCell>
-                <TableCell align="right">
-                  <IconButton size="small" onClick={() => { setEditing(s); setValue(s.value ?? ''); setError(''); }}><EditIcon fontSize="small" /></IconButton>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Paper>
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead><TableRow><TableCell>Setting</TableCell><TableCell>Value</TableCell><TableCell align="right"></TableCell></TableRow></TableHead>
+            <TableBody>
+              {settings.map((s) => (
+                <TableRow key={s.key}>
+                  <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.label}</TableCell>
+                  <TableCell className="figure" sx={{ fontWeight: 600, fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{s.value ?? '—'}</TableCell>
+                  <TableCell align="right">
+                    <IconButton size="small" onClick={() => { setEditing(s); setValue(s.value ?? ''); setError(''); }}><EditIcon fontSize="small" /></IconButton>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
 
-      <Dialog open={Boolean(editing)} onClose={() => setEditing(null)} maxWidth="xs" fullWidth>
+      <MobileDialog open={Boolean(editing)} onClose={() => setEditing(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Edit {editing?.label}</DialogTitle>
         <DialogContent>
           {editing?.type === 'enum' ? (
-            <TextField fullWidth select label="Value" value={value} onChange={(e) => setValue(e.target.value)} margin="normal">
-              {editing.options.map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
-            </TextField>
+            <MobileTextField fullWidth select label="Value" value={value} onChange={(e) => setValue(e.target.value)} margin="normal" options={editing.options.map((o) => ({ value: o, label: o }))} />
           ) : (
-            <TextField fullWidth type="number" label="Value" value={value} onChange={(e) => setValue(e.target.value)} margin="normal" autoFocus />
+            <MobileTextField fullWidth type="number" label="Value" value={value} onChange={(e) => setValue(e.target.value)} margin="normal" autoFocus />
           )}
           {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEditing(null)}>Cancel</Button>
-          <Button variant="contained" onClick={save}>Save</Button>
-        </DialogActions>
-      </Dialog>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setEditing(null)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={save}>Save</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }
 
 export default function Settings() {
   const [tab, setTab] = useState(0);
+  const isMobile = useMobile();
+
   return (
     <Box>
-      <Typography variant="h5" sx={{ mb: 3 }}>Settings</Typography>
-      <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: 3, borderBottom: '1px solid', borderColor: 'divider' }}>
-        <Tab label="General" />
-        <Tab label="Compliance rates" />
-        <Tab label="Professional Tax slabs" />
-        <Tab label="Income Tax slabs" />
-      </Tabs>
+      <MobilePageHeader>
+        <Typography variant={isMobile ? 'h6' : 'h5'} sx={{ mb: 0 }}>Settings</Typography>
+      </MobilePageHeader>
+      <MobilePaper sx={{ mb: 2 }}>
+        <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ borderBottom: '1px solid', borderColor: 'divider' }} variant="scrollable" scrollButtons="auto">
+          <Tab label="General" />
+          <Tab label="Compliance rates" />
+          <Tab label="Professional Tax slabs" />
+          <Tab label="Income Tax slabs" />
+        </Tabs>
+      </MobilePaper>
       {tab === 0 && <GeneralTab />}
       {tab === 1 && <ComplianceRatesTab />}
       {tab === 2 && <PTSlabsTab />}

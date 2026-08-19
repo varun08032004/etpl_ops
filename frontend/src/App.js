@@ -1,9 +1,13 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, CssBaseline } from '@mui/material';
+import { useMediaQuery } from '@mui/material';
 import theme from './theme';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
+import MobileLayout from './components/MobileLayout';
 import SecurityGuard from './components/SecurityGuard';
+import PWAInstallPrompt from './components/PWAInstallPrompt';
+import OfflineIndicator from './components/OfflineIndicator';
 import TwoFactorSettings from './pages/TwoFactorSettings';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
@@ -66,6 +70,9 @@ import ProductCoupons from './pages/ProductCoupons';
 import CorporateDeals from './pages/CorporateDeals';
 import MarketingCouponPerformance from './pages/MarketingCouponPerformance';
 import SupportTicketsView from './pages/SupportTicketsView';
+import GSTCollectedReport from './pages/GSTCollectedReport';
+import GSTLiabilityReport from './pages/GSTLiabilityReport';
+import PlatformSettlementReport from './pages/PlatformSettlementReport';
 
 // Widened to include legal_hod/compliance_hod/marketing_hod/sales_hod/
 // product_hod — matches Layout.jsx's PRIVILEGED_ROLES, so those roles get
@@ -74,6 +81,8 @@ const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compl
 
 function ProtectedRoutes() {
   const { staff, loading } = useAuth();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  
   if (loading) return null;
   if (!staff) return <Navigate to="/login" replace />;
   // SecurityGuard reads `staff` itself via useAuth(), so it only ever
@@ -82,7 +91,7 @@ function ProtectedRoutes() {
   // /sign/:token pages, only the authenticated app inside Layout/Outlet.
   return (
     <SecurityGuard>
-      <Layout />
+      {isMobile ? <MobileLayout /> : <Layout />}
     </SecurityGuard>
   );
 }
@@ -100,6 +109,8 @@ export default function App() {
       <CssBaseline />
       <AuthProvider>
         <BrowserRouter>
+          <PWAInstallPrompt />
+          <OfflineIndicator />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
@@ -112,6 +123,9 @@ export default function App() {
               <Route path="/employees/:id" element={<EmployeeDetail />} />
               <Route path="/invoices" element={<Invoices />} />
               <Route path="/accounting" element={<Accounting />} />
+              <Route path="/accounting/gst-collected" element={<GSTCollectedReport />} />
+              <Route path="/accounting/gst-liability" element={<GSTLiabilityReport />} />
+              <Route path="/accounting/platform-settlement" element={<PlatformSettlementReport />} />
               <Route path="/payroll" element={<Payroll />} />
               <Route path="/attendance" element={<Attendance />} />
               <Route path="/monitoring" element={<Monitoring />} />

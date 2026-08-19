@@ -294,6 +294,74 @@ router.put('/settings', requireMonitoringAdmin, async (req, res) => {
 });
 
 // ── devices — list + revoke, so a lost/offboarded laptop can be cut off ──
+// ── score summary for a date range, batched across employees ──────────────
+// Built for Performance.js's review cycles — one call covers every
+// employee in the cycle instead of N calls, and computes ONE score over
+// the whole period (not an average of daily scores, which would
+// equal-weight a day with 5 minutes of activity the same as a full day).
+router.get('/score-summary', async (req, res) => {
+  try {
+    if (!(await canViewAllMonitoring(req.staff))) return res.status(403).json({ error: 'Insufficient permissions' });
+    const { employee_ids, from, to } = req.query;
+    if (!employee_ids || !from || !to) return res.status(400).json({ error: 'employee_ids, from, and to are required' });
+    const ids = employee_ids.split(',').filter(Boolean);
+    if (ids.length === 0) return res.json({ scores: {} });
+
+    const { rows: sessionRows } = await safeQuery(
+      `SELECT employee_id, SUM(active_seconds)::int AS active_seconds, SUM(idle_seconds)::int AS idle_seconds, COUNT(DISTINCT work_date)::int AS days_tracked
+       FROM agent_sessions WHERE employee_id = ANY($1) AND work_date BETWEEN $2 AND $3
+       GROUP BY employee_id`,
+      [ids, from, to]
+    );
+    const { rows: appRows } = await safeQuery(
+      `SELECT s.employee_id, a.app_name, SUM(a.duration_seconds)::int AS duration_seconds
+       FROM app_usage_segments a JOIN agent_sessions s ON s.id = a.session_id
+       WHERE s.employee_id = ANY($1) AND s.work_date BETWEEN $2 AND $3
+       GROUP BY s.employee_id, a.app_name`,
+      [ids, from, to]
+    );
+    const { rows: siteRows } = await safeQuery(
+      `SELECT s.employee_id, w.domain, SUM(w.duration_seconds)::int AS duration_seconds
+       FROM website_usage_segments w JOIN agent_sessions s ON s.id = w.session_id
+       WHERE s.employee_id = ANY($1) AND s.work_date BETWEEN $2 AND $3
+       GROUP BY s.employee_id, w.domain`,
+      [ids, from, to]
+    );
+
+    const rules = await getRules();
+    const { rows: [settings] } = await safeQuery(`SELECT expected_daily_hours FROM monitoring_settings WHERE id = 1`);
+
+    const appsByEmployee = new Map();
+    for (const row of appRows) {
+      if (!appsByEmployee.has(row.employee_id)) appsByEmployee.set(row.employee_id, []);
+      appsByEmployee.get(row.employee_id).push(row);
+    }
+    const sitesByEmployee = new Map();
+    for (const row of siteRows) {
+      if (!sitesByEmployee.has(row.employee_id)) sitesByEmployee.set(row.employee_id, []);
+      sitesByEmployee.get(row.employee_id).push(row);
+    }
+
+    const scores = {};
+    for (const s of sessionRows) {
+      const productivity = summarizeProductivity(rules, appsByEmployee.get(s.employee_id) || [], sitesByEmployee.get(s.employee_id) || []);
+      // Multiply the daily expectation by days actually tracked, so a
+      // 2-week cycle with 10 working days expects 10 days' worth of
+      // hours, not the full 14 calendar days.
+      const expectedHoursForPeriod = (settings?.expected_daily_hours || 8) * Math.max(s.days_tracked, 1);
+      const score = computeProductivityScore({
+        totals: productivity.totals, activeSeconds: s.active_seconds, idleSeconds: s.idle_seconds,
+        expectedDailyHours: expectedHoursForPeriod,
+      });
+      scores[s.employee_id] = { ...score, daysTracked: s.days_tracked };
+    }
+    res.json({ scores });
+  } catch (err) {
+    console.error('[monitoring:score-summary]', err);
+    res.status(500).json({ error: 'Failed to load score summary' });
+  }
+});
+
 router.get('/devices', requireMonitoringAdmin, async (req, res) => {
   try {
     const { rows } = await safeQuery(

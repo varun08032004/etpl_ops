@@ -33,7 +33,7 @@ export default function ResetPassword() {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default' }}>
+    <Box sx={{ height: '100vh', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default' }}>
       <Paper sx={{ width: 380, p: 4 }}>
         <Typography sx={{ fontWeight: 700, fontSize: '1.1rem', mb: 0.5 }}>Reset your password</Typography>
 
