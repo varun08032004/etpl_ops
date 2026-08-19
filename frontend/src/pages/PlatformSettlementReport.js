@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Grid,
@@ -41,7 +41,7 @@ export default function PlatformSettlementReport() {
   const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [error, setError] = useState(null);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -54,11 +54,11 @@ export default function PlatformSettlementReport() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [from, to]);
 
   useEffect(() => {
     fetchData();
-  }, [from, to]);
+  }, [fetchData]);
 
   const handleExport = () => {
     const headers = [

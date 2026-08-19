@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Grid, Tabs, Tab, Table, TableHead, TableRow, TableCell, TableBody,
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip
@@ -56,7 +56,7 @@ export default function MyProfile() {
     ? client.get('/finance/expense-claims', { params: { status: 'approved' } }).then(({ data }) => setPendingReimbursementClaims(data.claims)).catch(() => setPendingReimbursementClaims([]))
     : Promise.resolve();
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     try {
       const { data } = await client.get('/employees/me');
       setEmployee(data.employee);
@@ -80,9 +80,9 @@ export default function MyProfile() {
     } catch (err) {
       if (err.response?.status === 404) setNotLinked(true);
     }
-  };
+  }, []);
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
   const decideLeave = async (leaveId, decision) => {
     await client.post(`/employees/leave/${leaveId}/decision`, { decision });

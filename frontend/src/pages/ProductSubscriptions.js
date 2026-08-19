@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   TextField, MenuItem, Chip, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button,
@@ -40,7 +40,7 @@ export default function ProductSubscriptions() {
   const [saving, setSaving] = useState(false);
   const [renewError, setRenewError] = useState('');
 
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true);
     setError('');
     const params = {};
@@ -50,12 +50,12 @@ export default function ProductSubscriptions() {
       .then(({ data }) => { setSubs(data.subscriptions); setCounts(data.counts); })
       .catch((err) => setError(err.response?.data?.error || 'Failed to load subscriptions'))
       .finally(() => setLoading(false));
-  };
+  }, [planFilter, search]);
 
   useEffect(() => {
     const t = setTimeout(load, search ? 350 : 0);
     return () => clearTimeout(t);
-  }, [planFilter, search]);
+  }, [load]);
 
   const openRenew = (row) => {
     setRenewTarget(row);

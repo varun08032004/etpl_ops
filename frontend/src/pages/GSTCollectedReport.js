@@ -1,9 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Grid,
-  TextField,
-  Button,
   Table,
   TableBody,
   TableCell,
@@ -70,7 +68,7 @@ export default function GSTCollectedReport() {
   const [expandedRow, setExpandedRow] = useState(null);
   const [error, setError] = useState(null);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -87,11 +85,11 @@ export default function GSTCollectedReport() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [from, to, revenueType]);
 
   useEffect(() => {
     fetchData();
-  }, [from, to, revenueType]);
+  }, [fetchData]);
 
   const handleExport = () => {
     const headers = [

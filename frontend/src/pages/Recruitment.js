@@ -164,8 +164,8 @@ function JobDetail({ jobId, onBack }) {
   const [hireDate, setHireDate] = useState('');
   const [message, setMessage] = useState(null);
 
-  const load = () => client.get(`/recruitment/jobs/${jobId}`).then(({ data }) => { setJob(data.job); setApplications(data.applications); });
-  useEffect(() => { load(); }, [jobId]);
+  const load = useCallback(() => client.get(`/recruitment/jobs/${jobId}`).then(({ data }) => { setJob(data.job); setApplications(data.applications); }), [jobId]);
+  useEffect(() => { load(); }, [load]);
 
   const addCandidate = async () => {
     setSaving(true);
