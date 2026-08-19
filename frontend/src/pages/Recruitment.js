@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  MenuItem, Alert, Chip, IconButton, Link as MuiLink,
+  MenuItem, Alert, Chip, Link as MuiLink,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -42,11 +42,11 @@ function JobList({ onOpenJob }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const load = () => client.get('/recruitment/jobs').then(({ data }) => setJobs(data.jobs)).catch(() => setJobs([]));
+  const load = useCallback(() => client.get('/recruitment/jobs').then(({ data }) => setJobs(data.jobs)).catch(() => setJobs([])), []);
   useEffect(() => {
     load();
     client.get('/departments').then(({ data }) => setDepartments(data.departments)).catch(() => {});
-  }, []);
+  }, [load]);
 
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
 

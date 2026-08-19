@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip,
@@ -43,11 +43,11 @@ export default function ProductBetaUsers() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const load = () => {
+  const load = useCallback(() => {
     const params = stageFilter ? { stage: stageFilter } : {};
     client.get('/product/beta-users', { params }).then(({ data }) => setBetaUsers(data.betaUsers)).catch(() => setBetaUsers([]));
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [stageFilter]);
+  }, [stageFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [load]);
 
   useEffect(() => {
     if (['owner', 'admin'].includes(staff?.role)) return;

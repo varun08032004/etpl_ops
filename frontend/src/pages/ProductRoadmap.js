@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Button, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, MenuItem, Alert, Chip, Grid,
@@ -41,11 +41,11 @@ export default function ProductRoadmap() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const load = () => {
+  const load = useCallback(() => {
     const params = areaFilter ? { area: areaFilter } : {};
     client.get('/product/features', { params }).then(({ data }) => setFeatures(data.features)).catch(() => setFeatures([]));
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [areaFilter]);
+  }, [areaFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [load]);
 
   useEffect(() => {
     if (['owner', 'admin'].includes(staff?.role)) return;

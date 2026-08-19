@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Grid, Tabs, Tab, IconButton, Chip, Button, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, MenuItem, Alert, Table, TableHead, TableRow, TableCell,
@@ -189,18 +189,19 @@ function RecurringList({ environment }) {
   const [total, setTotal] = useState(0);
   const pageSize = 50;
 
-  const load = () => {
+  const load = useCallback(() => {
     const params = { limit: pageSize, offset: page * pageSize };
     if (categoryFilter) params.category_id = categoryFilter;
     client.get('/expenses/recurring', { params }).then(({ data }) => {
       setItems(data.recurringExpenses);
       setTotal(data.pagination?.total ?? data.recurringExpenses.length);
     });
-  };
+  }, [categoryFilter, page, pageSize]);
+
   useEffect(() => {
     load();
     client.get('/accounting/expense-categories').then(({ data }) => setCategories(data.categories)).catch(() => {});
-  }, [environment, categoryFilter, page]);
+  }, [environment, categoryFilter, page, load]);
 
   useEffect(() => { setPage(0); }, [categoryFilter]);
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip, Link,
@@ -61,11 +61,11 @@ export default function MarketingBlog() {
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncError, setSyncError] = useState('');
 
-  const load = () => {
+  const load = useCallback(() => {
     const params = statusFilter ? { status: statusFilter } : {};
     client.get('/marketing/blog', { params }).then(({ data }) => setPosts(data.posts)).catch(() => setPosts([]));
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [statusFilter]);
+  }, [statusFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [load]);
 
   useEffect(() => {
     client.get('/employees').then(({ data }) => setEmployees(data.employees || [])).catch(() => setEmployees([]));

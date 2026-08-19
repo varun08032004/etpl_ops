@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip, Link,
@@ -45,11 +45,11 @@ export default function MarketingContentCalendar() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const load = () => {
+  const load = useCallback(() => {
     const params = statusFilter ? { status: statusFilter } : {};
     client.get('/marketing/content-calendar', { params }).then(({ data }) => setItems(data.items)).catch(() => setItems([]));
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [statusFilter]);
+  }, [statusFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [load]);
 
   useEffect(() => {
     client.get('/marketing/social-accounts').then(({ data }) => setAccounts(data.accounts)).catch(() => setAccounts([]));

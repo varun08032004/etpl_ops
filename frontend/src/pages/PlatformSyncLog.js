@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   TextField, MenuItem, Chip, Button, Dialog, DialogTitle, DialogContent, DialogActions, Alert, CircularProgress,
@@ -31,15 +31,15 @@ export default function PlatformSyncLog() {
 
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
 
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true);
     setError(null);
     client.get('/platform-sync/log', { params: { month, year } })
       .then(({ data }) => setRecords(data.records))
       .catch((e) => setError(e.response?.data?.error || 'Failed to load synced records'))
       .finally(() => setLoading(false));
-  };
-  useEffect(() => { load(); }, [month, year]);
+  }, [month, year]);
+  useEffect(() => { load(); }, [load]);
 
   const loadRefunds = () => {
     setRefundsError(null);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip,
@@ -44,11 +44,11 @@ export default function MarketingLeads() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const load = () => {
+  const load = useCallback(() => {
     const params = statusFilter ? { status: statusFilter } : {};
     client.get('/marketing/leads', { params }).then(({ data }) => setLeads(data.leads)).catch(() => setLeads([]));
-  };
-  useEffect(() => { load(); }, [statusFilter]);
+  }, [statusFilter]);
+  useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
     client.get('/marketing/campaigns').then(({ data }) => setCampaigns(data.campaigns)).catch(() => setCampaigns([]));

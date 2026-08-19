@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Box, Typography, Paper, Tabs, Tab, Table, TableHead, TableRow, TableCell, TableBody, TextField, Chip, Grid, Alert } from '@mui/material';
 import client from '../api/client';
 import {
@@ -63,8 +63,8 @@ function AuditLog() {
   const [actionFilter, setActionFilter] = useState('');
   const isMobile = useMobile();
 
-  const load = () => client.get('/admin/audit-log', { params: actionFilter ? { action: actionFilter } : {} }).then(({ data }) => setEntries(data.entries));
-  useEffect(() => { load(); }, [actionFilter]);
+  const load = useCallback(() => client.get('/admin/audit-log', { params: actionFilter ? { action: actionFilter } : {} }).then(({ data }) => setEntries(data.entries)), [actionFilter]);
+  useEffect(() => { load(); }, [load]);
 
   return (
     <Box>
@@ -119,10 +119,10 @@ function CompanyProfile() {
   const [message, setMessage] = useState(null);
   const isMobile = useMobile();
 
-  const load = () => client.get('/document-engine/company-profile').then(({ data }) =>
-    setForm(data.profile || Object.fromEntries(PROFILE_FIELDS.map((f) => [f.key, '']))));
+  const load = useCallback(() => client.get('/document-engine/company-profile').then(({ data }) =>
+    setForm(data.profile || Object.fromEntries(PROFILE_FIELDS.map((f) => [f.key, ''])))), []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const save = async () => {
     setSaving(true);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip,
@@ -188,11 +188,11 @@ export default function BankAccounts() {
   const [syncingId, setSyncingId] = useState(null);
   const [message, setMessage] = useState(null);
 
-  const load = () => client.get('/bank-accounts')
+  const load = useCallback(() => client.get('/bank-accounts')
     .then(({ data }) => { setAccounts(data.accounts); setTotalBalance(data.totalBalanceInr); setCurrencyWarning(data.currencyWarning); })
-    .catch(() => setAccounts([]));
+    .catch(() => setAccounts([])), []);
 
-  useEffect(() => { if (authorized) load(); }, []);
+  useEffect(() => { if (authorized) load(); }, [authorized, load]);
 
   const runSync = async (account) => {
     setSyncingId(account.id);

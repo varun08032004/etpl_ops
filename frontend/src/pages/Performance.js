@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Alert, Chip, LinearProgress, MenuItem,
+  Alert, Chip, LinearProgress,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -34,8 +34,8 @@ function CycleList({ onOpenCycle }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const load = () => client.get('/performance/cycles').then(({ data }) => setCycles(data.cycles)).catch(() => setCycles([]));
-  useEffect(() => { load(); }, []);
+  const load = useCallback(() => client.get('/performance/cycles').then(({ data }) => setCycles(data.cycles)).catch(() => setCycles([])), []);
+  useEffect(() => { load(); }, [load]);
 
   const handleCreate = async () => {
     setSaving(true);
@@ -122,8 +122,8 @@ function CycleDetail({ cycle, onBack }) {
   const [managerForm, setManagerForm] = useState({ manager_assessment: '', manager_rating: '' });
   const [newGoal, setNewGoal] = useState({ title: '', weight_percent: '' });
 
-  const load = () => client.get('/performance/reviews', { params: { review_cycle_id: cycle.id } }).then(({ data }) => setReviews(data.reviews));
-  useEffect(() => { load(); }, [cycle.id]);
+  const load = useCallback(() => client.get('/performance/reviews', { params: { review_cycle_id: cycle.id } }).then(({ data }) => setReviews(data.reviews)), [cycle.id]);
+  useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
     if (!reviews.length) return;

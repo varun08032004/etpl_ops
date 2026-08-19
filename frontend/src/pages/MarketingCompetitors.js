@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Grid, Button, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, MenuItem, Alert, Chip, IconButton, Tooltip, Tabs, Tab, Divider,
+  TextField, MenuItem, Alert, IconButton, Tooltip, Tabs, Tab, Divider,
   Table, TableHead, TableRow, TableCell, TableBody, LinearProgress, CircularProgress,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
-import EditIcon from '@mui/icons-material/EditOutlined';
 import DeleteIcon from '@mui/icons-material/DeleteOutline';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import StarIcon from '@mui/icons-material/Star';
@@ -132,15 +131,15 @@ export default function MarketingCompetitors() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true);
     const params = regionFilter ? { region: regionFilter } : {};
     client.get('/marketing/competitors', { params })
       .then(({ data }) => setCompetitors(data.competitors))
       .catch(() => setCompetitors([]))
       .finally(() => setLoading(false));
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [regionFilter]);
+  }, [regionFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [load]);
 
   useEffect(() => {
     if (['owner', 'admin'].includes(staff?.role)) return;

@@ -1,11 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Chip, Button, DialogTitle, DialogContent,
   TextField, MenuItem, Alert, IconButton, Divider, Table, TableHead, TableRow, TableCell, TableBody,
   Tabs, Tab, CircularProgress,
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import client from '../api/client';
 import Money from '../components/Money';
 import StatusChip from '../components/StatusChip';
@@ -23,6 +21,8 @@ import {
   useMobile,
   useBreakpoint
 } from '../components/MobileResponsive';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 const STAGES = [
   { key: 'new', label: 'New' },
@@ -119,11 +119,11 @@ function DealDetail({ dealId, onClose, onChanged }) {
   const [lostReason, setLostReason] = useState('');
   const [lostDialogOpen, setLostDialogOpen] = useState(false);
 
-  const load = () => client.get(`/sales/deals/${dealId}`).then(({ data }) => setData(data));
-  useEffect(() => { load(); }, [dealId]);
+  const load = useCallback(() => client.get(`/sales/deals/${dealId}`).then(({ data }) => setData(data)), [dealId]);
+  useEffect(() => { load(); }, [load]);
 
   if (!data) return null;
-  const { deal, quotations, tasks } = data;
+  const { deal, quotations } = data;
 
   const moveStage = async (stage) => {
     await client.post(`/sales/deals/${dealId}/move-stage`, { stage });
@@ -269,11 +269,11 @@ function Pipeline() {
   const [openDealId, setOpenDealId] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const load = () => {
+  const load = useCallback(() => {
     client.get('/sales/deals').then(({ data }) => setDeals(data.deals));
     client.get('/sales/forecast').then(({ data }) => setForecast(data));
-  };
-  useEffect(() => { load(); }, []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   const handleCreateDeal = async () => {
     setSaving(true);

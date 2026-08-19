@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem,
@@ -7,8 +7,6 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import client from '../api/client';
-import { useAuth } from '../context/AuthContext';
-
 const emptySigner = () => ({ name: '', email: '', role_label: '', staff_id: '' });
 
 function StatusChipLocal({ status }) {
@@ -25,11 +23,11 @@ export default function ESignatures() {
   const [detail, setDetail] = useState(null);
   const [staffList, setStaffList] = useState([]);
 
-  const load = () => client.get('/esignatures').then(({ data }) => setRequests(data.requests)).catch(() => setRequests([]));
+  const load = useCallback(() => client.get('/esignatures').then(({ data }) => setRequests(data.requests)).catch(() => setRequests([])), []);
   useEffect(() => {
     load();
     client.get('/staff-accounts').then(({ data }) => setStaffList(data.staff)).catch(() => setStaffList([]));
-  }, []);
+  }, [load]);
 
   const updateSigner = (i, key, value) => {
     const next = [...form.signers];

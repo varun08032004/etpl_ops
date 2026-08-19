@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip,
@@ -58,11 +58,11 @@ export default function PartnershipFirms() {
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef(null);
 
-  const load = () => {
+  const load = useCallback(() => {
     const params = stageFilter ? { stage: stageFilter } : {};
     client.get('/partnerships/firms', { params }).then(({ data }) => setFirms(data.firms)).catch(() => setFirms([]));
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [stageFilter]);
+  }, [stageFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [load]);
 
   useEffect(() => {
     client.get('/employees').then(({ data }) => setEmployees(data.employees || [])).catch(() => setEmployees([]));

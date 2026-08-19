@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Tabs, Tab, Table, TableHead, TableRow, TableCell, TableBody,
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip, Grid,
@@ -187,19 +187,19 @@ function ExpenseClaimsSection({ canSeeAll }) {
   const [reimburseClaim, setReimburseClaim] = useState(null);
   const PAGE_SIZE = 50;
 
-  const loadMine = () => client.get('/finance/expense-claims/mine', { params: { limit: PAGE_SIZE, offset: 0 } })
+  const loadMine = useCallback(() => client.get('/finance/expense-claims/mine', { params: { limit: PAGE_SIZE, offset: 0 } })
     .then(({ data }) => { setMyClaims(data.claims); setMyClaimsTotal(data.pagination?.total ?? data.claims.length); })
-    .catch(() => setMyClaims([]));
-  const loadMoreMine = () => client.get('/finance/expense-claims/mine', { params: { limit: PAGE_SIZE, offset: myClaims.length } })
-    .then(({ data }) => setMyClaims((prev) => [...prev, ...data.claims]));
-  const loadPending = () => client.get('/finance/expense-claims/pending-my-approval').then(({ data }) => setPendingApproval(data.claims)).catch(() => setPendingApproval([]));
-  const loadAll = () => canSeeAll && client.get('/finance/expense-claims', { params: { limit: PAGE_SIZE, offset: 0 } })
+    .catch(() => setMyClaims([])), []);
+  const loadMoreMine = useCallback(() => client.get('/finance/expense-claims/mine', { params: { limit: PAGE_SIZE, offset: myClaims.length } })
+    .then(({ data }) => setMyClaims((prev) => [...prev, ...data.claims])), [myClaims.length]);
+  const loadPending = useCallback(() => client.get('/finance/expense-claims/pending-my-approval').then(({ data }) => setPendingApproval(data.claims)).catch(() => setPendingApproval([])), []);
+  const loadAll = useCallback(() => canSeeAll && client.get('/finance/expense-claims', { params: { limit: PAGE_SIZE, offset: 0 } })
     .then(({ data }) => { setAllClaims(data.claims); setAllClaimsTotal(data.pagination?.total ?? data.claims.length); })
-    .catch(() => setAllClaims([]));
-  const loadMoreAll = () => client.get('/finance/expense-claims', { params: { limit: PAGE_SIZE, offset: allClaims.length } })
-    .then(({ data }) => setAllClaims((prev) => [...prev, ...data.claims]));
+    .catch(() => setAllClaims([])), [canSeeAll]);
+  const loadMoreAll = useCallback(() => client.get('/finance/expense-claims', { params: { limit: PAGE_SIZE, offset: allClaims.length } })
+    .then(({ data }) => setAllClaims((prev) => [...prev, ...data.claims])), [allClaims.length]);
 
-  useEffect(() => { loadMine(); loadPending(); loadAll(); }, []);
+  useEffect(() => { loadMine(); loadPending(); loadAll(); }, [loadMine, loadPending, loadAll]);
 
   const decide = async (claim, decision) => {
     try {
@@ -393,19 +393,19 @@ function PurchaseRequestsSection({ canSeeAll }) {
   const [convertRequest, setConvertRequest] = useState(null);
   const PAGE_SIZE = 50;
 
-  const loadMine = () => client.get('/purchase-requests/mine', { params: { limit: PAGE_SIZE, offset: 0 } })
+  const loadMine = useCallback(() => client.get('/purchase-requests/mine', { params: { limit: PAGE_SIZE, offset: 0 } })
     .then(({ data }) => { setMine(data.requests); setMineTotal(data.pagination?.total ?? data.requests.length); })
-    .catch(() => setMine([]));
-  const loadMoreMine = () => client.get('/purchase-requests/mine', { params: { limit: PAGE_SIZE, offset: mine.length } })
-    .then(({ data }) => setMine((prev) => [...prev, ...data.requests]));
-  const loadPending = () => client.get('/purchase-requests/pending-my-approval').then(({ data }) => setPendingApproval(data.requests)).catch(() => setPendingApproval([]));
-  const loadAll = () => canSeeAll && client.get('/purchase-requests', { params: { limit: PAGE_SIZE, offset: 0 } })
+    .catch(() => setMine([])), []);
+  const loadMoreMine = useCallback(() => client.get('/purchase-requests/mine', { params: { limit: PAGE_SIZE, offset: mine.length } })
+    .then(({ data }) => setMine((prev) => [...prev, ...data.requests])), [mine.length]);
+  const loadPending = useCallback(() => client.get('/purchase-requests/pending-my-approval').then(({ data }) => setPendingApproval(data.requests)).catch(() => setPendingApproval([])), []);
+  const loadAll = useCallback(() => canSeeAll && client.get('/purchase-requests', { params: { limit: PAGE_SIZE, offset: 0 } })
     .then(({ data }) => { setAll(data.requests); setAllTotal(data.pagination?.total ?? data.requests.length); })
-    .catch(() => setAll([]));
-  const loadMoreAll = () => client.get('/purchase-requests', { params: { limit: PAGE_SIZE, offset: all.length } })
-    .then(({ data }) => setAll((prev) => [...prev, ...data.requests]));
+    .catch(() => setAll([])), [canSeeAll]);
+  const loadMoreAll = useCallback(() => client.get('/purchase-requests', { params: { limit: PAGE_SIZE, offset: all.length } })
+    .then(({ data }) => setAll((prev) => [...prev, ...data.requests])), [all.length]);
 
-  useEffect(() => { loadMine(); loadPending(); loadAll(); }, []);
+  useEffect(() => { loadMine(); loadPending(); loadAll(); }, [loadMine, loadPending, loadAll]);
 
   const decide = async (pr, decision) => {
     try {
@@ -705,12 +705,12 @@ function BudgetsCashFlowSection() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const loadCashFlow = () => client.get('/finance/cash-flow').then(({ data }) => setCashFlow(data)).catch(() => setCashFlow(null));
-  const loadForecast = () => client.get('/finance/cash-flow/forecast', { params: { months: 6 } }).then(({ data }) => setForecast(data)).catch(() => setForecast(null));
-  const loadVariance = () => client.get('/finance/budgets/variance', { params: { fiscal_year_label: fiscalYearLabel } })
-    .then(({ data }) => setVariance(data)).catch(() => setVariance(null));
+  const loadCashFlow = useCallback(() => client.get('/finance/cash-flow').then(({ data }) => setCashFlow(data)).catch(() => setCashFlow(null)), []);
+  const loadForecast = useCallback(() => client.get('/finance/cash-flow/forecast', { params: { months: 6 } }).then(({ data }) => setForecast(data)).catch(() => setForecast(null)), []);
+  const loadVariance = useCallback(() => client.get('/finance/budgets/variance', { params: { fiscal_year_label: fiscalYearLabel } })
+    .then(({ data }) => setVariance(data)).catch(() => setVariance(null)), [fiscalYearLabel]);
 
-  useEffect(() => { loadCashFlow(); loadForecast(); loadVariance(); }, []);
+  useEffect(() => { loadCashFlow(); loadForecast(); loadVariance(); }, [loadCashFlow, loadForecast, loadVariance]);
 
   const saveBudget = async () => {
     setSaving(true);

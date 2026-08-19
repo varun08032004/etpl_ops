@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   TextField, MenuItem, Button, Alert, Chip, CircularProgress,
@@ -55,7 +55,7 @@ export default function Attendance() {
     client.get('/employees').then(({ data }) => setEmployees(data.employees || [])).catch(() => setEmployees([]));
   }, []);
 
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true);
     setError(null);
     const params = { from, to };
@@ -64,9 +64,9 @@ export default function Attendance() {
       .then(({ data }) => setRecords(data.attendance || []))
       .catch((e) => setError(e.response?.data?.error || 'Failed to load attendance'))
       .finally(() => setLoading(false));
-  };
+  }, [employeeId, from, to]);
 
-  useEffect(() => { load(); }, [employeeId, from, to]);
+  useEffect(() => { load(); }, [load]);
 
   const runSync = async () => {
     setSyncing(true);

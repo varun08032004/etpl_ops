@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   Box, Typography, Paper, Grid, Button, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, MenuItem, Alert, Chip, IconButton, Tooltip, ToggleButtonGroup, ToggleButton, LinearProgress,
@@ -51,11 +51,11 @@ export default function MarketingBrandAssets() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
 
-  const load = () => {
+  const load = useCallback(() => {
     const params = typeFilter ? { asset_type: typeFilter } : {};
     client.get('/marketing/brand-assets', { params }).then(({ data }) => setAssets(data.assets)).catch(() => setAssets([]));
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [typeFilter]);
+  }, [typeFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [load]);
 
   useEffect(() => {
     if (['owner', 'admin'].includes(staff?.role)) return;

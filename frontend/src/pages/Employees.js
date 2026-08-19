@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
@@ -74,18 +74,18 @@ function EmployeeList() {
   const [showExited, setShowExited] = useState(false);
   const isMobile = useMobile();
 
-  const load = async (q, includeExited = showExited) => {
+  const load = useCallback(async (q, includeExited = showExited) => {
     const params = q ? { search: q } : {};
     const { data } = await client.get('/employees', { params });
     setEmployees(includeExited ? data.employees : data.employees.filter((e) => e.status !== 'exited'));
-  };
+  }, [showExited]);
 
   useEffect(() => {
     load();
     client.get('/departments').then(({ data }) => setDepartments(data.departments)).catch(() => {});
     client.get('/teams').then(({ data }) => setTeams(data.teams)).catch(() => {});
     client.get('/designations').then(({ data }) => setDesignations(data.designations)).catch(() => {});
-  }, []);
+  }, [load]);
 
   const handleSearch = (e) => {
     setSearch(e.target.value);
@@ -457,9 +457,9 @@ function EmployeeDetail() {
   const canExit = ['owner', 'admin', 'hr'].includes(staff?.role);
   const canReinstate = ['owner', 'admin', 'hr'].includes(staff?.role);
 
-  const loadDocs = () => client.get('/documents', { params: { entity_type: 'employee', entity_id: id } }).then(({ data }) => setDocs(data.documents));
-  const loadEmployee = () => client.get(`/employees/${id}`).then(({ data }) => setEmployee(data.employee));
-  const loadChecklist = () => client.get(`/automation/checklist/${id}`).then(({ data }) => setChecklist(data.items)).catch(() => setChecklist([]));
+  const loadDocs = useCallback(() => client.get('/documents', { params: { entity_type: 'employee', entity_id: id } }).then(({ data }) => setDocs(data.documents)), [id]);
+  const loadEmployee = useCallback(() => client.get(`/employees/${id}`).then(({ data }) => setEmployee(data.employee)), [id]);
+  const loadChecklist = useCallback(() => client.get(`/automation/checklist/${id}`).then(({ data }) => setChecklist(data.items)).catch(() => setChecklist([])), [id]);
 
   useEffect(() => {
     loadEmployee();
@@ -469,7 +469,7 @@ function EmployeeDetail() {
     client.get('/teams').then(({ data }) => setTeams(data.teams)).catch(() => {});
     client.get('/designations').then(({ data }) => setDesignations(data.designations)).catch(() => {});
     client.get('/employees').then(({ data }) => setAllEmployees(data.employees)).catch(() => {});
-  }, [id]);
+  }, [id, loadEmployee, loadDocs, loadChecklist]);
 
   const toggleChecklistItem = async (itemId) => {
     await client.post(`/automation/checklist/${itemId}/toggle`);

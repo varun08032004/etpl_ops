@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Table, TableHead, TableRow, TableCell, TableBody,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip,
@@ -36,12 +36,12 @@ export default function Compliance() {
   const [fileTarget, setFileTarget] = useState(null);
   const [fileUploading, setFileUploading] = useState(false);
 
-  const load = () => {
+  const load = useCallback(() => {
     const params = statusFilter ? { status: statusFilter } : {};
     client.get('/compliance', { params }).then(({ data }) => setItems(data.items)).catch(() => setItems([]));
-  };
+  }, [statusFilter]);
 
-  useEffect(() => { load(); }, [statusFilter]);
+  useEffect(() => { load(); }, [load]);
   useEffect(() => { client.get('/employees').then(({ data }) => setEmployees(data.employees)).catch(() => {}); }, []);
 
   const handleCreate = async () => {

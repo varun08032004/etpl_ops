@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip,
@@ -46,11 +46,11 @@ export default function ProductFeedback() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const load = () => {
+  const load = useCallback(() => {
     const params = statusFilter ? { status: statusFilter } : {};
     client.get('/product/feedback', { params }).then(({ data }) => setItems(data.feedback)).catch(() => setItems([]));
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [statusFilter]);
+  }, [statusFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [load]);
 
   useEffect(() => {
     if (['owner', 'admin'].includes(staff?.role)) return;

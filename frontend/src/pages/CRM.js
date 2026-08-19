@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
@@ -11,7 +11,6 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import MergeTypeIcon from '@mui/icons-material/MergeType';
 import client from '../api/client';
 import Money from '../components/Money';
-import StatusChip from '../components/StatusChip';
 import {
   MobilePaper,
   MobilePageHeader,
@@ -38,8 +37,8 @@ function CompanyList() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const load = (q) => client.get('/parties', { params: { party_type: 'customer', ...(q ? { search: q } : {}) } }).then(({ data }) => setParties(data.parties));
-  useEffect(() => { load(); }, []);
+  const load = useCallback((q) => client.get('/parties', { params: { party_type: 'customer', ...(q ? { search: q } : {}) } }).then(({ data }) => setParties(data.parties)), []);
+  useEffect(() => { load(); }, [load]);
 
   const handleSearch = (e) => { setSearch(e.target.value); load(e.target.value); };
 
@@ -159,8 +158,8 @@ function CompanyDetail() {
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [message, setMessage] = useState(null);
 
-  const load = () => client.get(`/parties/${id}`).then(({ data }) => setData(data));
-  useEffect(() => { load(); }, [id]);
+  const load = useCallback(() => client.get(`/parties/${id}`).then(({ data }) => setData(data)), [id]);
+  useEffect(() => { load(); }, [load]);
 
   const addContact = async () => {
     await client.post(`/parties/${id}/contacts`, contactForm);

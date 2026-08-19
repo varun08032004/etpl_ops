@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Table, TableHead, TableRow, TableCell, TableBody,
   Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert, Chip, Tabs, Tab, Switch, FormControlLabel,
@@ -40,11 +40,11 @@ export default function DataGovernance() {
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState('');
 
-  const loadPolicies = () => client.get('/data-governance/policies').then(({ data }) => setPolicies(data.policies)).catch(() => setPolicies([]));
-  const loadFlags = () => client.get(`/data-governance/flags?reviewed=${showReviewed}`).then(({ data }) => setFlags(data.flags)).catch(() => setFlags([]));
+  const loadPolicies = useCallback(() => client.get('/data-governance/policies').then(({ data }) => setPolicies(data.policies)).catch(() => setPolicies([])), []);
+  const loadFlags = useCallback(() => client.get(`/data-governance/flags?reviewed=${showReviewed}`).then(({ data }) => setFlags(data.flags)).catch(() => setFlags([])), [showReviewed]);
 
-  useEffect(() => { loadPolicies(); }, []);
-  useEffect(() => { loadFlags(); }, [showReviewed]);
+  useEffect(() => { loadPolicies(); }, [loadPolicies]);
+  useEffect(() => { loadFlags(); }, [loadFlags]);
 
   const runScan = async () => {
     setScanning(true);
