@@ -1,8 +1,11 @@
+# dependencies
 node_modules/
+
+# environment files
 .env
 .env.local
-*.log
-npm-debug.log*
+.env.*.local
+*.env
 
 # build output
 frontend/build/
@@ -13,3 +16,80 @@ backend/dist/
 Thumbs.db
 .vscode/
 *.swp
+
+# secrets & credentials
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.key
+*.pem
+*.p12
+*.pfx
+*secret*
+*credential*
+*private*
+*.sqlite
+*.db
+*.sqlite3
+config.json
+*secret*.json
+*config*.json
+
+# agent/dist artifacts
+etpl_ops_agent/dist/
+etpl_ops_agent/dist/**/*
+
+# secrets & audit docs
+SECRETS_AUDIT_REPORT.md
+SECRET_ROTATION_PROCEDURES.md
+
+# logs
+*.log
+npm-debug.log*
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+
+# build output
+frontend/build/
+backend/dist/
+
+# Electron build artifacts
+etpl_ops_agent/dist/
+etpl_ops_agent/dist/**/*
+*.exe
+*.dll
+*.pak
+*.exe.blockmap
+*.yml
+*.yaml
+*.blockmap
+
+# database files
+*.sqlite
+*.sqlite3
+*.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# coverage
+coverage/
+.nyc_output/
+
+# turbo
+.turbo/
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
