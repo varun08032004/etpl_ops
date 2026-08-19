@@ -209,9 +209,9 @@ app.use('/api/support-tickets-view', require('./routes/supportTicketsView')); //
 // Global error handler (must be last middleware)
 app.use(errorHandler);
 
-const PORT = process.env.INTERNAL_OPS_PORT || 5050;
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`[internal-ops] listening on 127.0.0.1:${PORT}`);
+const PORT = process.env.PORT || process.env.INTERNAL_OPS_PORT || 5050;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[internal-ops] listening on 0.0.0.0:${PORT}`);
   // Required here, AFTER the server starts listening, so a scheduler failing
   // to initialize doesn't prevent the API from coming up at all — each one
   // logs its own errors internally and degrades to "manual trigger only"
