@@ -220,6 +220,7 @@ app.use('/api/churn-prediction', require('./routes/churnPrediction')); // NEW �
 app.use('/api/health-scores', require('./routes/healthScores')); // NEW — Customer Health Scores (composite)
 app.use('/api/pipeline-analytics', require('./routes/pipelineAnalytics')); // NEW — Deal Velocity & Pipeline Analytics
 app.use('/api/kpi-pack', require('./routes/kpiPack')); // NEW — Board-Ready KPI Pack (PDF)
+app.use('/api/invoice-anomalies', require('./routes/invoiceAnomaly')); // NEW — Invoice Anomaly Detection
 
 // Global error handler (must be last middleware)
 app.use(errorHandler);
