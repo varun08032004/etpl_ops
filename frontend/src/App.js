@@ -75,6 +75,7 @@ import PipelineAnalytics from './pages/PipelineAnalytics';
 import KPIPack from './pages/KPIPack';
 import SlackBotConfig from './pages/SlackBotConfig';
 import InvoiceAnomalies from './pages/InvoiceAnomalies';
+import VendorIntelligence from './pages/VendorIntelligence';
 import MarketingCouponPerformance from './pages/MarketingCouponPerformance';
 import SupportTicketsView from './pages/SupportTicketsView';
 import GSTCollectedReport from './pages/GSTCollectedReport';
@@ -193,6 +194,7 @@ export default function App() {
               <Route path="/kpi-pack" element={<KPIPack />} />
               <Route path="/slack-bot" element={<SlackBotConfig />} />
               <Route path="/invoice-anomalies" element={<InvoiceAnomalies />} />
+              <Route path="/vendor-intelligence" element={<VendorIntelligence />} />
               <Route path="/support-tickets" element={<SupportTicketsView />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
