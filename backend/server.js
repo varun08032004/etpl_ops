@@ -219,6 +219,7 @@ app.use('/api/renewals', require('./routes/renewals')); // NEW — Automated Ren
 app.use('/api/churn-prediction', require('./routes/churnPrediction')); // NEW — AI Churn Prediction Model
 app.use('/api/health-scores', require('./routes/healthScores')); // NEW — Customer Health Scores (composite)
 app.use('/api/pipeline-analytics', require('./routes/pipelineAnalytics')); // NEW — Deal Velocity & Pipeline Analytics
+app.use('/api/kpi-pack', require('./routes/kpiPack')); // NEW — Board-Ready KPI Pack (PDF)
 
 // Global error handler (must be last middleware)
 app.use(errorHandler);
