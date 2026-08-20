@@ -74,11 +74,22 @@ const allowedOrigins = (process.env.INTERNAL_OPS_ALLOWED_ORIGIN || 'http://local
   .split(',')
   .map(o => o.trim());
 
+// Also allow Vercel preview deployments and the production domain
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  // Allow Vercel preview deployments (*.vercel.app)
+  if (origin.endsWith('.vercel.app')) return true;
+  // Allow the production domain
+  if (origin === 'https://ops.ethertrack.in') return true;
+  return false;
+};
+
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (isAllowedOrigin(origin)) return callback(null, true);
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
