@@ -8,6 +8,7 @@ import MobileLayout from './components/MobileLayout';
 import SecurityGuard from './components/SecurityGuard';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 import OfflineIndicator from './components/OfflineIndicator';
+import { BackendKeepAlive } from './components/BackendKeepAlive';
 import TwoFactorSettings from './pages/TwoFactorSettings';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
@@ -121,6 +122,7 @@ export default function App() {
         <BrowserRouter>
           <PWAInstallPrompt />
           <OfflineIndicator />
+          <BackendKeepAlive />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />

@@ -257,3 +257,11 @@ app.listen(PORT, '0.0.0.0', () => {
   require('./services/healthScore'); // daily 05:00 — customer health scoring (cron inside)
   require('./services/slackBot'); // Slack bot for /mrr, /pipeline, /renewals, /approve-invoice
 });
+
+// Health check endpoint (no auth required - for keep-alive pings)
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Global error handler (must be last middleware)
+app.use(errorHandler);
