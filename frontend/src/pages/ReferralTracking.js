@@ -382,10 +382,3 @@ export default function ReferralTracking() {
     </Box>
   );
 }
-
-function formatINR(amount) {
-  if (!amount) return '₹0';
-  if (amount >= 1e7) return `₹${(amount / 1e7).toFixed(1)}Cr`;
-  if (amount >= 1e5) return `₹${(amount / 1e5).toFixed(1)}L`;
-  return `₹${amount.toLocaleString('en-IN')}`;
-}
