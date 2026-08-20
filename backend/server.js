@@ -217,6 +217,7 @@ app.use('/api/support-tickets-view', require('./routes/supportTicketsView')); //
 app.use('/api/analytics', require('./routes/analytics')); // NEW — MRR/ARR/Churn analytics dashboard
 app.use('/api/renewals', require('./routes/renewals')); // NEW — Automated Renewal Workflow (120/90/60/30 day)
 app.use('/api/churn-prediction', require('./routes/churnPrediction')); // NEW — AI Churn Prediction Model
+app.use('/api/health-scores', require('./routes/healthScores')); // NEW — Customer Health Scores (composite)
 
 // Global error handler (must be last middleware)
 app.use(errorHandler);
@@ -236,4 +237,5 @@ app.listen(PORT, '0.0.0.0', () => {
   require('./services/agentStaleSessionCron'); // every 5 min — auto-close stale agent sessions
   require('./services/renewalWorkflow'); // daily 07:30 — automated renewal check (cron inside)
   require('./services/churnPrediction'); // weekly Mon 06:00 — AI churn scoring (cron inside)
+  require('./services/healthScore'); // daily 05:00 — customer health scoring (cron inside)
 });
