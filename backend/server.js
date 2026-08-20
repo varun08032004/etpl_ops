@@ -222,6 +222,7 @@ app.use('/api/pipeline-analytics', require('./routes/pipelineAnalytics')); // NE
 app.use('/api/kpi-pack', require('./routes/kpiPack')); // NEW — Board-Ready KPI Pack (PDF)
 app.use('/api/invoice-anomalies', require('./routes/invoiceAnomaly')); // NEW — Invoice Anomaly Detection
 app.use('/api/vendor-intelligence', require('./routes/vendorIntelligence')); // NEW — Vendor Spend Intelligence
+app.use('/api/referrals', require('./routes/referralTracking')); // NEW — Internal Referral Tracking
 
 // Global error handler (must be last middleware)
 app.use(errorHandler);
