@@ -291,7 +291,11 @@ router.post('/login', authRateLimit, validateBody(loginSchema), async (req, res)
     console.log('[auth:login] Access token cookie set');
     res.cookie('internal_ops_refresh', refreshToken, cookieOptions(REFRESH_COOKIE_MAX_AGE));
     console.log('[auth:login] Refresh token cookie set');
-    res.json({ staff: { id: staff.id, email: staff.email, role: staff.role, employee_id: staff.employee_id } });
+    // Also return access token in body for Bearer token auth (works when cookies blocked)
+    res.json({ 
+      accessToken, 
+      staff: { id: staff.id, email: staff.email, role: staff.role, employee_id: staff.employee_id } 
+    });
     console.log('[auth:login] Response sent successfully');
   } catch (err) {
     console.error('[auth:login]', err);
@@ -344,7 +348,10 @@ router.post('/verify-device', authRateLimit, validateBody(verifyDeviceSchema), a
     res.cookie('internal_ops_refresh', refreshToken, cookieOptions(REFRESH_COOKIE_MAX_AGE));
     res.cookie('trusted_device_id', pendingToken, cookieOptions(DEVICE_COOKIE_MAX_AGE));
     res.clearCookie('pending_device_id', cookieOptions());
-    res.json({ staff: { id: staff.id, email: staff.email, role: staff.role, employee_id: staff.employee_id } });
+    res.json({ 
+      accessToken, 
+      staff: { id: staff.id, email: staff.email, role: staff.role, employee_id: staff.employee_id } 
+    });
   } catch (err) {
     console.error('[auth:verify-device]', err);
     res.status(500).json({ error: 'Device verification failed' });

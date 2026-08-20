@@ -13,14 +13,43 @@ const client = axios.create({
   withCredentials: true,
 });
 
-// No localStorage token — HttpOnly cookie is the single source of truth.
-// Backend sets 'internal_ops_token' cookie on login; browser sends it automatically.
+// Token storage for Bearer auth (fallback when cookies blocked)
+const TOKEN_KEY = 'internal_ops_token';
 
+function getStoredToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+function setStoredToken(token) {
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+}
+
+// Request interceptor: add Bearer token if available
+client.interceptors.request.use((config) => {
+  const token = getStoredToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Response interceptor: handle 401, 503, and store token from login
 client.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    // Store access token from login/verify-device responses
+    if (res.data?.accessToken) {
+      setStoredToken(res.data.accessToken);
+    }
+    return res;
+  },
   async (err) => {
     if (err.response?.status === 401) {
-      // Session expired or invalid — redirect to login
+      // Session expired or invalid — clear token and redirect to login
+      setStoredToken(null);
       if (window.location.pathname !== '/login') window.location.href = '/login';
       return Promise.reject(err);
     }
