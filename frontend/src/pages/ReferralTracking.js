@@ -383,10 +383,6 @@ export default function ReferralTracking() {
   );
 }
 
-const STAGE_ORDER = ['submitted', 'qualified', 'demo_scheduled', 'proposal_sent', 'won', 'lost'];
-const STAGE_LABEL = { submitted: 'Submitted', qualified: 'Qualified', demo_scheduled: 'Demo Scheduled', proposal_sent: 'Proposal Sent', won: 'Won', lost: 'Lost' };
-const STAGE_COLOR = { submitted: 'info', qualified: 'primary', demo_scheduled: 'warning', proposal_sent: 'warning', won: 'success', lost: 'error' };
-
 function formatINR(amount) {
   if (!amount) return '₹0';
   if (amount >= 1e7) return `₹${(amount / 1e7).toFixed(1)}Cr`;

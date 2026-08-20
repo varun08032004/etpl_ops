@@ -386,10 +386,6 @@ export default function PlatformFeeEngine() {
   );
 }
 
-const FEE_TYPE_LABEL = { percentage: 'Percentage', flat: 'Flat Fee', tiered: 'Tiered', volume_discount: 'Volume Discount', coupon: 'Coupon', mixed: 'Mixed (Pct + Flat)' };
-const FEE_TYPE_COLOR = { percentage: 'primary', flat: 'info', tiered: 'secondary', volume_discount: 'warning', coupon: 'success', mixed: 'default' };
-const APPLY_TO_LABEL = { seller: 'Seller', buyer: 'Buyer', both: 'Both' };
-
 function formatINR(amount) {
   if (!amount) return '₹0';
   if (amount >= 1e7) return `₹${(amount / 1e7).toFixed(1)}Cr`;

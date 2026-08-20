@@ -414,7 +414,7 @@ export default function PipelineAnalytics() {
               </Grid>
               <Grid item>
                 <Tooltip title="Deals stuck in stage longer than threshold">
-                  <IconButton size="small"><WarningIcon fontSize="small" color="warning" /></Tooltip>
+                  <IconButton size="small"><WarningIcon fontSize="small" color="warning" /></IconButton>
                 </Tooltip>
               </Grid>
             </Grid>
