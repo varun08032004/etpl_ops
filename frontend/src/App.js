@@ -77,6 +77,7 @@ import SlackBotConfig from './pages/SlackBotConfig';
 import InvoiceAnomalies from './pages/InvoiceAnomalies';
 import VendorIntelligence from './pages/VendorIntelligence';
 import ReferralTracking from './pages/ReferralTracking';
+import PlatformFeeEngine from './pages/PlatformFeeEngine';
 import MarketingCouponPerformance from './pages/MarketingCouponPerformance';
 import SupportTicketsView from './pages/SupportTicketsView';
 import GSTCollectedReport from './pages/GSTCollectedReport';
@@ -197,6 +198,7 @@ export default function App() {
               <Route path="/invoice-anomalies" element={<InvoiceAnomalies />} />
               <Route path="/vendor-intelligence" element={<VendorIntelligence />} />
               <Route path="/referral-tracking" element={<ReferralTracking />} />
+              <Route path="/platform-fee-engine" element={<PlatformFeeEngine />} />
               <Route path="/support-tickets" element={<SupportTicketsView />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

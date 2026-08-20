@@ -223,6 +223,7 @@ app.use('/api/kpi-pack', require('./routes/kpiPack')); // NEW — Board-Ready KP
 app.use('/api/invoice-anomalies', require('./routes/invoiceAnomaly')); // NEW — Invoice Anomaly Detection
 app.use('/api/vendor-intelligence', require('./routes/vendorIntelligence')); // NEW — Vendor Spend Intelligence
 app.use('/api/referrals', require('./routes/referralTracking')); // NEW — Internal Referral Tracking
+app.use('/api/fee-rules', require('./routes/platformFeeEngine')); // NEW — Dynamic Platform Fee/Commission Engine
 
 // Global error handler (must be last middleware)
 app.use(errorHandler);
