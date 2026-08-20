@@ -205,6 +205,7 @@ app.use('/api/product/pricing', require('./routes/productPricing')); // Product/
 app.use('/api/product/coupons', require('./routes/productCoupons')); // Product/Sales module: coupon codes (e.g. EARLYBIRD50)
 app.use('/api/product/corporate-deals', require('./routes/corporateDeals')); // Product/Sales module: Corporate deal setup + installment invoicing
 app.use('/api/support-tickets-view', require('./routes/supportTicketsView')); // NEW — Sales/CS module: read-only platform support ticket visibility
+app.use('/api/analytics', require('./routes/analytics')); // NEW — MRR/ARR/Churn analytics dashboard
 
 // Global error handler (must be last middleware)
 app.use(errorHandler);
