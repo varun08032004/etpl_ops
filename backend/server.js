@@ -221,4 +221,5 @@ app.listen(PORT, '0.0.0.0', () => {
   require('./services/corporateDealsScheduler'); // daily 08:00 — Corporate deal installment reminders
   require('./services/churnAlertScheduler'); // daily 09:00 — paid→free downgrade alerts to Sales/CS
   require('./services/refundAlertScheduler'); // daily 09:30 — refunds needing a ledger reversal
+  require('./services/agentStaleSessionCron'); // every 5 min — auto-close stale agent sessions
 });
