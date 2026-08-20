@@ -8,6 +8,7 @@ import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import EditIcon from '@mui/icons-material/Edit';
 import client from '../api/client';
 import {
   MobilePaper,
@@ -23,15 +24,7 @@ import {
   useMobile,
 } from '../components/MobileResponsive';
 
-const STAGE_COLOR = {
-  submitted: 'info',
-  qualified: 'primary',
-  demo_scheduled: 'warning',
-  proposal_sent: 'warning',
-  won: 'success',
-  lost: 'error',
-};
-
+const STAGE_ORDER = ['submitted', 'qualified', 'demo_scheduled', 'proposal_sent', 'won', 'lost'];
 const STAGE_LABEL = {
   submitted: 'Submitted',
   qualified: 'Qualified',
@@ -40,14 +33,20 @@ const STAGE_LABEL = {
   won: 'Won',
   lost: 'Lost',
 };
-
+const STAGE_COLOR = {
+  submitted: 'info',
+  qualified: 'primary',
+  demo_scheduled: 'warning',
+  proposal_sent: 'warning',
+  won: 'success',
+  lost: 'error',
+};
 const COMMISSION_COLOR = {
   pending: 'warning',
   approved: 'info',
   paid: 'success',
   cancelled: 'default',
 };
-
 const REFERRER_TYPE_LABEL = {
   ca_firm: 'CA Firm',
   audit_firm: 'Audit Firm',
@@ -83,6 +82,8 @@ export default function ReferralTracking() {
   });
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [stageChangeReferral, setStageChangeReferral] = useState(null);
+  const [stageChangeStage, setStageChangeStage] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -149,7 +150,12 @@ export default function ReferralTracking() {
     }
   };
 
-  const TABS = ['Referrals', 'Commissions', 'Dashboard'];
+  const openStageChange = (referral) => {
+    setStageChangeReferral(referral);
+    setStageChangeStage(referral.stage);
+  };
+
+  const TABS = ['All', 'Submitted', 'Qualified', 'Demo', 'Proposal', 'Won', 'Lost'];
 
   if (loading) return <MobileStack gap={2}><Typography>Loading referrals…</Typography></MobileStack>;
 
