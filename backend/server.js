@@ -218,6 +218,7 @@ app.use('/api/analytics', require('./routes/analytics')); // NEW — MRR/ARR/Chu
 app.use('/api/renewals', require('./routes/renewals')); // NEW — Automated Renewal Workflow (120/90/60/30 day)
 app.use('/api/churn-prediction', require('./routes/churnPrediction')); // NEW — AI Churn Prediction Model
 app.use('/api/health-scores', require('./routes/healthScores')); // NEW — Customer Health Scores (composite)
+app.use('/api/pipeline-analytics', require('./routes/pipelineAnalytics')); // NEW — Deal Velocity & Pipeline Analytics
 
 // Global error handler (must be last middleware)
 app.use(errorHandler);
