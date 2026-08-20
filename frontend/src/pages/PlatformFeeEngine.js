@@ -243,7 +243,7 @@ export default function PlatformFeeEngine() {
                 <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', textTransform: 'uppercase', mb: 1 }}>Applied Rules</Typography>
                 {calcResult.seller_fees.map((f, i) => (
                   <Chip key={i} label={`${f.rule_name}: ${formatINR(f.amount)} (${f.fee_type})`} size="small" color={FEE_TYPE_COLOR[f.fee_type] || 'default'} variant="outlined" sx={{ mr: 1, mb: 1 }} />
-                )}
+                ))}
                 {calcResult.buyer_fees.map((f, i) => (
                   <Chip key={`b-${i}`} label={`${f.rule_name}: ${formatINR(f.amount)} (${f.fee_type})`} size="small" color={FEE_TYPE_COLOR[f.fee_type] || 'default'} variant="outlined" sx={{ mr: 1, mb: 1 }} />
                 )}
