@@ -33,6 +33,8 @@
     "fix:domain-prepaid:execute": "node scripts/fix-domain-prepaid.js --execute"
   },
   "dependencies": {
+    "@slack/bolt": "^5.0.0",
+    "@slack/web-api": "^8.0.0",
     "archiver": "^8.0.0",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",

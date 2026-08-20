@@ -73,6 +73,7 @@ import ChurnPrediction from './pages/ChurnPrediction';
 import HealthScores from './pages/HealthScores';
 import PipelineAnalytics from './pages/PipelineAnalytics';
 import KPIPack from './pages/KPIPack';
+import SlackBotConfig from './pages/SlackBotConfig';
 import MarketingCouponPerformance from './pages/MarketingCouponPerformance';
 import SupportTicketsView from './pages/SupportTicketsView';
 import GSTCollectedReport from './pages/GSTCollectedReport';
@@ -189,6 +190,7 @@ export default function App() {
               <Route path="/health-scores" element={<HealthScores />} />
               <Route path="/pipeline-analytics" element={<PipelineAnalytics />} />
               <Route path="/kpi-pack" element={<KPIPack />} />
+              <Route path="/slack-bot" element={<SlackBotConfig />} />
               <Route path="/support-tickets" element={<SupportTicketsView />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -240,4 +240,5 @@ app.listen(PORT, '0.0.0.0', () => {
   require('./services/renewalWorkflow'); // daily 07:30 — automated renewal check (cron inside)
   require('./services/churnPrediction'); // weekly Mon 06:00 — AI churn scoring (cron inside)
   require('./services/healthScore'); // daily 05:00 — customer health scoring (cron inside)
+  require('./services/slackBot'); // Slack bot for /mrr, /pipeline, /renewals, /approve-invoice
 });
