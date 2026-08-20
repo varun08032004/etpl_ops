@@ -69,9 +69,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS
-app.use(cors({ 
-  origin: process.env.INTERNAL_OPS_ALLOWED_ORIGIN, 
+// CORS - Support multiple origins (dev + production)
+const allowedOrigins = (process.env.INTERNAL_OPS_ALLOWED_ORIGIN || 'http://localhost:3001')
+  .split(',')
+  .map(o => o.trim());
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
