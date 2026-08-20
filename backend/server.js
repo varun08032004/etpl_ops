@@ -215,6 +215,8 @@ app.use('/api/product/coupons', require('./routes/productCoupons')); // Product/
 app.use('/api/product/corporate-deals', require('./routes/corporateDeals')); // Product/Sales module: Corporate deal setup + installment invoicing
 app.use('/api/support-tickets-view', require('./routes/supportTicketsView')); // NEW — Sales/CS module: read-only platform support ticket visibility
 app.use('/api/analytics', require('./routes/analytics')); // NEW — MRR/ARR/Churn analytics dashboard
+app.use('/api/renewals', require('./routes/renewals')); // NEW — Automated Renewal Workflow (120/90/60/30 day)
+app.use('/api/churn-prediction', require('./routes/churnPrediction')); // NEW — AI Churn Prediction Model
 
 // Global error handler (must be last middleware)
 app.use(errorHandler);
@@ -232,4 +234,6 @@ app.listen(PORT, '0.0.0.0', () => {
   require('./services/churnAlertScheduler'); // daily 09:00 — paid→free downgrade alerts to Sales/CS
   require('./services/refundAlertScheduler'); // daily 09:30 — refunds needing a ledger reversal
   require('./services/agentStaleSessionCron'); // every 5 min — auto-close stale agent sessions
+  require('./services/renewalWorkflow'); // daily 07:30 — automated renewal check (cron inside)
+  require('./services/churnPrediction'); // weekly Mon 06:00 — AI churn scoring (cron inside)
 });

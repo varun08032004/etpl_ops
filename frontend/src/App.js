@@ -68,6 +68,8 @@ import ProductSubscriptions from './pages/ProductSubscriptions';
 import ProductPricing from './pages/ProductPricing';
 import ProductCoupons from './pages/ProductCoupons';
 import CorporateDeals from './pages/CorporateDeals';
+import Renewals from './pages/Renewals';
+import ChurnPrediction from './pages/ChurnPrediction';
 import MarketingCouponPerformance from './pages/MarketingCouponPerformance';
 import SupportTicketsView from './pages/SupportTicketsView';
 import GSTCollectedReport from './pages/GSTCollectedReport';
@@ -179,6 +181,8 @@ export default function App() {
               <Route path="/product/pricing" element={<ProductPricing />} />
               <Route path="/product/coupons" element={<ProductCoupons />} />
               <Route path="/product/corporate-deals" element={<CorporateDeals />} />
+              <Route path="/renewals" element={<Renewals />} />
+              <Route path="/churn-prediction" element={<ChurnPrediction />} />
               <Route path="/support-tickets" element={<SupportTicketsView />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
