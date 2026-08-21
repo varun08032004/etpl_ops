@@ -23,6 +23,29 @@ async function rateLimit() {
   lastRequestTime = Date.now();
 }
 
+// In-memory cache with TTL
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const cache = new Map();
+
+function getCached(key) {
+  const entry = cache.get(key);
+  if (entry && Date.now() - entry.time < CACHE_TTL_MS) {
+    console.log(`[platformClient] Cache HIT: ${key}`);
+    return entry.data;
+  }
+  return null;
+}
+
+function setCached(key, data) {
+  cache.set(key, { data, time: Date.now() });
+  console.log(`[platformClient] Cache SET: ${key}`);
+}
+
+function clearCache(key) {
+  if (key) cache.delete(key);
+  else cache.clear();
+}
+
 async function fetchWithRetry(url, options, retries = MAX_RETRIES) {
   await rateLimit();
   let lastError;
@@ -75,12 +98,18 @@ async function fetchPlatformIncome(fromDate, toDate) {
     );
   }
 
+  const cacheKey = `income:${fromDate}:${toDate}`;
+  const cached = getCached(`income:${fromDate}:${toDate}`);
+  if (cached) return cached;
+
   const url = `${base.replace(/\/$/, '')}/api/ops-integration/income?from=${fromDate}&to=${toDate}`;
 
   const resp = await fetchWithRetry(url, { headers: { 'x-service-token': token } });
 
   const data = await resp.json();
-  return [...(data.subscriptions || []), ...(data.trades || [])];
+  const result = [...(data.subscriptions || []), ...(data.trades || [])];
+  setCached(`income:${fromDate}:${toDate}`, result);
+  return result;
 }
 
 async function fetchPlatformCustomers(limit = 1000) {
@@ -91,11 +120,17 @@ async function fetchPlatformCustomers(limit = 1000) {
       'PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example'
     );
   }
+  const cacheKey = `customers:${limit}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cached;
+
   const url = `${base.replace(/\/$/, '')}/api/ops-integration/customers?limit=${limit}`;
 
   const resp = await fetchWithRetry(url, { headers: { 'x-service-token': token } });
   const data = await resp.json();
-  return data.customers || [];
+  const result = data.customers || [];
+  setCached(cacheKey, result);
+  return result;
 }
 
 // fetchChurnEvents: paid→free downgrades recorded on the platform, so Sales/
