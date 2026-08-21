@@ -7,10 +7,24 @@
 // construction: this file only ever does GETs.
 
 // Retry configuration for rate limiting
-const MAX_RETRIES = 3;
-const BASE_DELAY_MS = 1000;
+const MAX_RETRIES = 8;
+const BASE_DELAY_MS = 2000;
+
+// Simple rate limiter to space out requests
+let lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL_MS = 100; // Max 10 requests/second
+
+async function rateLimit() {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL_MS) {
+    await sleep(MIN_REQUEST_INTERVAL_MS - timeSinceLastRequest);
+  }
+  lastRequestTime = Date.now();
+}
 
 async function fetchWithRetry(url, options, retries = MAX_RETRIES) {
+  await rateLimit();
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt++) {
     let resp;
