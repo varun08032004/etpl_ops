@@ -243,4 +243,80 @@ async function fetchInvoicePdf(type, id) {
 
 // ─────────────────────────────────────────────────────────────────────────
 // Corporate subscription — WRITE path.
-...
+//
+// Everything above this line is read-only and goes through
+// PLATFORM_SYNC_SERVICE_TOKEN, hitting /api/ops-integration/* — that file's
+// own header comment on the platform side is explicit that it should never
+// grow write endpoints (deliberate blast-radius limit: a leaked read token
+// should never be able to touch billing). Corporate activation is a write,
+// so it deliberately uses a DIFFERENT token (PLATFORM_SYNC_CORPORATE_WRITE_TOKEN)
+// against a DIFFERENT route namespace (/api/ops-integration-corporate/*) —
+// see routes/opsIntegrationCorporate.js on the platform side. If this token
+// ever leaks, the read-only sync keeps working and is unaffected; if the
+// read-only token leaks, it can't reach this surface at all.
+//
+// ethertrack.in's Corporate plan is "Contact Sales" only, so the sale
+// happens in the ERP's Sales pipeline (routes/sales.js) and the platform
+// account just needs to be told the outcome once the deal is won.
+
+async function platformCorporateCall(path, method, body) {
+  const base = process.env.PLATFORM_API_URL;
+  const token = process.env.PLATFORM_SYNC_CORPORATE_WRITE_TOKEN;
+  if (!base || !token) {
+    throw new Error('PLATFORM_API_URL / PLATFORM_SYNC_CORPORATE_WRITE_TOKEN not configured — see .env.example');
+  }
+  const url = `${base.replace(/\/$/, '')}/api/ops-integration-corporate${path}`;
+  let resp;
+  try {
+    resp = await fetch(url, {
+      method,
+      headers: { 'x-service-token': token, 'Content-Type': 'application/json' },
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    throw new Error(`Could not reach platform API at ${base}: ${err.message}`);
+  }
+  const text = await resp.text().catch(() => '');
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* leave as null, raw text goes in the error below */ }
+
+  if (!resp.ok) {
+    const hint = resp.status === 404
+      ? ' — routes/opsIntegrationCorporate.js may not be deployed/mounted yet on the platform side'
+      : '';
+    throw Object.assign(
+      new Error(`Platform API returned ${resp.status}${hint}: ${(text || '').slice(0, 300)}`),
+      { status: resp.status, body: data }
+    );
+  }
+  return data;
+}
+
+// activateCorporate: triggers Corporate plan activation on the platform for
+// a specific platform user.
+async function activateCorporate(platformUserId, { cycle, seats, customPriceINR, renewalMonths, notes }) {
+  return platformCorporateCall(`/${platformUserId}/activate`, 'POST', {
+    cycle, seats, customPriceINR, renewalMonths, notes,
+  });
+}
+
+// updateCorporateRenewal
+async function updateCorporateRenewal(platformUserId, { renewalDate, seats, notes }) {
+  return platformCorporateCall(`/${platformUserId}/renewal`, 'PATCH', {
+    renewalDate, seats, notes,
+  });
+}
+
+// fetchCorporateActivations — read, but grouped here since it's gated
+// behind the same write-scoped token as the two actions above.
+async function fetchCorporateActivations() {
+  const data = await platformCorporateCall('/activations', 'GET', null);
+  return data?.activations || [];
+}
+
+module.exports = {
+  fetchPlatformIncome, fetchPlatformCustomers, fetchInvoicePdf, fetchChurnEvents, fetchPlatformRefunds, fetchCouponRedemptions, fetchSupportTickets, fetchDisputes, fetchKycStatus,
+  activateCorporate, updateCorporateRenewal, fetchCorporateActivations,
+  createCoupon, listCoupons, setCouponActive,
+  updatePlanPrice, fetchPlanPrices,
+};
