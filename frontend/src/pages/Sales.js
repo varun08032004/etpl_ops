@@ -23,6 +23,7 @@ import {
 } from '../components/MobileResponsive';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import RefreshIcon from '@mui/icons-material/Refresh';
 
 const STAGES = [
   { key: 'new', label: 'New' },
@@ -419,10 +420,22 @@ function PlatformSalesRecords() {
     }
   };
 
+  const handleRefresh = () => {
+    setLoading(true);
+    setError(null);
+    client.get('/platform-sync/records', { params: { month, year } })
+      .then(({ data }) => setRecords(data.records))
+      .catch((e) => setError(e.response?.data?.error || 'Could not reach the platform API'))
+      .finally(() => setLoading(false));
+  };
+
   return (
     <Box>
       <MobilePageHeader>
         <Typography variant={isMobile ? 'h6' : 'h5'} sx={{ mb: 0 }}>Platform Sales Records</Typography>
+        <MobileButton variant="outlined" onClick={handleRefresh} disabled={loading} startIcon={<RefreshIcon />}>
+          {loading ? 'Loading…' : 'Refresh'}
+        </MobileButton>
       </MobilePageHeader>
 
       <MobilePaper sx={{ mb: 2 }}>
@@ -466,7 +479,14 @@ function PlatformSalesRecords() {
         </MobileStack>
       </MobilePaper>
 
-      {error && <Alert severity="error" sx={{ mb: 2.5 }}>{error}</Alert>}
+      {error && (
+        <Alert severity="error" sx={{ mb: 2.5 }}>
+          {error}
+          <MobileButton size="small" variant="outlined" onClick={handleRefresh} sx={{ ml: 2 }}>
+            Retry
+          </MobileButton>
+        </Alert>
+      )}
       {loading && <CircularProgress size={22} />}
 
       {!loading && records && (
