@@ -54,6 +54,11 @@ import MonitorHeartOutlinedIcon from '@mui/icons-material/MonitorHeartOutlined';
 import TimelineOutlinedIcon from '@mui/icons-material/TimelineOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import SchoolOutlinedIcon from '@mui/icons-material/SchoolOutlined';
+import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined';
+import QuizOutlinedIcon from '@mui/icons-material/QuizOutlined';
+import VerifiedOutlinedIcon from '@mui/icons-material/VerifiedOutlined';
+import LibraryBooksOutlinedIcon from '@mui/icons-material/LibraryBooksOutlined';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from './NotificationBell';
 import client from '../api/client';
@@ -174,6 +179,23 @@ export const NAV_GROUPS = [
       { to: '/esignatures', label: 'E-Signatures', icon: BorderColorOutlinedIcon },
     ],
   },
+  {
+    label: 'Learning & Development',
+    items: [
+      { to: '/training/carbon-academy', label: 'Carbon Academy', icon: LibraryBooksOutlinedIcon, roles: ['owner', 'admin', 'hr'] },
+      { to: '/training/command-center', label: 'Command Center', icon: DashboardOutlinedIcon, roles: ['owner'] },
+      { to: '/training/programmes', label: 'Programmes', icon: MenuBookOutlinedIcon, roles: ['owner'] },
+      { to: '/training/courses', label: 'Courses', icon: SchoolOutlinedIcon, roles: ['owner'] },
+      { to: '/training/assessments', label: 'Assessments', icon: QuizOutlinedIcon, roles: ['owner'] },
+      { to: '/training/my-training', label: 'My Training', icon: SchoolOutlinedIcon, roles: ['owner'] },
+      { to: '/training/assignments', label: 'Assignments', icon: PersonAddAltOutlinedIcon, roles: ['owner', 'admin', 'hr'] },
+      { to: '/training/employees', label: 'Employees', icon: PeopleOutlinedIcon, roles: ['owner', 'admin', 'hr'] },
+      { to: '/training/progress', label: 'Progress', icon: TrendingUpOutlinedIcon, roles: ['owner', 'admin', 'hr'] },
+      { to: '/training/certificates', label: 'Certificates', icon: VerifiedOutlinedIcon, roles: ['owner', 'admin', 'hr'] },
+      { to: '/training/reports', label: 'Reports', icon: AssessmentOutlinedIcon, roles: ['owner', 'admin', 'hr'] },
+      { to: '/training/audit', label: 'Audit Logs', icon: FactCheckOutlinedIcon, roles: ['owner'] },
+    ],
+  },
 ];
 
 // Maps a department's granted_roles entries to the existing NAV_GROUPS
@@ -184,7 +206,7 @@ export const NAV_GROUPS = [
 // ('finance') — see middleware/auth.js + services/departmentAccess.js).
 export const ROLE_TO_NAV_GROUP_LABELS = {
   finance: ['Sales', 'Accounting', 'Finance'],
-  hr: ['HR'],
+  hr: ['HR', 'Learning & Development'],
   legal_hod: ['Legal'],
   compliance_hod: ['Legal'],
   marketing_hod: ['Marketing'],
@@ -205,6 +227,7 @@ export const ADMIN_NAV_GROUP = {
 export const SELF_SERVICE_NAV = [
   { to: '/', label: 'My Profile', icon: PersonOutlinedIcon, end: true },
   { to: '/my-activity', label: 'My Activity', icon: TimelineOutlinedIcon },
+  { to: '/training/my-training', label: 'My Training', icon: SchoolOutlinedIcon },
 ];
 
 // Groups open by default so nothing is hidden on first load.
@@ -216,7 +239,7 @@ const STORAGE_KEY = 'sidebar-open-groups';
 // still defaults to open even if the user's saved state predates it.
 function getInitialOpenState() {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = sessionStorage.getItem(STORAGE_KEY);
     if (saved) return { ...DEFAULT_OPEN_STATE, ...JSON.parse(saved) };
   } catch {
     // ignore malformed/blocked storage, fall back to default
@@ -256,9 +279,9 @@ export default function Layout() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(openGroups));
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(openGroups));
     } catch {
-      // storage may be unavailable (private mode, quota) — non-critical, skip
+      // ignore
     }
   }, [openGroups]);
 
@@ -285,59 +308,86 @@ export default function Layout() {
 
         <Box sx={{ px: 1.5, display: 'flex', flexDirection: 'column', gap: 0.5, flex: 1, overflowY: 'auto' }}>
           {isPrivileged ? (
-            navGroups.map((group) => {
-              const isOpen = openGroups[group.label] ?? true;
-              return (
-                <Box key={group.label} sx={{ mb: 1 }}>
-                  <Box
-                    onClick={() => toggleGroup(group.label)}
-                    sx={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      px: 1.5, pt: 1.5, pb: 0.5, cursor: 'pointer', userSelect: 'none',
-                      '&:hover .group-label': { color: 'text.primary' },
-                    }}
-                  >
-                    <Typography
-                      className="group-label"
-                      sx={{ fontSize: '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}
-                    >
-                      {group.label}
-                    </Typography>
-                    <ExpandMoreIcon
+            <>
+              {navGroups.map((group) => {
+                const isOpen = openGroups[group.label] ?? true;
+                return (
+                  <Box key={group.label} sx={{ mb: 1 }}>
+                    <Box
+                      onClick={() => toggleGroup(group.label)}
                       sx={{
-                        fontSize: 16, color: 'text.secondary',
-                        transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
-                        transition: 'transform 0.15s ease',
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        px: 1.5, pt: 1.5, pb: 0.5, cursor: 'pointer', userSelect: 'none',
+                        '&:hover .group-label': { color: 'text.primary' },
                       }}
-                    />
-                  </Box>
-                  <Collapse in={isOpen} timeout={150}>
-                    {group.items.map(({ to, label, icon: Icon, end }) => (
-                      <Box
-                        key={to} component={NavLink} to={to} end={end}
-                        sx={{
-                          display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1,
-                          borderRadius: 1.5, color: 'text.secondary', fontSize: '0.9375rem', fontWeight: 500,
-                          position: 'relative',
-                          '&.active': {
-                            color: 'text.primary', bgcolor: 'rgba(47,191,113,0.08)',
-                            '& .nav-icon': { color: 'primary.main' },
-                            '&::before': {
-                              content: '""', position: 'absolute', left: -6, top: '20%', bottom: '20%',
-                              width: 3, borderRadius: 3, bgcolor: 'primary.main',
-                            },
-                          },
-                          '&:hover': { color: 'text.primary', bgcolor: 'rgba(255,255,255,0.03)' },
-                        }}
+                    >
+                      <Typography
+                        className="group-label"
+                        sx={{ fontSize: '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}
                       >
-                        <Icon className="nav-icon" sx={{ fontSize: 21 }} />
-                        {label}
-                      </Box>
-                    ))}
-                  </Collapse>
+                        {group.label}
+                      </Typography>
+                      <ExpandMoreIcon
+                        sx={{
+                          fontSize: 16, color: 'text.secondary',
+                          transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+                          transition: 'transform 0.15s ease',
+                        }}
+                      />
+                    </Box>
+                    <Collapse in={isOpen} timeout={150}>
+                      {group.items
+                        .filter(({ roles }) => !roles || roles.includes(staff?.role))
+                        .map(({ to, label, icon: Icon, end }) => (
+                        <Box
+                          key={to} component={NavLink} to={to} end={end}
+                          sx={{
+                            display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1,
+                            borderRadius: 1.5, color: 'text.secondary', fontSize: '0.9375rem', fontWeight: 500,
+                            position: 'relative',
+                            '&.active': {
+                              color: 'text.primary', bgcolor: 'rgba(47,191,113,0.08)',
+                              '& .nav-icon': { color: 'primary.main' },
+                              '&::before': {
+                                content: '""', position: 'absolute', left: -6, top: '20%', bottom: '20%',
+                                width: 3, borderRadius: 3, bgcolor: 'primary.main',
+                              },
+                            },
+                            '&:hover': { color: 'text.primary', bgcolor: 'rgba(255,255,255,0.03)' },
+                          }}
+                        >
+                          <Icon className="nav-icon" sx={{ fontSize: 21 }} />
+                          {label}
+                        </Box>
+                      ))}
+                    </Collapse>
+                  </Box>
+                );
+              })}
+              {/* Self-service nav items for privileged users */}
+              {selfServiceNav.map(({ to, label, icon: Icon, end }) => (
+                <Box
+                  key={to} component={NavLink} to={to} end={end}
+                  sx={{
+                    display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1,
+                    borderRadius: 1.5, color: 'text.secondary', fontSize: '0.9375rem', fontWeight: 500,
+                    position: 'relative',
+                    '&.active': {
+                      color: 'text.primary', bgcolor: 'rgba(47,191,113,0.08)',
+                      '& .nav-icon': { color: 'primary.main' },
+                      '&::before': {
+                        content: '""', position: 'absolute', left: -6, top: '20%', bottom: '20%',
+                        width: 3, borderRadius: 3, bgcolor: 'primary.main',
+                      },
+                    },
+                    '&:hover': { color: 'text.primary', bgcolor: 'rgba(255,255,255,0.03)' },
+                  }}
+                >
+                  <Icon className="nav-icon" sx={{ fontSize: 21 }} />
+                  {label}
                 </Box>
-              );
-            })
+              ))}
+            </>
           ) : (
             selfServiceNav.map(({ to, label, icon: Icon, end }) => (
               <Box

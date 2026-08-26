@@ -21,6 +21,12 @@ import Accounting from './pages/Accounting';
 import Payroll from './pages/Payroll';
 import Attendance from './pages/Attendance';
 import Monitoring from './pages/Monitoring';
+import MonitoringLive from './pages/MonitoringLive';
+import MonitoringDay from './pages/MonitoringDay';
+import MonitoringProductivityRules from './pages/MonitoringProductivityRules';
+import MonitoringSettings from './pages/MonitoringSettings';
+import MonitoringDevices from './pages/MonitoringDevices';
+import MonitoringScreenshots from './pages/MonitoringScreenshots';
 import MyActivity from './pages/MyActivity';
 import Recruitment from './pages/Recruitment';
 import Performance from './pages/Performance';
@@ -84,6 +90,18 @@ import SupportTicketsView from './pages/SupportTicketsView';
 import GSTCollectedReport from './pages/GSTCollectedReport';
 import GSTLiabilityReport from './pages/GSTLiabilityReport';
 import PlatformSettlementReport from './pages/PlatformSettlementReport';
+import TrainingCommandCenter from './pages/TrainingCommandCenter';
+import TrainingProgrammes from './pages/TrainingProgrammes';
+import TrainingCourses from './pages/TrainingCourses';
+import TrainingAssessments from './pages/TrainingAssessments';
+import TrainingAssignments from './pages/TrainingAssignments';
+import TrainingEmployees from './pages/TrainingEmployees';
+import TrainingProgress from './pages/TrainingProgress';
+import TrainingCertificates from './pages/TrainingCertificates';
+import TrainingReports from './pages/TrainingReports';
+import TrainingAudit from './pages/TrainingAudit';
+import TrainingMyTraining from './pages/TrainingMyTraining';
+import TrainingCarbonAcademy from './pages/TrainingCarbonAcademy';
 
 // Widened to include legal_hod/compliance_hod/marketing_hod/sales_hod/
 // product_hod — matches Layout.jsx's PRIVILEGED_ROLES, so those roles get
@@ -141,6 +159,12 @@ export default function App() {
               <Route path="/payroll" element={<Payroll />} />
               <Route path="/attendance" element={<Attendance />} />
               <Route path="/monitoring" element={<Monitoring />} />
+              <Route path="/monitoring/live" element={<MonitoringLive />} />
+              <Route path="/monitoring/day" element={<MonitoringDay />} />
+              <Route path="/monitoring/productivity-rules" element={<MonitoringProductivityRules />} />
+              <Route path="/monitoring/settings" element={<MonitoringSettings />} />
+              <Route path="/monitoring/devices" element={<MonitoringDevices />} />
+              <Route path="/monitoring/screenshots" element={<MonitoringScreenshots />} />
               <Route path="/my-activity" element={<MyActivity />} />
               <Route path="/recruitment" element={<Recruitment />} />
               <Route path="/performance" element={<Performance />} />
@@ -202,6 +226,18 @@ export default function App() {
               <Route path="/referral-tracking" element={<ReferralTracking />} />
               <Route path="/platform-fee-engine" element={<PlatformFeeEngine />} />
               <Route path="/support-tickets" element={<SupportTicketsView />} />
+              <Route path="/training/command-center" element={<TrainingCommandCenter />} />
+              <Route path="/training/programmes" element={<TrainingProgrammes />} />
+              <Route path="/training/courses" element={<TrainingCourses />} />
+              <Route path="/training/assessments" element={<TrainingAssessments />} />
+              <Route path="/training/assignments" element={<TrainingAssignments />} />
+              <Route path="/training/employees" element={<TrainingEmployees />} />
+              <Route path="/training/progress" element={<TrainingProgress />} />
+              <Route path="/training/certificates" element={<TrainingCertificates />} />
+              <Route path="/training/reports" element={<TrainingReports />} />
+              <Route path="/training/audit" element={<TrainingAudit />} />
+              <Route path="/training/carbon-academy" element={<TrainingCarbonAcademy />} />
+              <Route path="/training/my-training" element={<TrainingMyTraining />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
