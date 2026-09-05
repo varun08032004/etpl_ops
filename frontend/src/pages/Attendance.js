@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
-  TextField, MenuItem, Button, Alert, Chip, CircularProgress,
+  Box, Typography, Table, TableHead, TableRow, TableCell, TableBody,
+  Alert, Chip, CircularProgress,
 } from '@mui/material';
 import SyncOutlinedIcon from '@mui/icons-material/SyncOutlined';
 import client from '../api/client';
@@ -10,7 +10,6 @@ import {
   MobilePaper,
   MobilePageHeader,
   MobileFormGrid,
-  MobileActionButtons,
   ResponsiveTableContainer,
   MobileCardGrid,
   MobileButton,
@@ -45,7 +44,6 @@ export default function Attendance() {
   const [from, setFrom] = useState(firstOfMonth());
   const [to, setTo] = useState(today());
   const [records, setRecords] = useState(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const [syncing, setSyncing] = useState(false);
@@ -56,14 +54,12 @@ export default function Attendance() {
   }, []);
 
   const load = useCallback(() => {
-    setLoading(true);
     setError(null);
     const params = { from, to };
     if (employeeId) params.employee_id = employeeId;
     client.get('/attendance', { params })
       .then(({ data }) => setRecords(data.attendance || []))
-      .catch((e) => setError(e.response?.data?.error || 'Failed to load attendance'))
-      .finally(() => setLoading(false));
+      .catch((e) => setError(e.response?.data?.error || 'Failed to load attendance'));
   }, [employeeId, from, to]);
 
   useEffect(() => { load(); }, [load]);
@@ -74,7 +70,7 @@ export default function Attendance() {
     try {
       const syncMonth = Number(to.slice(5, 7));
       const syncYear = Number(to.slice(0, 4));
-      const { data } = await client.post('/attendance/sync/trackpilot', { month: syncMonth, year: syncYear });
+      const { data } = await client.post('/attendance/sync/agent', { month: syncMonth, year: syncYear });
       setSyncMessage({ severity: 'success', text: data.message || 'Sync complete.' });
       load();
     } catch (e) {
@@ -102,15 +98,13 @@ export default function Attendance() {
           onClick={runSync}
           disabled={syncing}
         >
-          {syncing ? 'Syncing…' : 'Sync from TrackPilot'}
+          {syncing ? 'Syncing…' : 'Sync from Agent'}
         </MobileButton>
       </MobilePageHeader>
 
       <MobilePaper sx={{ mb: 2 }}>
         <Typography sx={{ color: 'text.secondary', fontSize: isMobile ? '0.7rem' : '0.85rem', mb: 2 }}>
-          Sourced from Trackpilots (Section 18.2). "Sync from Trackpilots" pulls the whole month
-          containing your "To" date — Trackpilots reports monthly, not by arbitrary range. New
-          employees are auto-linked by matching their work email to their Trackpilots login on first sync.
+          Sync pulls attendance from the EtherTrack desktop agent for the selected month.
         </Typography>
 
         {syncMessage && <Alert severity={syncMessage.severity} sx={{ mb: 2 }}>{syncMessage.text}</Alert>}

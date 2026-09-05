@@ -52,13 +52,11 @@ These phases are complete and tested. Any changes require full regression suite 
 
 ---
 
-## Phase 4: BLOCKED
+## Phase 4: ACTIVE
 
-**Blocker:** Stabilization gate not committed
+**Phase 4.1: Calculation Engine Core** - DESIGN COMPLETE → IMPLEMENTATION STARTING
 
-**Unblock:** Complete git commit → push → Phase 4.1 can resume
-
-**Phase 4.1 Scope:**
+**Scope:**
 - Deterministic calculation engine core
 - Project-level emission aggregation
 - Uncertainty propagation
@@ -68,14 +66,15 @@ These phases are complete and tested. Any changes require full regression suite 
 
 ## Test Requirements for Phase 4
 
-Before Phase 4 can begin:
+Before Phase 4.1 can be marked complete:
 - [ ] All 71 Phase 1-3 tests passing
 - [ ] Carbon Academy validation passing
 - [ ] Frontend build passing
 - [ ] TypeScript clean
 - [ ] Git commit pushed
-
----
+- [ ] Phase 4.1 unit tests passing
+- [ ] Deterministic execution verified
+- [ ] Uncertainty propagation tested
 
 ## Notes
 

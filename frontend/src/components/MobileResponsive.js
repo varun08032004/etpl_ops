@@ -486,9 +486,44 @@ export function MobileSelectField({ label, value, onChange, options, placeholder
   );
 }
 
-export function MobileTextField({ label, type = 'text', value, onChange, placeholder, fullWidth = true, multiline, rows = 2, ...props }) {
+export function MobileTextField({ label, type = 'text', value, onChange, placeholder, fullWidth = true, multiline, rows = 2, select, options, ...props }) {
   const isMobile = useMobile();
   const theme = useTheme();
+
+  if (select && options) {
+    return (
+      <TextField
+        fullWidth={fullWidth}
+        label={label}
+        select
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        size="small"
+        sx={{
+          '& .MuiInputBase-input': {
+            padding: theme.spacing(1, 1.5),
+            fontSize: isMobile ? '0.875rem' : '0.875rem',
+            minHeight: isMobile ? 44 : 'auto',
+          },
+          '& .MuiInputLabel-root': {
+            fontSize: isMobile ? '0.75rem' : '0.875rem',
+          },
+          '& .MuiOutlinedInput-root': {
+            '&:hover .MuiOutlinedInput-notchedOutline': {
+              borderColor: theme.palette.primary.main,
+            },
+          },
+        }}
+        InputLabelProps={{ shrink: true }}
+        {...props}
+      >
+        {options.map((opt) => (
+          <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+        ))}
+      </TextField>
+    );
+  }
 
   return (
     <TextField

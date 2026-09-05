@@ -36,6 +36,34 @@ const { fetchPlatformIncome, fetchPlatformCustomers, fetchInvoicePdf, fetchPlatf
 
 router.use(authenticate);
 
+// Idempotency key middleware for mutating endpoints
+const idempotencyStore = new Map();
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function idempotencyMiddleware(req, res, next) {
+  const key = req.headers['idempotency-key'];
+  if (!key) {
+    return res.status(400).json({ error: 'Idempotency-Key header required' });
+  }
+  const existing = idempotencyStore.get(key);
+  if (existing) {
+    if (Date.now() - existing.timestamp < IDEMPOTENCY_TTL_MS) {
+      return res.status(409).json({ error: 'Duplicate request', originalResponse: existing.response });
+    }
+    // Expired - allow through
+    idempotencyStore.delete(key);
+  }
+  // Store response for future duplicate detection
+  const originalSend = res.send;
+  res.send = function (body) {
+    if (res.statusCode < 400) {
+      idempotencyStore.set(key, { response: body, timestamp: Date.now() });
+    }
+    return originalSend.call(this, body);
+  };
+  next();
+}
+
 function monthRange(month, year) {
   const m = parseInt(month, 10);
   const y = parseInt(year, 10);
@@ -106,7 +134,7 @@ router.get('/preview', requireRole('finance'), async (req, res) => {
 // The one-click import. Fetches the platform's income feed for the month,
 // posts a journal entry per new record, logs each for idempotency, and
 // records a summary run.
-router.post('/run', requireRole('finance'), async (req, res) => {
+router.post('/run', requireRole('finance'), idempotencyMiddleware, async (req, res) => {
   try {
     const { from, to } = monthRange(req.body.month, req.body.year);
     const accts = await getAccountIds();
@@ -152,10 +180,12 @@ router.post('/run', requireRole('finance'), async (req, res) => {
         });
 
         await safeQuery(
-          `INSERT INTO platform_sync_log (source, ref_id, amount_inr, gst_inr, entry_date, journal_entry_id, synced_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)
+          `INSERT INTO platform_sync_log (source, ref_id, amount_inr, gst_inr, cgst_inr, sgst_inr, igst_inr, entry_date, journal_entry_id, synced_by, customer_email, buyer_email, seller_email, project_name, quantity_tco2, plan, cycle, description)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
            ON CONFLICT (source, ref_id) DO NOTHING`,
-          [r.source, r.ref_id, amount, gst, entryDate, je.id, req.staff.id]
+          [r.source, r.ref_id, amount, gst, cgst, sgst, igst, entryDate, je.id, req.staff.id,
+           r.customer_email || null, r.buyer_email || null, r.seller_email || null,
+           r.project_name || null, r.quantity_tco2 || null, r.plan || null, r.cycle || null, r.description]
         );
 
         synced++;
@@ -191,6 +221,31 @@ router.get('/history', requireRole('finance'), async (req, res) => {
      ORDER BY r.run_at DESC LIMIT 24`
   );
   res.json({ runs: rows });
+});
+
+// GET /api/platform-sync/latest?month=7&year=2026
+// Get the latest sync run for a specific period
+router.get('/latest', requireRole('finance', 'manager'), async (req, res) => {
+  try {
+    const month = parseInt(req.query.month, 10);
+    const year = parseInt(req.query.year, 10);
+    if (!month || month < 1 || month > 12 || !year || year < 2000 || year > 2100) {
+      return res.status(400).json({ error: 'Invalid month/year' });
+    }
+    const { rows } = await safeQuery(
+      `SELECT r.*, s.email AS run_by_email
+       FROM platform_sync_runs r LEFT JOIN staff_accounts s ON s.id = r.run_by
+       WHERE r.period_month = $1 AND r.period_year = $2
+       ORDER BY r.run_at DESC LIMIT 1`,
+      [month, year]
+    );
+    if (rows.length === 0) {
+      return res.json({ run: null });
+    }
+    res.json({ run: rows[0] });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
 });
 
 // GET /api/platform-sync/log?month=7&year=2026
@@ -231,7 +286,7 @@ router.get('/log', requireRole('finance'), async (req, res) => {
 // touch platform_sync_log or the original journal entry — posts an
 // equal-and-opposite reversing entry via ledger.reverseJournalEntry, so the
 // mistake AND its correction are both visible in the books, forever.
-router.post('/records/:logId/void', requireRole('finance'), async (req, res) => {
+router.post('/records/:logId/void', requireRole('finance'), idempotencyMiddleware, async (req, res) => {
   try {
     const { reason } = req.body;
     if (!reason || !reason.trim()) {
@@ -271,15 +326,61 @@ router.post('/records/:logId/void', requireRole('finance'), async (req, res) => 
 });
 
 // GET /api/platform-sync/records?month=7&year=2026
-// Read-only sales register — does NOT post anything to the ledger. Just the
-// platform's raw trade + subscription records, formatted for browsing,
-// filtering, and export. Separate from /preview and /run, which are about
-// the accounting entries specifically.
+// Read-only sales register — returns LOCAL synced records instantly,
+// plus optionally fetches fresh platform data in background for comparison.
 router.get('/records', requireRole('finance', 'manager'), async (req, res) => {
   try {
     const { from, to } = monthRange(req.query.month, req.query.year);
+
+    // 1. Return LOCAL synced records immediately (fast, no ERP call)
+    const { rows: localRecords } = await safeQuery(
+      `SELECT psl.*, je.entry_number, je.narration, je.reversed_by,
+              rev.entry_number AS reversal_entry_number
+       FROM platform_sync_log psl
+       JOIN journal_entries je ON je.id = psl.journal_entry_id
+       LEFT JOIN journal_entries rev ON rev.id = je.reversed_by
+       WHERE psl.entry_date BETWEEN $1 AND $2
+       ORDER BY psl.entry_date DESC, psl.synced_at DESC`,
+      [from, to]
+    );
+
+    const syncedRecords = localRecords.map((r) => ({
+      ...r,
+      voided: !!r.reversed_by,
+      source: r.source,
+      ref_id: r.ref_id,
+      amount_inr: r.amount_inr,
+      gst_inr: r.gst_inr,
+      date: r.entry_date,
+      invoice_number: r.entry_number,
+      description: r.narration,
+      project_name: r.project_name,
+      customer_email: r.customer_email,
+      buyer_email: r.buyer_email,
+      seller_email: r.seller_email,
+      quantity_tco2: r.quantity_tco2,
+      plan: r.plan,
+      cycle: r.cycle,
+      _local: true,
+    }));
+
+    res.json({ from, to, records: syncedRecords, fromCache: true });
+
+    // 2. Optionally fetch fresh platform data in background (non-blocking)
+    // Frontend can call /records?month=X&year=Y&fresh=true if it wants live data
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// GET /api/platform-sync/records/fresh?month=7&year=2026
+// Fetches LIVE data from platform (may be slow on cold start)
+// Use for "Refresh" button or background sync comparison
+router.get('/records/fresh', requireRole('finance', 'manager'), async (req, res) => {
+  try {
+    const { from, to } = monthRange(req.query.month, req.query.year);
     const records = await fetchPlatformIncome(from, to);
-    res.json({ from, to, records });
+    res.json({ from, to, records, fromCache: false });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }

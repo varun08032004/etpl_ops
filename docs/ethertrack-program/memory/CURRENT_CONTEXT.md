@@ -84,7 +84,7 @@
 **New Files:** 6 backend scripts, 1 frontend proxy config  
 **Modified Files:** `training.js`, `import-lesson-content.js`  
 
-**Next Commit:** `fix(academy): restore carbon academy curriculum loading`
+**Git Commit:** a5be960
 
 ---
 

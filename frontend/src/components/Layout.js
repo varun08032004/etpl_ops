@@ -193,6 +193,7 @@ export const NAV_GROUPS = [
       { to: '/training/progress', label: 'Progress', icon: TrendingUpOutlinedIcon, roles: ['owner', 'admin', 'hr'] },
       { to: '/training/certificates', label: 'Certificates', icon: VerifiedOutlinedIcon, roles: ['owner', 'admin', 'hr'] },
       { to: '/training/reports', label: 'Reports', icon: AssessmentOutlinedIcon, roles: ['owner', 'admin', 'hr'] },
+      { to: '/training/manager-dashboard', label: 'Manager Dashboard', icon: PeopleOutlinedIcon, roles: ['owner', 'admin', 'hr', 'manager'] },
       { to: '/training/audit', label: 'Audit Logs', icon: FactCheckOutlinedIcon, roles: ['owner'] },
     ],
   },

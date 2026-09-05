@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -26,6 +26,8 @@ import {
 import SyncOutlinedIcon from '@mui/icons-material/SyncOutlined';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ScheduleIcon from '@mui/icons-material/Schedule';
 import client from '../api/client';
 import Money from '../components/Money';
 import PlatformSyncLog from './PlatformSyncLog';
@@ -45,6 +47,7 @@ import {
   MobileTextField,
   useMobile,
 } from '../components/MobileResponsive';
+import { refreshEvents, REFRESH_EVENTS } from '../utils/refreshEvents';
 
 function monthStartEnd() {
   const now = new Date();
@@ -186,10 +189,31 @@ function PlatformSync() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [history, setHistory] = useState([]);
+  const [lastSync, setLastSync] = useState(null);
 
   const loadHistory = () => client.get('/platform-sync/history').then(({ data }) => setHistory(data.runs)).catch(() => {});
 
-  useEffect(() => { loadHistory(); }, []);
+  const loadLatestSync = useCallback(() => {
+    client.get('/platform-sync/latest', { params: { month, year } })
+      .then(({ data }) => {
+        if (data.run) {
+          setLastSync({
+            date: data.run.run_at,
+            recordsSynced: data.run.records_synced,
+            totalAmount: data.run.total_amount_inr,
+            runBy: data.run.run_by_email,
+          });
+        } else {
+          setLastSync(null);
+        }
+      })
+      .catch(() => setLastSync(null));
+  }, [month, year]);
+
+  useEffect(() => {
+    loadHistory();
+    loadLatestSync();
+  }, [loadHistory, loadLatestSync]);
 
   useEffect(() => {
     setError(null);
@@ -205,11 +229,17 @@ function PlatformSync() {
     setSyncing(true);
     setError(null);
     try {
-      const { data } = await client.post('/platform-sync/run', { month, year });
+      const idempotencyKey = `sync-${month}-${year}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const { data } = await client.post('/platform-sync/run', { month, year }, {
+        headers: { 'Idempotency-Key': idempotencyKey }
+      });
       setResult(data);
       const { data: p } = await client.get('/platform-sync/preview', { params: { month, year } });
       setPreview(p);
       loadHistory();
+      loadLatestSync();
+      refreshEvents.emit(REFRESH_EVENTS.SYNC_COMPLETE, { month, year, ...data });
+      refreshEvents.emit(REFRESH_EVENTS.REVENUE_UPDATED, { month, year, ...data });
     } catch (e) {
       setError(e.response?.data?.error || 'Sync failed');
     } finally {
@@ -219,12 +249,52 @@ function PlatformSync() {
 
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
 
+  const formatDateTime = (isoString) => {
+    const d = new Date(isoString);
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' +
+           d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
     <Box sx={{ maxWidth: isMobile ? '100%' : 900 }}>
       <Typography sx={{ color: 'text.secondary', mb: 2, fontSize: isMobile ? '0.75rem' : '0.875rem' }}>
         Pulls subscription and trade-fee revenue from the EtherTrack platform and posts it into this ledger.
         Safe to click more than once: anything already synced is skipped automatically.
       </Typography>
+
+      {lastSync && (
+        <Box sx={{ mb: 1.5, p: 1, borderRadius: 1, borderLeft: '3px solid', borderColor: 'success.main', bgcolor: 'success.50', display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <CheckCircleIcon fontSize="small" color="success.main" />
+            <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>
+              Last synced
+            </Typography>
+            <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
+              {formatDateTime(lastSync.date)}
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 2.5, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}>
+              <Typography variant="caption" color="text.secondary">Records:</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 600, color: 'success.main' }}>
+                {lastSync.recordsSynced}
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}>
+              <Typography variant="caption" color="text.secondary">Revenue:</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 600, color: 'primary.main' }}>
+                <Money amount={lastSync.totalAmount} size="0.8rem" />
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}>
+              <Typography variant="caption" color="text.secondary">By:</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.primary' }}>
+                {lastSync.runBy || '—'}
+              </Typography>
+            </Box>
+          </Box>
+        </Box>
+      )}
 
       <MobileFormGrid sx={{ mb: 2, alignItems: 'center' }}>
         <MobileTextField
@@ -341,11 +411,17 @@ function MrrCard() {
   const [mrr, setMrr] = useState(null);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
+  const fetchMrr = useCallback(() => {
     client.get('/platform-sync/mrr')
       .then(({ data }) => setMrr(data))
       .catch((e) => setError(e.response?.data?.error || 'Failed to load MRR'));
   }, []);
+
+  useEffect(() => {
+    fetchMrr();
+    const cleanup = refreshEvents.on(REFRESH_EVENTS.REVENUE_UPDATED, fetchMrr);
+    return cleanup;
+  }, [fetchMrr]);
 
   if (error) return <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>;
   if (!mrr) return null;
@@ -388,19 +464,31 @@ function RevenueGrowth() {
   const [gst, setGst] = useState(null);
   const [gstError, setGstError] = useState(null);
 
-  useEffect(() => {
+  const fetchRevenueGrowth = useCallback(() => {
     setError(null);
     client.get('/accounting/reports/revenue-growth', { params: { months } })
       .then(({ data }) => setData(data))
       .catch((e) => setError(e.response?.data?.error || 'Failed to load revenue trend'));
   }, [months]);
 
-  useEffect(() => {
+  const fetchGst = useCallback(() => {
     setGstError(null);
     client.get('/accounting/reports/gst-summary', { params: gstRange })
       .then(({ data }) => setGst(data))
       .catch((e) => setGstError(e.response?.data?.error || 'Failed to load GST summary'));
   }, [gstRange]);
+
+  useEffect(() => {
+    fetchRevenueGrowth();
+    const cleanup = refreshEvents.on(REFRESH_EVENTS.REVENUE_UPDATED, fetchRevenueGrowth);
+    return cleanup;
+  }, [fetchRevenueGrowth]);
+
+  useEffect(() => {
+    fetchGst();
+    const cleanup = refreshEvents.on(REFRESH_EVENTS.REVENUE_UPDATED, fetchGst);
+    return cleanup;
+  }, [fetchGst]);
 
   const maxMonthTotal = data ? Math.max(...data.months.map((m) => m.totalRevenue), 1) : 1;
 

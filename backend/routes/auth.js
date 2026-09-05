@@ -15,10 +15,15 @@ const {
   revokeRefreshToken,
   enforceSessionLimit,
   cookieOptions,
+  accessCookieOptions,
+  refreshCookieOptions,
   authenticate,
+  hashRefreshToken,
+  ACCESS_COOKIE_MAX_AGE,
+  REFRESH_COOKIE_MAX_AGE,
 } = require('../middleware/auth');
 const { sendEmail, APP_BASE_URL } = require('../services/email');
-const { logAction } = require('../services/auditLog');
+const { logAction, logAuthEvent } = require('../services/auditLog');
 const { hashToken, generateDeviceToken, generateOtp, ipAllowed } = require('../services/deviceSecurity');
 const {
   encryptSecret, decryptSecret, generateSecret, generateQrCodeDataUrl,
@@ -29,9 +34,6 @@ const { z } = require('zod');
 
 const DEVICE_COOKIE_MAX_AGE = 400 * 24 * 60 * 60 * 1000; // ~13 months (Chrome's cookie cap)
 const PENDING_DEVICE_COOKIE_MAX_AGE = 10 * 60 * 1000;
-
-const ACCESS_COOKIE_MAX_AGE = 30 * 60 * 1000; // 30 minutes
-const REFRESH_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Validation schemas
 const loginSchema = z.object({
@@ -287,10 +289,14 @@ router.post('/login', authRateLimit, validateBody(loginSchema), async (req, res)
     await safeQuery(`UPDATE staff_accounts SET last_login = NOW() WHERE id = $1`, [staff.id]);
     console.log('[auth:login] Last login updated');
 
-    res.cookie('internal_ops_token', accessToken, cookieOptions(ACCESS_COOKIE_MAX_AGE));
-    console.log('[auth:login] Access token cookie set');
-    res.cookie('internal_ops_refresh', refreshToken, cookieOptions(REFRESH_COOKIE_MAX_AGE));
-    console.log('[auth:login] Refresh token cookie set');
+    // Clear any existing auth cookies first (handles multi-user cookie collision)
+    res.clearCookie('internal_ops_token', accessCookieOptions());
+    res.clearCookie('internal_ops_refresh', refreshCookieOptions());
+
+    res.cookie('internal_ops_token', accessToken, accessCookieOptions(ACCESS_COOKIE_MAX_AGE));
+    console.log('[auth:login] Access token cookie set:', accessCookieOptions(ACCESS_COOKIE_MAX_AGE));
+    res.cookie('internal_ops_refresh', refreshToken, refreshCookieOptions(REFRESH_COOKIE_MAX_AGE));
+    console.log('[auth:login] Refresh token cookie set:', refreshCookieOptions(REFRESH_COOKIE_MAX_AGE));
     // Also return access token in body for Bearer token auth (works when cookies blocked)
     res.json({ 
       accessToken, 
@@ -344,10 +350,14 @@ router.post('/verify-device', authRateLimit, validateBody(verifyDeviceSchema), a
     await safeQuery(`UPDATE staff_accounts SET last_login = NOW() WHERE id = $1`, [staff.id]);
     await logAction({ staffId: staff.id, action: 'login.device_approved', entity: 'staff_accounts', entityId: staff.id, ipAddress: req.ip });
 
-    res.cookie('internal_ops_token', accessToken, cookieOptions(ACCESS_COOKIE_MAX_AGE));
-    res.cookie('internal_ops_refresh', refreshToken, cookieOptions(REFRESH_COOKIE_MAX_AGE));
-    res.cookie('trusted_device_id', pendingToken, cookieOptions(DEVICE_COOKIE_MAX_AGE));
-    res.clearCookie('pending_device_id', cookieOptions());
+    // Clear any existing auth cookies first
+    res.clearCookie('internal_ops_token', accessCookieOptions());
+    res.clearCookie('internal_ops_refresh', refreshCookieOptions());
+
+    res.cookie('internal_ops_token', accessToken, accessCookieOptions(ACCESS_COOKIE_MAX_AGE));
+    res.cookie('internal_ops_refresh', refreshToken, refreshCookieOptions(REFRESH_COOKIE_MAX_AGE));
+    res.cookie('trusted_device_id', pendingToken, accessCookieOptions(DEVICE_COOKIE_MAX_AGE));
+    res.clearCookie('pending_device_id', accessCookieOptions());
     res.json({ 
       accessToken, 
       staff: { id: staff.id, email: staff.email, role: staff.role, employee_id: staff.employee_id } 
@@ -355,6 +365,118 @@ router.post('/verify-device', authRateLimit, validateBody(verifyDeviceSchema), a
   } catch (err) {
     console.error('[auth:verify-device]', err);
     res.status(500).json({ error: 'Device verification failed' });
+  }
+});
+
+// ── Forgot Password — sends a reset link to the user's email
+router.post('/forgot-password', authRateLimit, validateBody(forgotPasswordSchema), async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const { rows: [staff] } = await safeQuery(`SELECT id, email FROM staff_accounts WHERE email = $1`, [email.toLowerCase()]);
+
+    // Always return success to prevent email enumeration
+    const successResponse = { message: 'If an account exists, a password reset link has been sent.' };
+
+    if (!staff) {
+      await logAction({
+        staffId: '00000000-0000-0000-0000-000000000000',
+        action: 'auth.password_reset_request',
+        entity: 'staff_accounts',
+        entityId: 'unknown',
+        ipAddress: req.ip,
+      });
+      return res.json(successResponse);
+    }
+
+    // Generate a secure random token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    // Store token hash in database
+    await safeQuery(
+      `INSERT INTO password_reset_tokens (staff_account_id, token_hash, expires_at)
+       VALUES ($1, $2, $3)`,
+      [staff.id, tokenHash, expiresAt]
+    );
+
+    // Send reset email
+    const resetUrl = `${APP_BASE_URL}/reset-password?token=${resetToken}`;
+    await sendEmail({
+      to: staff.email,
+      subject: 'Reset your EtherTrack password',
+      html: `
+        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h2 style="color:#1a1a1a">Password Reset Request</h2>
+          <p>You requested to reset your password for your EtherTrack Internal Ops account.</p>
+          <p>Click the link below to set a new password:</p>
+          <p style="text-align:center;margin:30px 0">
+            <a href="${resetUrl}" style="background:#22C55E;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block">Reset Password</a>
+          </p>
+          <p style="color:#666;font-size:14px">This link expires in 1 hour. If you didn't request this, please ignore this email or contact support.</p>
+          <hr style="border:none;border-top:1px solid #eee;margin:20px 0">
+          <p style="color:#999;font-size:12px">EtherTrack Technologies Private Limited</p>
+        </div>
+      `,
+    });
+
+    await logAction({
+      staffId: staff.id,
+      action: 'auth.password_reset_request',
+      entity: 'staff_accounts',
+      entityId: staff.id,
+      ipAddress: req.ip,
+    });
+
+    res.json(successResponse);
+  } catch (err) {
+    console.error('[auth:forgot-password]', err);
+    res.status(500).json({ error: 'Failed to process password reset request' });
+  }
+});
+
+// ── Reset Password — validates token and updates password
+router.post('/reset-password', validateBody(resetPasswordSchema), async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    const { rows } = await safeQuery(
+      `SELECT prt.*, sa.email FROM password_reset_tokens prt
+       JOIN staff_accounts sa ON sa.id = prt.staff_account_id
+       WHERE prt.token_hash = $1 AND prt.used_at IS NULL AND prt.expires_at > NOW()`,
+      [tokenHash]
+    );
+
+    if (!rows.length) {
+      return res.status(400).json({ error: 'Invalid or expired reset token' });
+    }
+
+    const { staff_account_id: staffId, email } = rows[0];
+
+    // Hash new password
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    // Update password and mark token as used
+    await safeQuery(`UPDATE staff_accounts SET password_hash = $1, updated_at = NOW() WHERE id = $2`, [passwordHash, staffId]);
+    await safeQuery(`UPDATE password_reset_tokens SET used_at = NOW() WHERE token_hash = $1`, [tokenHash]);
+
+    // Revoke all existing refresh tokens (force re-login on all devices)
+    await revokeAllRefreshTokens(staffId);
+
+    await logAction({
+      staffId,
+      action: 'auth.password_reset',
+      entity: 'staff_accounts',
+      entityId: staffId,
+      ipAddress: req.ip,
+    });
+
+    res.json({ message: 'Password has been reset successfully. Please sign in with your new password.' });
+  } catch (err) {
+    console.error('[auth:reset-password]', err);
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 
@@ -554,6 +676,97 @@ router.delete('/trusted-devices/:id', authenticate, async (req, res) => {
   }
 });
 
+// POST /auth/logout — revoke current refresh token and clear cookies
+router.post('/logout', async (req, res) => {
+  try {
+    const refreshToken = req.cookies?.internal_ops_refresh;
+    if (refreshToken) {
+      const { hashRefreshToken, validateRefreshToken, revokeRefreshToken } = require('../middleware/auth');
+      const tokenHash = hashRefreshToken(refreshToken);
+      const validated = await validateRefreshToken(refreshToken);
+      if (validated) {
+        await revokeRefreshToken(validated.staffId, tokenHash);
+      }
+    }
+    res.clearCookie('internal_ops_token', accessCookieOptions());
+    res.clearCookie('internal_ops_refresh', refreshCookieOptions());
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[auth:logout]', err);
+    res.clearCookie('internal_ops_token', accessCookieOptions());
+    res.clearCookie('internal_ops_refresh', refreshCookieOptions());
+    res.json({ ok: true });
+  }
+});
+
+// POST /auth/revoke-all-sessions — revoke all refresh tokens for current user (logout everywhere)
+router.post('/revoke-all-sessions', authenticate, async (req, res) => {
+  try {
+    await revokeAllRefreshTokens(req.staff.id);
+    res.clearCookie('internal_ops_token', accessCookieOptions());
+    res.clearCookie('internal_ops_refresh', refreshCookieOptions());
+    await logAction({ staffId: req.staff.id, action: 'auth.all_sessions_revoked', entity: 'staff_accounts', entityId: req.staff.id, ipAddress: req.ip });
+    res.json({ ok: true, message: 'All sessions revoked' });
+  } catch (err) {
+    console.error('[auth:revoke-all-sessions]', err);
+    res.status(500).json({ error: 'Failed to revoke sessions' });
+  }
+});
+
+// POST /auth/refresh — exchange valid refresh token for new access token
+// Called by frontend when access token expires (401) or on app init
+router.post('/refresh', async (req, res) => {
+  try {
+    const refreshToken = req.cookies?.internal_ops_refresh;
+    if (!refreshToken) {
+      return res.status(401).json({ error: 'No refresh token', code: 'NO_REFRESH_TOKEN' });
+    }
+
+    const validated = await validateRefreshToken(refreshToken);
+    if (!validated) {
+      return res.status(401).json({ error: 'Refresh token invalid or expired', code: 'REFRESH_TOKEN_INVALID' });
+    }
+
+    const { staffId, tokenHash, staff } = validated;
+
+    // Rotate: revoke old refresh token, issue new one
+    await revokeRefreshToken(staffId, tokenHash);
+    
+    const newAccessToken = signAccessToken({ id: staff.id, role: staff.role });
+    const newRefreshToken = signRefreshToken({ id: staff.id, role: staff.role });
+    
+    try {
+      await storeRefreshToken(staffId, newRefreshToken, req.headers['user-agent'] || null, req.ip);
+    } catch (storeErr) {
+      // Handle FK constraint (user deleted) - clear cookies and force re-login
+      if (storeErr.code === '23503') {
+        console.warn('[auth:refresh] User no longer exists, clearing cookies');
+        res.clearCookie('internal_ops_token', accessCookieOptions());
+        res.clearCookie('internal_ops_refresh', refreshCookieOptions());
+        return res.status(401).json({ error: 'Session invalid — please log in again', code: 'USER_NOT_FOUND' });
+      }
+      throw storeErr;
+    }
+
+    // Set new cookies (both access and refresh)
+    const accessCookieOpts = accessCookieOptions(ACCESS_COOKIE_MAX_AGE);
+    const refreshCookieOpts = refreshCookieOptions(REFRESH_COOKIE_MAX_AGE);
+    console.log('[auth:refresh] Setting access cookie:', accessCookieOpts);
+    console.log('[auth:refresh] Setting refresh cookie:', refreshCookieOpts);
+    res.cookie('internal_ops_token', newAccessToken, accessCookieOpts);
+    res.cookie('internal_ops_refresh', newRefreshToken, refreshCookieOpts);
+
+    // Return staff info + access token (for immediate use before cookie propagates)
+    res.json({ 
+      accessToken: newAccessToken,
+      staff: { id: staff.id, email: staff.email, role: staff.role, employee_id: staff.employee_id }
+    });
+  } catch (err) {
+    console.error('[auth:refresh]', err);
+    res.status(500).json({ error: 'Token refresh failed' });
+  }
+});
+
 router.get('/me', authenticate, async (req, res) => {
   try {
     const { rows: [staff] } = await safeQuery(
@@ -587,6 +800,16 @@ router.get('/me', authenticate, async (req, res) => {
     console.error('[auth:me] ERROR:', err.message, err.stack);
     res.status(500).json({ error: 'Failed to fetch profile', details: err.message });
   }
+});
+
+// Debug endpoint - trace cookie flow
+router.get('/debug/cookies', (req, res) => {
+  res.json({
+    cookies: req.cookies,
+    cookieHeader: req.headers.cookie,
+    path: req.path,
+    method: req.method
+  });
 });
 
 module.exports = router;

@@ -102,6 +102,9 @@ import TrainingReports from './pages/TrainingReports';
 import TrainingAudit from './pages/TrainingAudit';
 import TrainingMyTraining from './pages/TrainingMyTraining';
 import TrainingCarbonAcademy from './pages/TrainingCarbonAcademy';
+import TrainingProgrammeDetail from './pages/TrainingProgrammeDetail';
+import TrainingManagerDashboard from './pages/TrainingManagerDashboard';
+import TrainingCourseDetail from './pages/TrainingCourseDetail';
 
 // Widened to include legal_hod/compliance_hod/marketing_hod/sales_hod/
 // product_hod — matches Layout.jsx's PRIVILEGED_ROLES, so those roles get
@@ -228,13 +231,17 @@ export default function App() {
               <Route path="/support-tickets" element={<SupportTicketsView />} />
               <Route path="/training/command-center" element={<TrainingCommandCenter />} />
               <Route path="/training/programmes" element={<TrainingProgrammes />} />
+              <Route path="/training/programmes/:id" element={<TrainingProgrammeDetail />} />
+              <Route path="/training/courses/:courseId" element={<TrainingCourseDetail />} />
               <Route path="/training/courses" element={<TrainingCourses />} />
               <Route path="/training/assessments" element={<TrainingAssessments />} />
               <Route path="/training/assignments" element={<TrainingAssignments />} />
               <Route path="/training/employees" element={<TrainingEmployees />} />
               <Route path="/training/progress" element={<TrainingProgress />} />
+              <Route path="/training/employees/:employeeId/progress" element={<TrainingProgress />} />
               <Route path="/training/certificates" element={<TrainingCertificates />} />
               <Route path="/training/reports" element={<TrainingReports />} />
+              <Route path="/training/manager-dashboard" element={<TrainingManagerDashboard />} />
               <Route path="/training/audit" element={<TrainingAudit />} />
               <Route path="/training/carbon-academy" element={<TrainingCarbonAcademy />} />
               <Route path="/training/my-training" element={<TrainingMyTraining />} />

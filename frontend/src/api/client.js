@@ -1,73 +1,85 @@
 import axios from 'axios';
 
-// Vercel (frontend) and Render (backend) are different domains, so a
-// relative '/api' path breaks completely in production — it would
-// resolve to your-app.vercel.app/api/... instead of your Render backend,
-// and every API call (including login) would 404. In local dev, frontend
-// and backend are typically on the same origin (via CRA's proxy or
-// same-host), so '/api' still works there as a fallback.
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '/api';
-
 const client = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: '/api',
+  headers: {
+    'Content-Type': 'application/json',
+  },
   withCredentials: true,
-  timeout: 30000, // 30 second timeout
 });
 
-// Token storage for Bearer auth (fallback when cookies blocked)
-const TOKEN_KEY = 'internal_ops_token';
-
-function getStoredToken() {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-function setStoredToken(token) {
-  if (token) {
-    localStorage.setItem(TOKEN_KEY, token);
-  } else {
-    localStorage.removeItem(TOKEN_KEY);
-  }
-}
-
-// Request interceptor: add Bearer token if available
+// Add request interceptor to include auth token if needed
 client.interceptors.request.use((config) => {
-  const token = getStoredToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+  // Add any auth headers if needed
   return config;
 });
 
-// Response interceptor: handle 401, 503, and store token from login
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error, token = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
+
+// Add response interceptor for error handling
 client.interceptors.response.use(
-  (res) => {
-    // Store access token from login/verify-device responses
-    if (res.data?.accessToken) {
-      setStoredToken(res.data.accessToken);
-    }
-    return res;
-  },
-  async (err) => {
-    if (err.response?.status === 401) {
-      // Session expired or invalid — clear token and redirect to login
-      setStoredToken(null);
-      if (window.location.pathname !== '/login') window.location.href = '/login';
-      return Promise.reject(err);
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+
+    // If the error is 401 and we haven't tried to refresh yet
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      // Don't intercept refresh endpoint itself
+      if (originalRequest.url === '/auth/refresh') {
+        return Promise.reject(error);
+      }
+
+      // Don't retry if request already has Authorization header (caller handles auth)
+      if (originalRequest.headers?.Authorization) {
+        return Promise.reject(error);
+      }
+
+      if (isRefreshing) {
+        // If already refreshing, queue this request
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then(() => {
+            return client(originalRequest);
+          })
+          .catch((err) => Promise.reject(err));
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        // Try to refresh the token
+        await client.post('/auth/refresh');
+        isRefreshing = false;
+        processQueue(null);
+        return client(originalRequest);
+      } catch (err) {
+        isRefreshing = false;
+        processQueue(err, null);
+        
+        // Only redirect to login if not already on login page
+        if (!window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
+        return Promise.reject(err);
+      }
     }
 
-    // [FIX-AUTO-LOGOUT] 503 now means "the backend/DB had a transient hiccup,
-    // your token was fine" (see middleware/auth.js) — NOT a reason to log
-    // out. For a GET, retry once after a short delay before giving up; for
-    // a write, don't auto-retry (could double-submit), just surface the
-    // error and let the user retry the action themselves.
-    const config = err.config;
-    if (err.response?.status === 503 && config?.method === 'get' && !config._retried503) {
-      config._retried503 = true;
-      await new Promise((r) => setTimeout(r, 1200));
-      return client(config);
-    }
-
-    return Promise.reject(err);
+    // For other errors, just reject
+    return Promise.reject(error);
   }
 );
 

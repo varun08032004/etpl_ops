@@ -30,9 +30,7 @@ export default function SlackBotConfig() {
   const load = async () => {
     try {
       // In production, this would load from backend config API
-      // For now, load from localStorage or env
-      const saved = localStorage.getItem('slackBotConfig');
-      if (saved) setConfig(JSON.parse(saved));
+      // Config is stored in-memory; use environment variables for persistence
     } catch (err) {
       console.error('[SlackBotConfig] Load error:', err);
     }
@@ -44,9 +42,9 @@ export default function SlackBotConfig() {
     setSaving(true);
     setError('');
     try {
-      localStorage.setItem('slackBotConfig', JSON.stringify(config));
       // In production, would call backend API to save
-      setStatus({ connected: false, message: 'Configuration saved. Restart bot to apply.' });
+      // For now, just keep in memory (resets on reload)
+      setStatus({ connected: false, message: 'Configuration saved (in-memory). Use environment variables for production persistence.' });
     } catch (err) {
       setError('Failed to save configuration');
     } finally {

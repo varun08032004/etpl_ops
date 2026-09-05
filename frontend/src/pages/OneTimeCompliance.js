@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   Box, Typography, Table, TableHead, TableRow, TableCell, TableBody,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, Alert, Chip, Link, Tooltip,
 } from '@mui/material';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
+import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -34,8 +35,11 @@ export default function OneTimeCompliance() {
   const [viewDownloadUrl, setViewDownloadUrl] = useState(null);
   const [form, setForm] = useState({ registration_number: '', registered_on: '', notes: '' });
   const [fileToUpload, setFileToUpload] = useState(null);
+  const fileInputRef = useRef(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [duplicateInfo, setDuplicateInfo] = useState(null);
+  const [resolving, setResolving] = useState(false);
 
   const load = () => {
     client.get('/one-time-registrations').then(({ data }) => setItems(data.items)).catch(() => setItems([]));
@@ -94,8 +98,17 @@ export default function OneTimeCompliance() {
           fd.append('doc_type', 'certificate');
           fd.append('entity_type', 'company');
           fd.append('entity_id', editTarget.id);
-          const { data: docRes } = await client.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-          proof_document_id = docRes.document.id;
+          try {
+            const { data: docRes } = await client.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+            proof_document_id = docRes.document.id;
+          } catch (err) {
+            if (err.response?.status === 409 && err.response?.data?.duplicate) {
+              setDuplicateInfo(err.response.data);
+              setSaving(false);
+              return;
+            }
+            throw err;
+          }
         }
       }
       const { data } = await client.put(`/one-time-registrations/${editTarget.slug}`, {
@@ -114,6 +127,45 @@ export default function OneTimeCompliance() {
       setError(err.response?.data?.error || 'Failed to save');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleReplace = async () => {
+    setResolving(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', fileToUpload);
+      await client.post(`/documents/${duplicateInfo.existing.id}/new-version`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setDuplicateInfo(null);
+      setFileToUpload(null);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to replace document');
+      setDuplicateInfo(null);
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  const handleUploadAnyway = async () => {
+    setResolving(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', fileToUpload);
+      fd.append('title', `${editTarget.title} — Proof of registration`);
+      fd.append('doc_type', 'certificate');
+      fd.append('entity_type', 'company');
+      fd.append('entity_id', editTarget.id);
+      fd.append('allow_duplicate', 'true');
+      const { data: docRes } = await client.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setDuplicateInfo(null);
+      setFileToUpload(null);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Upload failed');
+      setDuplicateInfo(null);
+    } finally {
+      setResolving(false);
     }
   };
 
@@ -256,10 +308,21 @@ export default function OneTimeCompliance() {
               value={form.notes}
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
             />
-            <MobileButton component="label" variant="outlined" fullWidth sx={{ mt: 1 }}>
+            <MobileButton
+              fullWidth
+              variant="outlined"
+              startIcon={<UploadFileOutlinedIcon />}
+              onClick={() => fileInputRef.current?.click()}
+              sx={{ mt: 1 }}
+            >
               {fileToUpload ? fileToUpload.name : 'Upload certificate / proof'}
-              <input type="file" hidden onChange={(e) => setFileToUpload(e.target.files[0])} />
             </MobileButton>
+            <input
+              ref={fileInputRef}
+              type="file"
+              hidden
+              onChange={(e) => setFileToUpload(e.target.files?.[0] || null)}
+            />
           </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
@@ -270,6 +333,30 @@ export default function OneTimeCompliance() {
           </MobileButton>
         </MobileActionButtons>
       </MobileDialog>
+
+      {/* Duplicate resolution dialog */}
+      {duplicateInfo && (
+        <MobileDialog open onClose={() => setDuplicateInfo(null)} maxWidth="sm" fullWidth>
+          <DialogTitle>Duplicate document</DialogTitle>
+          <DialogContent>
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              A document titled "<b>{duplicateInfo.existing.title}</b>" already exists (uploaded {new Date(duplicateInfo.existing.created_at).toLocaleDateString()}, v{duplicateInfo.existing.version}).
+            </Alert>
+            <Typography sx={{ mb: 2 }}>
+              How would you like to proceed?
+            </Typography>
+          </DialogContent>
+          <MobileActionButtons>
+            <MobileButton variant="outlined" onClick={() => setDuplicateInfo(null)}>Cancel</MobileButton>
+            <MobileButton variant="contained" onClick={handleReplace} disabled={resolving} startIcon={<UploadFileOutlinedIcon />}>
+              {resolving ? 'Replacing…' : 'Replace existing (new version)'}
+            </MobileButton>
+            <MobileButton variant="outlined" onClick={handleUploadAnyway} disabled={resolving}>
+              Upload as separate document
+            </MobileButton>
+          </MobileActionButtons>
+        </MobileDialog>
+      )}
 
       {/* View dialog — read-only, shows proof via a signed download URL */}
       <MobileDialog open={!!viewTarget} onClose={() => setViewTarget(null)} maxWidth="xs" fullWidth>

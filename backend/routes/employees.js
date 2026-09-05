@@ -274,7 +274,7 @@ router.put('/:id', requireRole('hr'), async (req, res) => {
       'department_id', 'team_id', 'designation_id', 'manager_id', 'employment_type', 'status',
       'ctc_annual', 'basic_monthly', 'hra_monthly', 'other_allowances_monthly', 'employer_pf_monthly',
       'da_monthly', 'tax_regime', 'pf_applicable', 'esic_applicable', 'declared_deductions',
-      'bank_account_number', 'bank_ifsc', 'trackpilot_user_id', 'notes',
+      'bank_account_number', 'bank_ifsc', 'notes',
     ];
     // 'exited' must go through POST /:id/exit — that's what captures exit_date/
     // reason properly and deactivates the linked login, and now what routes

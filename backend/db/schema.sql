@@ -43,7 +43,19 @@ CREATE TABLE staff_accounts (
   updated_at        TIMESTAMP DEFAULT NOW()
 );
 
--- ══════════════════════════════════════════════════════════════════════════
+-- Password reset tokens
+CREATE TABLE password_reset_tokens (
+  id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  staff_account_id  UUID NOT NULL REFERENCES staff_accounts(id) ON DELETE CASCADE,
+  token_hash        VARCHAR(64) NOT NULL,          -- SHA-256 hash of the token
+  expires_at        TIMESTAMP NOT NULL,
+  used_at           TIMESTAMP,
+  created_at        TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX idx_password_reset_tokens_hash ON password_reset_tokens(token_hash);
+CREATE INDEX idx_password_reset_tokens_expires ON password_reset_tokens(expires_at);
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- HR — DEPARTMENTS / DESIGNATIONS
 -- ══════════════════════════════════════════════════════════════════════════
 
@@ -111,7 +123,8 @@ CREATE TABLE employees (
   razorpay_fund_account_id  VARCHAR(100),
 
   -- Integrations
-  trackpilot_user_id        VARCHAR(100),               -- maps to TrackPilot's user for attendance sync
+  -- trackpilot_user_id        VARCHAR(100),             -- DEPRECATED: maps to TrackPilot's user for attendance sync
+  agent_user_id              VARCHAR(100),               -- maps to EtherTrack Agent's user for attendance sync
 
   -- Leave balances (simple counters; ledger detail in leave_requests)
   leave_balance_annual     NUMERIC(5,2) DEFAULT 0,
@@ -170,10 +183,10 @@ CREATE TABLE attendance_records (
   status            attendance_status NOT NULL DEFAULT 'present',
   clock_in          TIMESTAMP,
   clock_out         TIMESTAMP,
-  active_seconds    INTEGER DEFAULT 0,             -- from TrackPilot activity tracking
+  active_seconds    INTEGER DEFAULT 0,             -- from EtherTrack Agent activity tracking
   idle_seconds      INTEGER DEFAULT 0,
-  source            VARCHAR(50) DEFAULT 'trackpilot',
-  raw_payload       JSONB,                          -- store original TrackPilot payload for audit
+  source            VARCHAR(50) DEFAULT 'agent',
+  raw_payload       JSONB,                          -- store original Agent payload for audit
   created_at        TIMESTAMP DEFAULT NOW(),
   UNIQUE(employee_id, work_date)
 );

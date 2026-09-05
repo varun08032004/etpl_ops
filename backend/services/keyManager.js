@@ -70,8 +70,7 @@ const KEY_SPECS = {
     razorpay_key_secret: { external: true, description: 'RazorpayX key secret' },
     razorpay_account_number: { external: true, description: 'RazorpayX account number' },
     razorpay_webhook_secret: { external: true, description: 'RazorpayX webhook secret' },
-    trackpilot_api_key: { external: true, description: 'TrackPilot API key' },
-    trackpilots_webhook_secret: { external: true, description: 'TrackPilots webhook secret' }
+    agent_webhook_secret: { external: true, description: 'Agent webhook secret' }
   }
 };
 

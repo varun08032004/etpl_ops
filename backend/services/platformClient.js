@@ -10,6 +10,9 @@
 const MAX_RETRIES = 8;
 const BASE_DELAY_MS = 2000;
 
+// Request timeout (ms)
+const REQUEST_TIMEOUT_MS = 15000;
+
 // Simple rate limiter to space out requests
 let lastRequestTime = 0;
 const MIN_REQUEST_INTERVAL_MS = 100; // Max 10 requests/second
@@ -21,6 +24,36 @@ async function rateLimit() {
     await sleep(MIN_REQUEST_INTERVAL_MS - timeSinceLastRequest);
   }
   lastRequestTime = Date.now();
+}
+
+// Circuit breaker state
+const CB_FAILURE_THRESHOLD = 5;
+const CB_RESET_TIMEOUT_MS = 30000;
+let cbFailures = 0;
+let cbOpenAt = 0;
+
+function circuitBreakerCheck() {
+  const now = Date.now();
+  if (cbOpenAt && now < cbOpenAt) {
+    throw new Error('Circuit breaker OPEN — platform API unavailable');
+  }
+  if (cbOpenAt && now >= cbOpenAt) {
+    // Half-open: allow one request through
+    cbOpenAt = 0;
+  }
+}
+
+function circuitBreakerRecordSuccess() {
+  cbFailures = 0;
+  cbOpenAt = 0;
+}
+
+function circuitBreakerRecordFailure() {
+  cbFailures++;
+  if (cbFailures >= CB_FAILURE_THRESHOLD) {
+    cbOpenAt = Date.now() + CB_RESET_TIMEOUT_MS;
+    console.error(`[platformClient] Circuit breaker OPEN for ${CB_RESET_TIMEOUT_MS}ms`);
+  }
 }
 
 // In-memory cache with TTL
@@ -48,19 +81,33 @@ function clearCache(key) {
 
 async function fetchWithRetry(url, options, retries = MAX_RETRIES) {
   await rateLimit();
+  circuitBreakerCheck();
+
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt++) {
     let resp;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
     try {
-      resp = await fetch(url, options);
+      resp = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
     } catch (err) {
+      clearTimeout(timeoutId);
       lastError = err;
-      if (attempt === retries) throw err;
+      if (err.name === 'AbortError') {
+        lastError = new Error(`Request timeout after ${REQUEST_TIMEOUT_MS}ms`);
+      }
+      if (attempt === retries) {
+        circuitBreakerRecordFailure();
+        throw lastError;
+      }
       await sleep(BASE_DELAY_MS * Math.pow(2, attempt));
       continue;
     }
 
     if (resp.ok) {
+      circuitBreakerRecordSuccess();
       return resp;
     }
 
@@ -71,21 +118,47 @@ async function fetchWithRetry(url, options, retries = MAX_RETRIES) {
       console.warn(`[platformClient] Rate limited (429), retrying in ${delay}ms (attempt ${attempt + 1}/${retries + 1})`);
       if (attempt === retries) {
         const body = await resp.text().catch(() => '');
+        circuitBreakerRecordFailure();
         throw new Error(`Platform API returned 429 after ${retries + 1} attempts: ${body.slice(0, 300)}`);
       }
       await sleep(delay);
       continue;
     }
 
+    // 5xx errors - retry
+    if (resp.status >= 500) {
+      const body = await resp.text().catch(() => '');
+      lastError = new Error(`Platform API returned ${resp.status}: ${body.slice(0, 300)}`);
+      if (attempt === retries) {
+        circuitBreakerRecordFailure();
+        throw lastError;
+      }
+      await sleep(BASE_DELAY_MS * Math.pow(2, attempt));
+      continue;
+    }
+
     // Other error statuses - don't retry
     const body = await resp.text().catch(() => '');
+    circuitBreakerRecordFailure();
     throw new Error(`Platform API returned ${resp.status}: ${body.slice(0, 300)}`);
   }
+  circuitBreakerRecordFailure();
   throw lastError;
 }
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Expose circuit breaker state for health checks
+function getCircuitBreakerState() {
+  const now = Date.now();
+  return {
+    failures: cbFailures,
+    threshold: CB_FAILURE_THRESHOLD,
+    open: cbOpenAt > now,
+    openUntil: cbOpenAt ? new Date(cbOpenAt).toISOString() : null,
+  };
 }
 
 async function fetchPlatformIncome(fromDate, toDate) {
@@ -99,7 +172,7 @@ async function fetchPlatformIncome(fromDate, toDate) {
   }
 
   const cacheKey = `income:${fromDate}:${toDate}`;
-  const cached = getCached(`income:${fromDate}:${toDate}`);
+  const cached = getCached(cacheKey);
   if (cached) return cached;
 
   const url = `${base.replace(/\/$/, '')}/api/ops-integration/income?from=${fromDate}&to=${toDate}`;
@@ -108,7 +181,7 @@ async function fetchPlatformIncome(fromDate, toDate) {
 
   const data = await resp.json();
   const result = [...(data.subscriptions || []), ...(data.trades || [])];
-  setCached(`income:${fromDate}:${toDate}`, result);
+  setCached(cacheKey, result);
   return result;
 }
 
@@ -363,13 +436,6 @@ async function fetchCorporateActivations() {
   return data?.activations || [];
 }
 
-module.exports = {
-  fetchPlatformIncome, fetchPlatformCustomers, fetchInvoicePdf, fetchChurnEvents, fetchPlatformRefunds, fetchCouponRedemptions, fetchSupportTickets, fetchDisputes, fetchKycStatus,
-  activateCorporate, updateCorporateRenewal, fetchCorporateActivations,
-  createCoupon, listCoupons, setCouponActive,
-  updatePlanPrice, fetchPlanPrices,
-};
-
 // ─────────────────────────────────────────────────────────────────────────
 // Coupons — WRITE path, own token/namespace (PLATFORM_SYNC_COUPON_WRITE_TOKEN
 // against /api/ops-integration-coupons/*), same isolation reasoning as
@@ -457,4 +523,5 @@ module.exports = {
   activateCorporate, updateCorporateRenewal, fetchCorporateActivations,
   createCoupon, listCoupons, setCouponActive,
   updatePlanPrice, fetchPlanPrices,
+  getCircuitBreakerState,
 };

@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Box, Typography, Paper, Chip, Button, DialogTitle, DialogContent,
-  TextField, MenuItem, Alert, IconButton, Divider, Table, TableHead, TableRow, TableCell, TableBody,
-  Tabs, Tab, CircularProgress,
+  Box, Typography, Chip, Button, DialogTitle, DialogContent,
+  TextField, Alert, IconButton, Divider, Table, TableHead, TableRow, TableCell, TableBody,
+  Tabs, Tab, CircularProgress, Tooltip,
 } from '@mui/material';
 import client from '../api/client';
 import Money from '../components/Money';
 import StatusChip from '../components/StatusChip';
+import { refreshEvents, REFRESH_EVENTS } from '../utils/refreshEvents';
 import {
   MobilePaper,
   MobilePageHeader,
@@ -24,6 +25,8 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 const STAGES = [
   { key: 'new', label: 'New' },
@@ -364,17 +367,132 @@ function PlatformSalesRecords() {
   const [sourceFilter, setSourceFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [records, setRecords] = useState(null);
+  const [freshRecords, setFreshRecords] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [savingFresh, setSavingFresh] = useState(false);
   const [error, setError] = useState(null);
+  const [lastSync, setLastSync] = useState(null);
+  const [syncHistory, setSyncHistory] = useState([]);
+  const [nothingNewOpen, setNothingNewOpen] = useState(false);
 
-  useEffect(() => {
+  const loadLocal = useCallback(() => {
     setLoading(true);
     setError(null);
+    setFreshRecords(null);
     client.get('/platform-sync/records', { params: { month, year } })
-      .then(({ data }) => setRecords(data.records))
-      .catch((e) => setError(e.response?.data?.error || 'Could not reach the platform API'))
+      .then(({ data }) => {
+        setRecords(data.records);
+      })
+      .catch((e) => setError(e.response?.data?.error || 'Could not load synced records'))
       .finally(() => setLoading(false));
   }, [month, year]);
+
+  const loadSyncHistory = useCallback(() => {
+    client.get('/platform-sync/history')
+      .then(({ data }) => {
+        setSyncHistory(data.runs || []);
+      })
+      .catch(() => {});
+  }, []);
+
+  const loadLatestSync = useCallback(() => {
+    client.get('/platform-sync/latest', { params: { month, year } })
+      .then(({ data }) => {
+        if (data.run) {
+          setLastSync({
+            date: data.run.run_at,
+            recordsSynced: data.run.records_synced,
+            totalAmount: data.run.total_amount_inr,
+            runBy: data.run.run_by_email,
+          });
+        } else {
+          setLastSync(null);
+        }
+      })
+      .catch(() => setLastSync(null));
+  }, [month, year]);
+
+  useEffect(() => {
+    loadLocal();
+    loadSyncHistory();
+    loadLatestSync();
+  }, [loadLocal, loadSyncHistory, loadLatestSync]);
+
+  const runSync = async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      const idempotencyKey = `sync-${month}-${year}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const { data } = await client.post('/platform-sync/run', { month, year }, {
+        headers: { 'Idempotency-Key': idempotencyKey }
+      });
+      setSyncing(false);
+      if (data.synced > 0 || data.skipped > 0) {
+        loadLocal();
+        loadSyncHistory();
+        loadLatestSync();
+        refreshEvents.emit(REFRESH_EVENTS.SYNC_COMPLETE, { month, year, ...data });
+        refreshEvents.emit(REFRESH_EVENTS.REVENUE_UPDATED, { month, year, ...data });
+      }
+      return data;
+    } catch (e) {
+      setSyncing(false);
+      setError(e.response?.data?.error || 'Sync failed');
+      throw e;
+    }
+  };
+
+  const loadFresh = async () => {
+    setRefreshing(true);
+    setError(null);
+    try {
+      const { data } = await client.get('/platform-sync/records/fresh', { params: { month, year } });
+      const fresh = data.records || [];
+      
+      // Check if all fresh records already exist in local DB
+      const localKeys = new Set((records || []).map(r => `${r.source}:${r.ref_id}`));
+      const allExist = fresh.length > 0 && fresh.every(r => localKeys.has(`${r.source}:${r.ref_id}`));
+      
+      if (allExist) {
+        setNothingNewOpen(true);
+        setFreshRecords(null);
+      } else {
+        setFreshRecords(fresh);
+        setRecords(fresh);
+      }
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not reach the platform API');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const saveFresh = async () => {
+    if (!freshRecords || !freshRecords.length) return;
+    setSavingFresh(true);
+    setError(null);
+    try {
+      const idempotencyKey = `save-fresh-${month}-${year}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const { data } = await client.post('/platform-sync/run', { month, year }, {
+        headers: { 'Idempotency-Key': idempotencyKey }
+      });
+      setSavingFresh(false);
+      if (data.synced > 0 || data.skipped > 0) {
+        loadLocal();
+        loadSyncHistory();
+        loadLatestSync();
+        refreshEvents.emit(REFRESH_EVENTS.SYNC_COMPLETE, { month, year, ...data });
+        refreshEvents.emit(REFRESH_EVENTS.REVENUE_UPDATED, { month, year, ...data });
+      }
+      return data;
+    } catch (e) {
+      setSavingFresh(false);
+      setError(e.response?.data?.error || 'Save failed');
+      throw e;
+    }
+  };
 
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
 
@@ -421,22 +539,88 @@ function PlatformSalesRecords() {
   };
 
   const handleRefresh = () => {
-    setLoading(true);
-    setError(null);
-    client.get('/platform-sync/records', { params: { month, year } })
-      .then(({ data }) => setRecords(data.records))
-      .catch((e) => setError(e.response?.data?.error || 'Could not reach the platform API'))
-      .finally(() => setLoading(false));
+    loadLocal();
+    loadSyncHistory();
+    loadLatestSync();
+  };
+
+  const showSaveFresh = freshRecords && freshRecords.length > 0 && !loading && !refreshing;
+
+  const formatDateTime = (isoString) => {
+    const d = new Date(isoString);
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' +
+           d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
   };
 
   return (
     <Box>
       <MobilePageHeader>
         <Typography variant={isMobile ? 'h6' : 'h5'} sx={{ mb: 0 }}>Platform Sales Records</Typography>
-        <MobileButton variant="outlined" onClick={handleRefresh} disabled={loading} startIcon={<RefreshIcon />}>
-          {loading ? 'Loading…' : 'Refresh'}
-        </MobileButton>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+          <MobileButton variant="outlined" onClick={handleRefresh} disabled={loading} startIcon={<RefreshIcon />}>
+            {loading ? 'Loading…' : 'Reload Local'}
+          </MobileButton>
+          <MobileButton 
+            variant="contained" 
+            onClick={runSync} 
+            disabled={syncing} 
+            startIcon={<RefreshIcon />}
+            color="primary"
+            size="medium"
+          >
+            {syncing ? 'Syncing…' : 'Sync from Platform'}
+          </MobileButton>
+          <MobileButton variant="outlined" onClick={loadFresh} disabled={refreshing} startIcon={<RefreshIcon />}>
+            {refreshing ? 'Fetching Platform…' : 'Fetch Fresh'}
+          </MobileButton>
+          {showSaveFresh && (
+            <MobileButton 
+              variant="contained" 
+              onClick={saveFresh} 
+              disabled={savingFresh} 
+              startIcon={<RefreshIcon />}
+              color="success"
+              size="medium"
+            >
+              {savingFresh ? 'Saving…' : `Save ${freshRecords.length} Fresh Records`}
+            </MobileButton>
+          )}
+        </Box>
       </MobilePageHeader>
+
+      {lastSync && (
+        <Box sx={{ mb: 1.5, p: 1, borderRadius: 1, borderLeft: '3px solid', borderColor: 'success.main', bgcolor: 'success.50', display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <CheckCircleIcon fontSize="small" color="success.main" />
+            <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>
+              Last synced
+            </Typography>
+            <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
+              {formatDateTime(lastSync.date)}
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 2.5, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}>
+              <Typography variant="caption" color="text.secondary">Records:</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 600, color: 'success.main' }}>
+                {lastSync.recordsSynced}
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}>
+              <Typography variant="caption" color="text.secondary">Revenue:</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 600, color: 'primary.main' }}>
+                <Money amount={lastSync.totalAmount} size="0.8rem" />
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3 }}>
+              <Typography variant="caption" color="text.secondary">By:</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.primary' }}>
+                {lastSync.runBy || '—'}
+              </Typography>
+            </Box>
+          </Box>
+        </Box>
+      )}
 
       <MobilePaper sx={{ mb: 2 }}>
         <MobileStack direction="column" gap={2} sx={{ mb: 1 }}>
@@ -487,15 +671,17 @@ function PlatformSalesRecords() {
           </MobileButton>
         </Alert>
       )}
-      {loading && <CircularProgress size={22} />}
+      {(loading || refreshing || syncing) && <CircularProgress size={22} />}
 
-      {!loading && records && (
+      {!loading && !refreshing && records && (
         <>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
             <Typography sx={{ color: 'text.secondary', fontSize: '0.85rem' }}>
               {filtered.length} record{filtered.length === 1 ? '' : 's'}
               {sourceFilter !== 'all' && ` · ${sourceFilter === 'trade_fee' ? 'Trades' : 'Subscriptions'}`}
               {records.length !== filtered.length && ` (of ${records.length} total)`}
+              {' '}
+              <Chip size="small" variant="outlined" label="Local DB" color="primary" />
             </Typography>
             <Money amount={total} />
           </Box>
@@ -539,7 +725,7 @@ function PlatformSalesRecords() {
                   ))}
                   {filtered.length === 0 && (
                     <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', color: 'text.secondary', py: 3 }}>
-                      {records.length === 0 ? `No records for ${MONTHS[month - 1]} ${year}` : 'No records match this filter'}
+                      {records.length === 0 ? `No local records for ${MONTHS[month - 1]} ${year}. Click "Sync from Platform" to fetch.` : 'No records match this filter'}
                     </TableCell></TableRow>
                   )}
                 </TableBody>
@@ -548,6 +734,21 @@ function PlatformSalesRecords() {
           </MobilePaper>
         </>
       )}
+
+      <MobileDialog open={nothingNewOpen} onClose={() => setNothingNewOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Nothing New to Fetch</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 1 }}>All platform records for <strong>{MONTHS[month - 1]} {year}</strong> are already synced.</Typography>
+          {lastSync && (
+            <Typography variant="body2" color="text.secondary">
+              Last synced: {formatDateTime(lastSync.date)} · {lastSync.recordsSynced} records · <Money amount={lastSync.totalAmount} size="0.85rem" />
+            </Typography>
+          )}
+        </DialogContent>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setNothingNewOpen(false)}>OK</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
     </Box>
   );
 }
@@ -557,10 +758,18 @@ function PlatformCustomers() {
   const [customers, setCustomers] = useState(null);
   const [search, setSearch] = useState('');
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    client.get('/platform-sync/customers').then(({ data }) => setCustomers(data.customers)).catch((e) => setError(e.response?.data?.error || 'Could not reach the platform API'));
+  const loadCustomers = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    client.get('/platform-sync/customers')
+      .then(({ data }) => setCustomers(data.customers))
+      .catch((e) => setError(e.response?.data?.error || 'Could not reach the platform API'))
+      .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { loadCustomers(); }, [loadCustomers]);
 
   const filtered = (customers || []).filter((c) =>
     !search || c.email?.toLowerCase().includes(search.toLowerCase()) || c.company_name?.toLowerCase().includes(search.toLowerCase())
@@ -576,6 +785,9 @@ function PlatformCustomers() {
     <Box>
       <MobilePageHeader>
         <Typography variant={isMobile ? 'h6' : 'h5'} sx={{ mb: 0 }}>Platform Customers</Typography>
+        <MobileButton variant="outlined" onClick={loadCustomers} disabled={loading} startIcon={<RefreshIcon />}>
+          {loading ? 'Loading…' : 'Refresh'}
+        </MobileButton>
       </MobilePageHeader>
 
       {error && <Alert severity="error" sx={{ mb: 2.5 }}>{error}</Alert>}
@@ -587,7 +799,7 @@ function PlatformCustomers() {
           onChange={(e) => setSearch(e.target.value)}
         />
       </MobilePaper>
-      {!customers && !error && <CircularProgress size={22} />}
+      {loading && <CircularProgress size={22} />}
       {customers && (
         <MobilePaper>
           <ResponsiveTableContainer>

@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26  
 **Status:** COMPLETE - Carbon Academy curriculum loading restored  
-**Git Commit:** [pending]
+**Git Commit:** a5be960
 
 ---
 

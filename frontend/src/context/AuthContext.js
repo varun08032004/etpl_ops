@@ -9,9 +9,16 @@ export function AuthProvider({ children }) {
 
   const refresh = useCallback(async () => {
     try {
-      const { data } = await client.get('/auth/me');
-      setStaff(data.staff);
+      // Call /auth/refresh which returns new access token in body + sets HttpOnly cookies
+      const { data: refreshData } = await client.post('/auth/refresh');
+      const accessToken = refreshData.accessToken;
+      // Fetch user profile using the new access token immediately (before cookie propagates)
+      const { data } = await client.get('/auth/me', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      setStaff(data);
     } catch {
+      // Refresh failed (refresh token expired/revoked) — clear staff
       setStaff(null);
     } finally {
       setLoading(false);
@@ -21,14 +28,8 @@ export function AuthProvider({ children }) {
   useEffect(() => { refresh(); }, [refresh]);
 
   const login = async (email, password, twoFactorCode) => {
-    // Device-locked accounts get a 202 when the browser isn't recognized
-    // yet, and 2FA-enabled accounts get a 202 when no code was supplied —
-    // neither is an error, both mean the caller needs another step before
-    // a session is issued.
     const body = { email, password };
     if (twoFactorCode) {
-      // A backup code is longer (10 hex chars) than a TOTP code (6 digits) —
-      // let the caller pass either without needing to specify which.
       if (/^\d{6}$/.test(twoFactorCode)) body.totpToken = twoFactorCode;
       else body.backupCode = twoFactorCode;
     }
@@ -36,14 +37,14 @@ export function AuthProvider({ children }) {
     if (status === 202) {
       return { deviceApprovalRequired: !!data.deviceApprovalRequired, twoFactorRequired: !!data.twoFactorRequired, message: data.message };
     }
-    // Token is in HttpOnly cookie; no localStorage needed
+    // Access token in HttpOnly cookie, refresh token in HttpOnly cookie
+    // data.staff returned in body
     setStaff(data.staff);
     return { staff: data.staff };
   };
 
   const verifyDevice = async (email, otp, label) => {
     const { data } = await client.post('/auth/verify-device', { email, otp, label });
-    // Token is in HttpOnly cookie; no localStorage needed
     setStaff(data.staff);
     return data.staff;
   };

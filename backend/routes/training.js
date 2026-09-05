@@ -39,7 +39,7 @@ function canAssignTraining(req) {
 }
 
 function canViewAllProgress(req) {
-  return ['owner', 'admin', 'hr'].includes(req.staff.role);
+  return ['owner', 'admin', 'hr', 'manager'].includes(req.staff.role);
 }
 
 async function getEmployeeDepartment(req) {
@@ -252,6 +252,43 @@ router.get('/programmes/:id', async (req, res) => {
       [req.params.id]
     );
 
+    const courseIds = courses.map(c => c.id);
+    if (courseIds.length > 0) {
+      const placeholders = courseIds.map((_, i) => `$${i + 1}`).join(',');
+      const { rows: modules } = await safeQuery(
+        `SELECT m.*, c.id as course_id
+         FROM training_modules m
+         JOIN training_courses c ON c.id = m.course_id
+         WHERE m.course_id IN (${placeholders})
+         ORDER BY c.display_order, m.display_order`,
+        courseIds
+      );
+
+      const moduleIds = modules.map(m => m.id);
+      if (moduleIds.length > 0) {
+        const modulePlaceholders = moduleIds.map((_, i) => `$${i + 1}`).join(',');
+        const { rows: lessons } = await safeQuery(
+          `SELECT l.*, m.id as module_id, c.id as course_id
+           FROM training_lessons l
+           JOIN training_modules m ON m.id = l.module_id
+           JOIN training_courses c ON c.id = m.course_id
+           WHERE l.module_id IN (${modulePlaceholders})
+           ORDER BY c.display_order, m.display_order, l.display_order`,
+          moduleIds
+        );
+
+        // Attach lessons to modules, modules to courses
+        for (const course of courses) {
+          course.modules = modules.filter(m => m.course_id === course.id).map(module => {
+            return {
+              ...module,
+              lessons: lessons.filter(l => l.module_id === module.id)
+            };
+          });
+        }
+      }
+    }
+
     res.json({ programme, courses });
   } catch (err) {
     console.error('[training:programmes:get]', err);
@@ -445,6 +482,60 @@ router.post('/courses/:id/reorder', requireRole('owner'), async (req, res) => {
   } catch (err) {
     console.error('[training:courses:reorder]', err);
     res.status(500).json({ error: 'Failed to reorder course' });
+  }
+});
+
+// ============ COURSE LIST ============
+
+router.get('/courses', async (req, res) => {
+  try {
+    const { status } = req.query;
+    let query = `SELECT c.*, p.title as programme_title, p.code as programme_code
+                 FROM training_courses c
+                 LEFT JOIN training_programmes p ON p.id = c.programme_id`;
+    const params = [];
+    if (status) {
+      query += ` WHERE c.status = $1`;
+      params.push(status);
+    }
+    query += ` ORDER BY c.display_order`;
+    const { rows } = await safeQuery(query, params);
+    res.json({ courses: rows });
+  } catch (err) {
+    console.error('[training:courses:list]', err);
+    res.status(500).json({ error: 'Failed to fetch courses' });
+  }
+});
+
+// ============ COURSE DETAIL ============
+
+router.get('/courses/:courseId', async (req, res) => {
+  try {
+    const { rows: [course] } = await safeQuery(
+      `SELECT c.*, p.title as programme_title, p.code as programme_code
+       FROM training_courses c
+       LEFT JOIN training_programmes p ON p.id = c.programme_id
+       WHERE c.id = $1`,
+      [req.params.courseId]
+    );
+    if (!course) return res.status(404).json({ error: 'Course not found' });
+
+    const { rows: modules } = await safeQuery(
+      `SELECT m.*, 
+              (SELECT json_agg(l ORDER BY l.display_order) 
+               FROM training_lessons l 
+               WHERE l.module_id = m.id) as lessons
+       FROM training_modules m
+       WHERE m.course_id = $1
+       ORDER BY m.display_order`,
+      [req.params.courseId]
+    );
+
+    course.modules = modules || [];
+    res.json({ course });
+  } catch (err) {
+    console.error('[training:course:detail]', err);
+    res.status(500).json({ error: 'Failed to fetch course' });
   }
 });
 
@@ -710,6 +801,228 @@ router.post('/lessons/:lessonId/exercises', requireRole('owner'), async (req, re
   } catch (err) {
     console.error('[training:exercises:create]', err);
     res.status(500).json({ error: 'Failed to create exercise' });
+  }
+});
+
+// ============ DOWNLOAD ENDPOINTS ============
+
+router.get('/courses/:courseId/download', async (req, res) => {
+  try {
+    const { rows: [course] } = await safeQuery(
+      `SELECT c.*, p.title as programme_title, p.code as programme_code
+       FROM training_courses c
+       JOIN training_programmes p ON p.id = c.programme_id
+       WHERE c.id = $1`,
+      [req.params.courseId]
+    );
+    if (!course) return res.status(404).json({ error: 'Course not found' });
+
+    const { rows: modules } = await safeQuery(
+      `SELECT m.*, 
+              (SELECT COUNT(*) FROM training_lessons WHERE module_id = m.id) as lesson_count
+       FROM training_modules m
+       WHERE m.course_id = $1
+       ORDER BY m.display_order`,
+      [req.params.courseId]
+    );
+
+    for (const module of modules) {
+      const { rows: lessons } = await safeQuery(
+        `SELECT l.* FROM training_lessons l WHERE l.module_id = $1 ORDER BY l.display_order`,
+        [module.id]
+      );
+      module.lessons = lessons;
+    }
+
+    let markdown = `# ${course.programme_code}: ${course.programme_title}\n\n`;
+    markdown += `## ${course.code}: ${course.title}\n\n`;
+    if (course.description) markdown += `${course.description}\n\n`;
+    markdown += `**Tier:** ${course.tier}\n`;
+    markdown += `**Total Hours:** ${course.total_hours || '—'}\n`;
+    markdown += `**Instructional Hours:** ${course.total_instructional_hours || 0}\n`;
+    markdown += `**Practical Hours:** ${course.total_practical_hours || 0}\n`;
+    markdown += `**Assessment Hours:** ${course.total_assessment_hours || 0}\n\n`;
+    markdown += `---\n\n`;
+
+    for (const module of modules) {
+      markdown += `### Module ${module.code}: ${module.title}\n\n`;
+      if (module.description) markdown += `${module.description}\n\n`;
+      markdown += `**Lessons:** ${module.lesson_count}\n\n`;
+      
+      for (const lesson of module.lessons) {
+        markdown += `#### Lesson ${lesson.code}: ${lesson.title}\n\n`;
+        markdown += `**Type:** ${lesson.lesson_type}\n`;
+        markdown += `**Duration:** ${lesson.duration_minutes || '—'} minutes\n\n`;
+        if (lesson.description) markdown += `${lesson.description}\n\n`;
+        if (lesson.content?.text) {
+          markdown += `**Content:**\n\n${lesson.content.text}\n\n`;
+        }
+        markdown += `---\n\n`;
+      }
+    }
+
+    res.setHeader('Content-Type', 'text/markdown');
+    res.setHeader('Content-Disposition', `attachment; filename="${course.code}-${course.title.replace(/[^a-zA-Z0-9]/g, '-')}.md"`);
+    res.send(markdown);
+  } catch (err) {
+    console.error('[training:course:download]', err);
+    res.status(500).json({ error: 'Failed to download course' });
+  }
+});
+
+router.get('/modules/:moduleId/download', async (req, res) => {
+  try {
+    const { rows: [module] } = await safeQuery(
+      `SELECT m.*, c.title as course_title, c.code as course_code, p.title as programme_title, p.code as programme_code
+       FROM training_modules m
+       JOIN training_courses c ON c.id = m.course_id
+       JOIN training_programmes p ON p.id = c.programme_id
+       WHERE m.id = $1`,
+      [req.params.moduleId]
+    );
+    if (!module) return res.status(404).json({ error: 'Module not found' });
+
+    const { rows: lessons } = await safeQuery(
+      `SELECT l.* FROM training_lessons l WHERE l.module_id = $1 ORDER BY l.display_order`,
+      [req.params.moduleId]
+    );
+
+    let markdown = `# ${module.programme_code}: ${module.programme_title}\n\n`;
+    markdown += `## ${module.course_code}: ${module.course_title}\n\n`;
+    markdown += `### Module ${module.code}: ${module.title}\n\n`;
+    if (module.description) markdown += `${module.description}\n\n`;
+    markdown += `**Lessons:** ${lessons.length}\n\n`;
+    markdown += `---\n\n`;
+
+    for (const lesson of lessons) {
+      markdown += `#### Lesson ${lesson.code}: ${lesson.title}\n\n`;
+      markdown += `**Type:** ${lesson.lesson_type}\n`;
+      markdown += `**Duration:** ${lesson.duration_minutes || '—'} minutes\n\n`;
+      if (lesson.description) markdown += `${lesson.description}\n\n`;
+      if (lesson.content?.text) {
+        markdown += `**Content:**\n\n${lesson.content.text}\n\n`;
+      }
+      markdown += `---\n\n`;
+    }
+
+    res.setHeader('Content-Type', 'text/markdown');
+    res.setHeader('Content-Disposition', `attachment; filename="${module.course_code}-${module.code}-${module.title.replace(/[^a-zA-Z0-9]/g, '-')}.md"`);
+    res.send(markdown);
+  } catch (err) {
+    console.error('[training:module:download]', err);
+    res.status(500).json({ error: 'Failed to download module' });
+  }
+});
+
+router.get('/programmes/:programmeId/download', async (req, res) => {
+  try {
+    const { rows: [programme] } = await safeQuery(
+      `SELECT * FROM training_programmes WHERE id = $1`,
+      [req.params.programmeId]
+    );
+    if (!programme) return res.status(404).json({ error: 'Programme not found' });
+
+    const { rows: courses } = await safeQuery(
+      `SELECT c.* FROM training_courses c WHERE c.programme_id = $1 ORDER BY c.display_order`,
+      [req.params.programmeId]
+    );
+
+    const courseIds = courses.map(c => c.id);
+    if (courseIds.length > 0) {
+      const placeholders = courseIds.map((_, i) => `$${i + 1}`).join(',');
+      const { rows: modules } = await safeQuery(
+        `SELECT m.*, c.id as course_id FROM training_modules m JOIN training_courses c ON c.id = m.course_id WHERE m.course_id IN (${placeholders}) ORDER BY c.display_order, m.display_order`,
+        courseIds
+      );
+
+      const moduleIds = modules.map(m => m.id);
+      if (moduleIds.length > 0) {
+        const modulePlaceholders = moduleIds.map((_, i) => `$${i + 1}`).join(',');
+        const { rows: lessons } = await safeQuery(
+          `SELECT l.*, m.id as module_id, c.id as course_id FROM training_lessons l JOIN training_modules m ON m.id = l.module_id JOIN training_courses c ON c.id = m.course_id WHERE l.module_id IN (${modulePlaceholders}) ORDER BY c.display_order, m.display_order, l.display_order`,
+          moduleIds
+        );
+
+        for (const course of courses) {
+          course.modules = modules.filter(m => m.course_id === course.id).map(module => {
+            return {
+              ...module,
+              lessons: lessons.filter(l => l.module_id === module.id)
+            };
+          });
+        }
+      }
+    }
+
+    let markdown = `# ${programme.code}: ${programme.title}\n\n`;
+    if (programme.description) markdown += `${programme.description}\n\n`;
+    markdown += `**Duration:** ${programme.duration_weeks} weeks\n`;
+    markdown += `**Total Estimated Hours:** ${programme.total_estimated_hours}\n`;
+    markdown += `**Passing Score:** ${programme.passing_score_pct}%\n\n`;
+    markdown += `---\n\n`;
+
+    for (const course of courses) {
+      markdown += `## ${course.code}: ${course.title}\n\n`;
+      if (course.description) markdown += `${course.description}\n\n`;
+      markdown += `**Tier:** ${course.tier}\n`;
+      markdown += `**Total Hours:** ${course.total_hours || '—'}\n`;
+      markdown += `**Instructional Hours:** ${course.total_instructional_hours || 0}\n`;
+      markdown += `**Practical Hours:** ${course.total_practical_hours || 0}\n`;
+      markdown += `**Assessment Hours:** ${course.total_assessment_hours || 0}\n\n`;
+      markdown += `---\n\n`;
+
+      for (const module of course.modules || []) {
+        markdown += `### Module ${module.code}: ${module.title}\n\n`;
+        if (module.description) markdown += `${module.description}\n\n`;
+        markdown += `**Lessons:** ${module.lessons?.length || 0}\n\n`;
+        
+        for (const lesson of module.lessons || []) {
+          markdown += `#### Lesson ${lesson.code}: ${lesson.title}\n\n`;
+          markdown += `**Type:** ${lesson.lesson_type}\n`;
+          markdown += `**Duration:** ${lesson.duration_minutes || '—'} minutes\n\n`;
+          if (lesson.description) markdown += `${lesson.description}\n\n`;
+          if (lesson.content?.text) {
+            markdown += `**Content:**\n\n${lesson.content.text}\n\n`;
+          }
+          markdown += `---\n\n`;
+        }
+      }
+    }
+
+    res.setHeader('Content-Type', 'text/markdown');
+    res.setHeader('Content-Disposition', `attachment; filename="${programme.code}-${programme.title.replace(/[^a-zA-Z0-9]/g, '-')}.md"`);
+    res.send(markdown);
+  } catch (err) {
+    console.error('[training:programme:download]', err);
+    res.status(500).json({ error: 'Failed to download programme' });
+  }
+});
+
+// ============ ASSESSMENTS LIST ============
+
+router.get('/assessments', async (req, res) => {
+  try {
+    const { status, programme_id, course_id, module_id } = req.query;
+    let query = `SELECT a.*, 
+                 (SELECT COUNT(*) FROM training_questions WHERE assessment_id = a.id) as question_count,
+                 c.title as course_title, c.code as course_code,
+                 m.title as module_title
+                 FROM training_assessments a
+                 LEFT JOIN training_courses c ON c.id = a.course_id
+                 LEFT JOIN training_modules m ON m.id = a.module_id`;
+    const params = [];
+    const conditions = [];
+    if (status) { conditions.push(`a.status = $${params.length + 1}`); params.push(status); }
+    if (programme_id) { conditions.push(`a.programme_id = $${params.length + 1}`); params.push(programme_id); }
+    if (course_id) { conditions.push(`a.course_id = $${params.length + 1}`); params.push(course_id); }
+    if (module_id) { conditions.push(`a.module_id = $${params.length + 1}`); params.push(module_id); }
+    if (conditions.length) query += ` WHERE ` + conditions.join(' AND ');
+    query += ` ORDER BY a.created_at`;
+    const { rows } = await safeQuery(query, params);
+    res.json({ assessments: rows });
+  } catch (err) {
+    console.error('[training:assessments:list]', err);
+    res.status(500).json({ error: 'Failed to fetch assessments' });
   }
 });
 
@@ -1022,7 +1335,7 @@ router.post('/assignments', requireRole('owner', 'admin', 'hr'), async (req, res
 
     const assignments = [];
     for (const empId of targetEmployees) {
-      const { rows: [existing] } = await safeQuery(
+      const { rows: existing } = await safeQuery(
         `SELECT id FROM training_assignments WHERE employee_id = $1 AND ${programme_id ? 'programme_id' : 'course_id'} = $2 AND status NOT IN ('cancelled', 'completed')`,
         [empId, programme_id || course_id]
       );
@@ -1034,7 +1347,7 @@ router.post('/assignments', requireRole('owner', 'admin', 'hr'), async (req, res
         [programme_id || null, course_id || null, empId, req.staff.id, start_date || null, due_date || null]
       );
 
-      await recalculateProgress(assignment.id);
+      await recalculateProgress(assignment.id).catch(e => console.error('[recalculateProgress] error:', e));
 
       await logTrainingAction({
         staffId: req.staff.id,
@@ -1042,7 +1355,7 @@ router.post('/assignments', requireRole('owner', 'admin', 'hr'), async (req, res
         entityType: ENTITY_TYPES.ASSIGNMENT,
         entityId: assignment.id,
         newValue: { employee_id: empId, programme_id, course_id, start_date, due_date }
-      });
+      }).catch(e => console.error('[logTrainingAction] error:', e));
 
       const { rows: [emp] } = await safeQuery(`SELECT full_name, work_email FROM employees WHERE id = $1`, [empId]);
       fireEvent('training.assigned', {
@@ -1053,7 +1366,7 @@ router.post('/assignments', requireRole('owner', 'admin', 'hr'), async (req, res
         programmeId: programme_id,
         courseId: course_id,
         dueDate: due_date,
-      });
+      }).catch(e => console.error('[fireEvent] error:', e));
 
       assignments.push(assignment);
     }
@@ -1149,12 +1462,12 @@ router.get('/my-training', async (req, res) => {
          JOIN training_modules m ON m.id = l.module_id
          JOIN training_courses c ON c.id = m.course_id
          LEFT JOIN training_lesson_progress lp ON lp.lesson_id = l.id AND lp.assignment_id = $1
-         WHERE a.programme_id IS NOT NULL AND c.programme_id = a.programme_id
+         WHERE c.programme_id = $2
             AND l.is_required = true
             AND (lp.status IS NULL OR lp.status != 'completed')
          ORDER BY m.display_order, l.display_order
          LIMIT 1`,
-        [a.id]
+        [a.id, a.programme_id]
       );
       a.next_lesson = nextLesson[0] || null;
 
@@ -1163,10 +1476,10 @@ router.get('/my-training', async (req, res) => {
                 (SELECT COUNT(*) FROM training_assessment_attempts WHERE assignment_id = $1 AND assessment_id = a.id) as attempts_used
          FROM training_assessments a
          JOIN training_courses c ON c.id = a.course_id
-         WHERE a.programme_id IS NOT NULL AND c.programme_id = a.programme_id
+         WHERE a.programme_id = $2
             AND a.status IN ('published', 'active')
          ORDER BY a.created_at`,
-        [a.id]
+        [a.id, a.programme_id]
       );
       a.upcoming_assessments = upcomingAssessments;
     }
@@ -1504,7 +1817,9 @@ router.post('/assessment-attempts/:attemptId/submit', async (req, res) => {
 
 router.get('/employees/:employeeId/progress', async (req, res) => {
   try {
-    if (!canViewAllProgress(req)) return res.status(403).json({ error: 'Insufficient permissions' });
+    // Allow employees to view their own progress
+    const isOwnProgress = req.staff.employee_id && req.staff.employee_id === req.params.employeeId;
+    if (!isOwnProgress && !canViewAllProgress(req)) return res.status(403).json({ error: 'Insufficient permissions' });
 
     const { rows: assignments } = await safeQuery(
       `SELECT ta.*, 
@@ -1707,6 +2022,101 @@ router.get('/reports/overdue', requireRole('owner', 'admin', 'hr'), async (req, 
   }
 });
 
+router.get('/reports/manager-dashboard', requireRole('owner', 'admin', 'hr', 'manager'), async (req, res) => {
+  try {
+    // Get manager's team employees
+    let managerEmployeeIds = [];
+    try {
+      const { rows: managerEmp } = await safeQuery(
+        `SELECT id FROM employees WHERE manager_id = $1 AND status = 'active'`,
+        [req.staff.employee_id]
+      );
+      managerEmployeeIds = managerEmp.map(e => e.id);
+      
+      // Also include employees in departments where manager is HOD
+      const { rows: deptEmp } = await safeQuery(
+        `SELECT e.id FROM employees e
+         JOIN departments d ON d.id = e.department_id
+         WHERE d.hod_id = $1 AND e.status = 'active'`,
+        [req.staff.employee_id]
+      );
+      deptEmp.forEach(e => { if (!managerEmployeeIds.includes(e.id)) managerEmployeeIds.push(e.id); });
+    } catch (queryErr) {
+      // If manager_id or hod_id columns don't exist or query fails, continue with empty array
+      console.warn('[training:manager-dashboard] Query for team employees failed:', queryErr.message);
+    }
+    
+    if (managerEmployeeIds.length === 0) {
+      return res.json({ team: [], summary: { total: 0, in_training: 0, completed: 0, overdue: 0, avg_progress: 0 } });
+    }
+    
+    const placeholders = managerEmployeeIds.map((_, i) => `$${i + 1}`).join(',');
+    
+    // Get team assignments
+    const { rows: assignments } = await safeQuery(
+      `SELECT ta.*, e.full_name, e.employee_code, e.work_email, d.name as department, p.title as programme_title, c.title as course_title,
+              tp.progress_pct, tp.lessons_completed, tp.lessons_total, tp.assessments_completed, tp.assessments_total, tp.average_score_pct
+       FROM training_assignments ta
+       JOIN employees e ON e.id = ta.employee_id
+       LEFT JOIN departments d ON d.id = e.department_id
+       LEFT JOIN training_programmes p ON p.id = ta.programme_id
+       LEFT JOIN training_courses c ON c.id = ta.course_id
+       LEFT JOIN training_progress tp ON tp.assignment_id = ta.id AND tp.programme_id = ta.programme_id
+       WHERE ta.employee_id IN (${placeholders})
+       ORDER BY e.full_name, ta.assigned_at DESC`,
+      managerEmployeeIds
+    );
+    
+    // Calculate summary
+    const total = managerEmployeeIds.length;
+    const inTraining = [...new Set(assignments.filter(a => ['assigned', 'in_progress'].includes(a.status)).map(a => a.employee_id))].length;
+    const completed = [...new Set(assignments.filter(a => a.status === 'completed').map(a => a.employee_id))].length;
+    const overdue = [...new Set(assignments.filter(a => a.status === 'overdue').map(a => a.employee_id))].length;
+    const avgProgress = assignments.length > 0 
+      ? Math.round(assignments.reduce((sum, a) => sum + (parseFloat(a.progress_pct) || 0), 0) / assignments.length)
+      : 0;
+    
+    // Group by employee
+    const employeeMap = new Map();
+    for (const a of assignments) {
+      if (!employeeMap.has(a.employee_id)) {
+        employeeMap.set(a.employee_id, {
+          employee_id: a.employee_id,
+          full_name: a.full_name,
+          employee_code: a.employee_code,
+          work_email: a.work_email,
+          department: a.department,
+          assignments: []
+        });
+      }
+      employeeMap.get(a.employee_id).assignments.push({
+        id: a.id,
+        programme_id: a.programme_id,
+        programme_title: a.programme_title,
+        course_id: a.course_id,
+        course_title: a.course_title,
+        status: a.status,
+        progress_pct: a.progress_pct,
+        lessons_completed: a.lessons_completed,
+        lessons_total: a.lessons_total,
+        assessments_completed: a.assessments_completed,
+        assessments_total: a.assessments_total,
+        average_score_pct: a.average_score_pct,
+        due_date: a.due_date,
+        assigned_at: a.assigned_at
+      });
+    }
+    
+    res.json({ 
+      team: Array.from(employeeMap.values()),
+      summary: { total, in_training: inTraining, completed, overdue, avg_progress }
+    });
+  } catch (err) {
+    console.error('[training:reports:manager-dashboard]', err);
+    res.status(500).json({ error: 'Failed to fetch manager dashboard' });
+  }
+});
+
 // ============ AUDIT LOGS ============
 
 router.get('/audit-logs', requireRole('owner'), async (req, res) => {
@@ -1750,6 +2160,372 @@ router.get('/content-versions/:entityType/:entityId', requireRole('owner'), asyn
   } catch (err) {
     console.error('[training:versions:list]', err);
     res.status(500).json({ error: 'Failed to fetch content versions' });
+  }
+});
+
+// ============ PILOT COHORT MANAGEMENT ============
+
+router.get('/pilot-cohorts', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const { rows } = await safeQuery(`
+      SELECT pc.*, 
+             (SELECT COUNT(*) FROM training_cohort_members WHERE cohort_id = pc.id) as member_count,
+             sa.email as created_by_email
+      FROM training_pilot_cohorts pc
+      LEFT JOIN staff_accounts sa ON sa.id = pc.created_by
+      ORDER BY pc.created_at DESC
+    `);
+    res.json({ cohorts: rows });
+  } catch (err) {
+    console.error('[training:pilot-cohorts:list]', err);
+    res.status(500).json({ error: 'Failed to fetch pilot cohorts' });
+  }
+});
+
+router.get('/pilot-cohorts/:id', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const { rows: [cohort] } = await safeQuery(`
+      SELECT pc.*, sa.email as created_by_email
+      FROM training_pilot_cohorts pc
+      LEFT JOIN staff_accounts sa ON sa.id = pc.created_by
+      WHERE pc.id = $1
+    `, [req.params.id]);
+    if (!cohort) return res.status(404).json({ error: 'Cohort not found' });
+
+    const { rows: members } = await safeQuery(`
+      SELECT cm.*, e.full_name, e.employee_code, e.work_email, d.name as department
+      FROM training_cohort_members cm
+      JOIN employees e ON e.id = cm.employee_id
+      LEFT JOIN departments d ON d.id = e.department_id
+      WHERE cm.cohort_id = $1
+      ORDER BY cm.assigned_at DESC
+    `, [req.params.id]);
+
+    const { rows: courseAssignments } = await safeQuery(`
+      SELECT cca.*, c.code, c.title
+      FROM training_cohort_course_assignments cca
+      JOIN training_courses c ON c.id = cca.course_id
+      WHERE cca.cohort_id = $1
+      ORDER BY c.display_order
+    `, [req.params.id]);
+
+    res.json({ cohort, members, courseAssignments });
+  } catch (err) {
+    console.error('[training:pilot-cohorts:get]', err);
+    res.status(500).json({ error: 'Failed to fetch pilot cohort' });
+  }
+});
+
+router.post('/pilot-cohorts', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const { name, description, programme_id, track, start_date, end_date } = req.body;
+    if (!name || !programme_id) return res.status(400).json({ error: 'name and programme_id are required' });
+
+    const { rows: [cohort] } = await safeQuery(
+      `INSERT INTO training_pilot_cohorts (name, description, programme_id, track, start_date, end_date, created_by, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'active') RETURNING *`,
+      [name, description || null, programme_id, track || null, start_date || null, end_date || null, req.staff.id]
+    );
+    res.status(201).json({ cohort });
+  } catch (err) {
+    console.error('[training:pilot-cohorts:create]', err);
+    res.status(500).json({ error: 'Failed to create pilot cohort' });
+  }
+});
+
+router.put('/pilot-cohorts/:id', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const { name, description, track, start_date, end_date, status } = req.body;
+    const { rows: [cohort] } = await safeQuery(
+      `UPDATE training_pilot_cohorts SET name = $1, description = $2, track = $3, start_date = $4, end_date = $5, status = $6, updated_at = NOW() WHERE id = $7 RETURNING *`,
+      [name, description, track, start_date, end_date, status, req.params.id]
+    );
+    if (!cohort) return res.status(404).json({ error: 'Cohort not found' });
+    res.json({ cohort });
+  } catch (err) {
+    console.error('[training:pilot-cohorts:update]', err);
+    res.status(500).json({ error: 'Failed to update pilot cohort' });
+  }
+});
+
+router.post('/pilot-cohorts/:id/members', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const { employee_ids } = req.body;
+    if (!Array.isArray(employee_ids) || employee_ids.length === 0) return res.status(400).json({ error: 'employee_ids array required' });
+
+    const { rows: cohort } = await safeQuery(`SELECT * FROM training_pilot_cohorts WHERE id = $1`, [req.params.id]);
+    if (!cohort.length) return res.status(404).json({ error: 'Cohort not found' });
+
+    const results = [];
+    for (const employee_id of employee_ids) {
+      const { rows: [member] } = await safeQuery(
+        `INSERT INTO training_cohort_members (cohort_id, employee_id, assigned_by)
+         VALUES ($1,$2,$3)
+         ON CONFLICT (cohort_id, employee_id) DO UPDATE SET status = 'active', assigned_by = $3, assigned_at = NOW()
+         RETURNING *`,
+        [req.params.id, employee_id, req.staff.id]
+      );
+      results.push(member);
+
+      // Create assignments for required courses
+      const { rows: courseAssignments } = await safeQuery(
+        `SELECT cca.course_id, cca.due_date FROM training_cohort_course_assignments cca WHERE cca.cohort_id = $1 AND cca.is_required = true`,
+        [req.params.id]
+      );
+      for (const ca of courseAssignments) {
+        await safeQuery(
+          `INSERT INTO training_assignments (programme_id, course_id, employee_id, assigned_by, status, due_date, cohort_id)
+           VALUES ($1, $2, $3, $4, 'assigned', $5, $6)
+           ON CONFLICT DO NOTHING`,
+          [cohort[0].programme_id, ca.course_id, employee_id, req.staff.id, ca.due_date || null, req.params.id]
+        );
+      }
+    }
+    res.status(201).json({ members: results });
+  } catch (err) {
+    console.error('[training:pilot-cohorts:add-members]', err);
+    res.status(500).json({ error: 'Failed to add cohort members' });
+  }
+});
+
+router.delete('/pilot-cohorts/:id/members/:employeeId', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    await safeQuery(`DELETE FROM training_cohort_members WHERE cohort_id = $1 AND employee_id = $2`, [req.params.id, req.params.employeeId]);
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error('[training:pilot-cohorts:remove-member]', err);
+    res.status(500).json({ error: 'Failed to remove cohort member' });
+  }
+});
+
+router.post('/pilot-cohorts/:id/course-assignments', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const { course_id, is_required, due_date } = req.body;
+    if (!course_id) return res.status(400).json({ error: 'course_id required' });
+
+    const { rows: [cohort] } = await safeQuery(`SELECT * FROM training_pilot_cohorts WHERE id = $1`, [req.params.id]);
+    if (!cohort.length) return res.status(404).json({ error: 'Cohort not found' });
+
+    const { rows: [assignment] } = await safeQuery(
+      `INSERT INTO training_cohort_course_assignments (cohort_id, course_id, is_required, due_date, created_by)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [req.params.id, course_id, is_required !== false, due_date || null, req.staff.id]
+    );
+
+    // Assign to existing members
+    const { rows: members } = await safeQuery(`SELECT employee_id FROM training_cohort_members WHERE cohort_id = $1 AND status = 'active'`, [req.params.id]);
+    for (const m of members) {
+      await safeQuery(
+        `INSERT INTO training_assignments (programme_id, course_id, employee_id, assigned_by, status, due_date, cohort_id)
+         VALUES ($1, $2, $3, $4, 'assigned', $5, $6)
+         ON CONFLICT DO NOTHING`,
+        [cohort[0].programme_id, course_id, m.employee_id, req.staff.id, due_date || null, req.params.id]
+      );
+    }
+    res.status(201).json({ assignment });
+  } catch (err) {
+    console.error('[training:pilot-cohorts:add-course]', err);
+    res.status(500).json({ error: 'Failed to add course assignment' });
+  }
+});
+
+router.delete('/pilot-cohorts/:id/course-assignments/:courseId', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    await safeQuery(`DELETE FROM training_cohort_course_assignments WHERE cohort_id = $1 AND course_id = $2`, [req.params.id, req.params.courseId]);
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error('[training:pilot-cohorts:remove-course]', err);
+    res.status(500).json({ error: 'Failed to remove course assignment' });
+  }
+});
+
+// ============ PILOT FEEDBACK ============
+
+router.post('/pilot-feedback', async (req, res) => {
+  try {
+    const { programme_id, course_id, module_id, lesson_id, rating, q1_relevant, q2_understandable, q3_useful, q4_difficulty, q5_applicable, unclear_text, improvement_text, unnecessary_text, missing_text } = req.body;
+    
+    if (!req.staff.employee_id) return res.status(404).json({ error: 'No employee record linked' });
+
+    // Get cohort if employee is in one
+    const { rows: member } = await safeQuery(`
+      SELECT cm.cohort_id FROM training_cohort_members cm
+      WHERE cm.employee_id = $1 AND cm.status = 'active'
+      ORDER BY cm.assigned_at DESC LIMIT 1
+    `, [req.staff.employee_id]);
+
+    const { rows: [feedback] } = await safeQuery(
+      `INSERT INTO training_pilot_feedback (employee_id, cohort_id, programme_id, course_id, module_id, lesson_id, rating, q1_relevant, q2_understandable, q3_useful, q4_difficulty, q5_applicable, unclear_text, improvement_text, unnecessary_text, missing_text)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+      [req.staff.employee_id, member?.[0]?.cohort_id || null, programme_id || null, course_id || null, module_id || null, lesson_id || null, rating || null, q1_relevant || null, q2_understandable || null, q3_useful || null, q4_difficulty || null, q5_applicable || null, unclear_text || null, improvement_text || null, unnecessary_text || null, missing_text || null]
+    );
+    res.status(201).json({ feedback });
+  } catch (err) {
+    console.error('[training:pilot-feedback:create]', err);
+    res.status(500).json({ error: 'Failed to submit feedback' });
+  }
+});
+
+router.get('/pilot-feedback', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const { cohort_id, programme_id, course_id } = req.query;
+    const conditions = [];
+    const params = [];
+    
+    if (cohort_id) { params.push(cohort_id); conditions.push(`pf.cohort_id = $${params.length}`); }
+    if (programme_id) { params.push(programme_id); conditions.push(`pf.programme_id = $${params.length}`); }
+    if (course_id) { params.push(course_id); conditions.push(`pf.course_id = $${params.length}`); }
+    
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const { rows } = await safeQuery(`
+      SELECT pf.*, e.full_name, e.employee_code, pc.name as cohort_name
+      FROM training_pilot_feedback pf
+      JOIN employees e ON e.id = pf.employee_id
+      LEFT JOIN training_pilot_cohorts pc ON pc.id = pf.cohort_id
+      ${where}
+      ORDER BY pf.submitted_at DESC
+    `, params);
+    res.json({ feedback: rows });
+  } catch (err) {
+    console.error('[training:pilot-feedback:list]', err);
+    res.status(500).json({ error: 'Failed to fetch feedback' });
+  }
+});
+
+router.get('/pilot-feedback/analytics', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const { cohort_id, programme_id, course_id } = req.query;
+    const conditions = [];
+    const params = [];
+    
+    if (cohort_id) { params.push(cohort_id); conditions.push(`pf.cohort_id = $${params.length}`); }
+    if (programme_id) { params.push(programme_id); conditions.push(`pf.programme_id = $${params.length}`); }
+    if (course_id) { params.push(course_id); conditions.push(`pf.course_id = $${params.length}`); }
+    
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    
+    const { rows: [ratingStats] } = await safeQuery(`
+      SELECT 
+        COUNT(*) as total_responses,
+        ROUND(AVG(rating)::numeric, 2) as avg_rating,
+        ROUND(AVG(q1_relevant)::numeric, 2) as avg_q1_relevant,
+        ROUND(AVG(q2_understandable)::numeric, 2) as avg_q2_understandable,
+        ROUND(AVG(q3_useful)::numeric, 2) as avg_q3_useful,
+        ROUND(AVG(q4_difficulty)::numeric, 2) as avg_q4_difficulty,
+        ROUND(AVG(q5_applicable)::numeric, 2) as avg_q5_applicable
+      FROM training_pilot_feedback pf
+      ${where}
+    `, params);
+
+    const { rows: byCourse } = await safeQuery(`
+      SELECT c.code, c.title, COUNT(*) as responses, ROUND(AVG(rating)::numeric, 2) as avg_rating
+      FROM training_pilot_feedback pf
+      JOIN training_courses c ON c.id = pf.course_id
+      ${where}
+      GROUP BY c.id, c.code, c.title
+      ORDER BY avg_rating ASC
+    `, params);
+
+    res.json({ ratingStats: ratingStats[0], byCourse });
+  } catch (err) {
+    console.error('[training:pilot-feedback:analytics]', err);
+    res.status(500).json({ error: 'Failed to fetch feedback analytics' });
+  }
+});
+
+// ============ COMPETENCY MANAGEMENT ============
+
+router.get('/competencies', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const { rows } = await safeQuery(`
+      SELECT * FROM training_competencies ORDER BY tier, category, name
+    `);
+    res.json({ competencies: rows });
+  } catch (err) {
+    console.error('[training:competencies:list]', err);
+    res.status(500).json({ error: 'Failed to fetch competencies' });
+  }
+});
+
+router.post('/competencies', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const { code, name, description, category, tier } = req.body;
+    if (!code || !name) return res.status(400).json({ error: 'code and name required' });
+    
+    const { rows: [comp] } = await safeQuery(
+      `INSERT INTO training_competencies (code, name, description, category, tier)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [code, name, description || null, category || null, tier || null]
+    );
+    res.status(201).json({ competency: comp });
+  } catch (err) {
+    console.error('[training:competencies:create]', err);
+    if (err.code === '23505') return res.status(409).json({ error: 'Competency code already exists' });
+    res.status(500).json({ error: 'Failed to create competency' });
+  }
+});
+
+router.get('/competencies/:id/evidence', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const { employee_id } = req.query;
+    let conditions = ['tce.competency_id = $1'];
+    let params = [req.params.id];
+    
+    if (employee_id) { params.push(employee_id); conditions.push(`tce.employee_id = $${params.length}`); }
+    
+    const where = conditions.join(' AND ');
+    const { rows } = await safeQuery(`
+      SELECT tce.*, e.full_name, e.employee_code, a.title as assessment_title, ex.title as exercise_title
+      FROM training_competency_evidence tce
+      JOIN employees e ON e.id = tce.employee_id
+      LEFT JOIN training_assessments a ON a.id = tce.assessment_id
+      LEFT JOIN training_exercises ex ON ex.id = tce.exercise_id
+      WHERE ${where}
+      ORDER BY tce.evaluated_at DESC
+    `, params);
+    res.json({ evidence: rows });
+  } catch (err) {
+    console.error('[training:competencies:evidence]', err);
+    res.status(500).json({ error: 'Failed to fetch competency evidence' });
+  }
+});
+
+router.post('/competencies/evidence', async (req, res) => {
+  try {
+    const { competency_id, assessment_id, exercise_id, score_pct, status, notes } = req.body;
+    if (!competency_id) return res.status(400).json({ error: 'competency_id required' });
+    
+    const employee_id = req.staff.employee_id;
+    if (!employee_id) return res.status(404).json({ error: 'No employee record linked' });
+
+    const { rows: [evidence] } = await safeQuery(
+      `INSERT INTO training_competency_evidence (employee_id, competency_id, assessment_id, exercise_id, score_pct, status, evaluated_by, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [employee_id, competency_id, assessment_id || null, exercise_id || null, score_pct || null, status || 'developing', req.staff.id, notes || null]
+    );
+    res.status(201).json({ evidence });
+  } catch (err) {
+    console.error('[training:competencies:evidence:create]', err);
+    res.status(500).json({ error: 'Failed to create competency evidence' });
+  }
+});
+
+router.get('/employees/:employeeId/competencies', requireRole('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const { rows } = await safeQuery(`
+      SELECT tc.*, 
+             COALESCE(tce.status, 'developing') as current_status,
+             tce.score_pct,
+             tce.evaluated_at,
+             tce.evaluated_by
+      FROM training_competencies tc
+      LEFT JOIN training_competency_evidence tce ON tce.competency_id = tc.id AND tce.employee_id = $1
+      ORDER BY tc.tier, tc.category, tc.name
+    `, [req.params.employeeId]);
+    res.json({ competencies: rows });
+  } catch (err) {
+    console.error('[training:employee:competencies]', err);
+    res.status(500).json({ error: 'Failed to fetch employee competencies' });
   }
 });
 

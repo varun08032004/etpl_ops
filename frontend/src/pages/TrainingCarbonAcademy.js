@@ -337,9 +337,10 @@ export default function TrainingCarbonAcademy() {
 
   const fetchData = async () => {
     try {
-      const [curriculum, progress] = await Promise.all([
+      const [curriculum, progress, lessonProgress] = await Promise.all([
         client.get('/training/carbon-academy'),
-        staff.employee_id ? client.get('/training/my-training') : Promise.resolve({ data: { assignments: [] } })
+        staff.employee_id ? client.get('/training/my-training') : Promise.resolve({ data: { assignments: [] } }),
+        staff.employee_id ? client.get(`/training/employees/${staff.employee_id}/progress`) : Promise.resolve({ data: { rows: [] } })
       ]);
       setData(curriculum.data);
       
@@ -347,14 +348,13 @@ export default function TrainingCarbonAcademy() {
       if (progress.data.assignments) {
         for (const a of progress.data.assignments) {
           if (a.programme_id === curriculum.data.programme?.id) {
-            const { data: lessonProg } = await client.get(`/training/employees/${staff.employee_id}/progress`).catch(() => ({ data: { rows: [] } }));
-            const completed = lessonProg.rows?.filter(l => l.status === 'completed').map(l => l.lesson_id) || [];
-            const inProgress = lessonProg.rows?.filter(l => l.status === 'in_progress').map(l => l.lesson_id) || [];
-            const lessonProgress = {};
-            lessonProg.rows?.forEach(l => {
-              lessonProgress[l.lesson_id] = l.progress_pct;
+            const completed = lessonProgress.data.rows?.filter(l => l.status === 'completed').map(l => l.lesson_id) || [];
+            const inProgress = lessonProgress.data.rows?.filter(l => l.status === 'in_progress').map(l => l.lesson_id) || [];
+            const lessonProgressMap = {};
+            lessonProgress.data.rows?.forEach(l => {
+              lessonProgressMap[l.lesson_id] = l.progress_pct;
             });
-            progMap[a.id] = { completed_lessons: completed, in_progress_lessons: inProgress, lesson_progress: lessonProgress };
+            progMap[a.id] = { completed_lessons: completed, in_progress_lessons: inProgress, lesson_progress: lessonProgressMap };
           }
         }
       }
@@ -372,8 +372,8 @@ export default function TrainingCarbonAcademy() {
     setActiveLesson(lesson);
     try {
       const [materials, exercises] = await Promise.all([
-        client.get(`/api/training/lessons/${lesson.id}/materials`),
-        client.get(`/api/training/lessons/${lesson.id}/exercises`),
+        client.get(`/training/lessons/${lesson.id}/materials`),
+        client.get(`/training/lessons/${lesson.id}/exercises`),
       ]);
       setLessonMaterials(materials.data.materials);
       setLessonExercises(exercises.data.exercises);

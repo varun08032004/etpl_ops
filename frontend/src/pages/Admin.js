@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Box, Typography, Paper, Tabs, Tab, Table, TableHead, TableRow, TableCell, TableBody, TextField, Chip, Grid, Alert } from '@mui/material';
+import { Box, Typography, Paper, Tabs, Tab, Table, TableHead, TableRow, TableCell, TableBody, TextField, Chip, Grid, Alert, Button, Dialog, DialogTitle, DialogContent, DialogActions, IconButton } from '@mui/material';
+import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import client from '../api/client';
+import Money from '../components/Money';
 import {
   MobilePageHeader,
   MobileButton,
@@ -13,6 +15,7 @@ import {
 } from '../components/MobileResponsive';
 
 const LEVEL_COLOR = { full: 'success', view: 'info', none: 'default' };
+const CHANNELS = ['google', 'meta', 'linkedin', 'email', 'referral', 'organic', 'other'];
 
 function PermissionsMatrix() {
   const [data, setData] = useState(null);
@@ -113,6 +116,136 @@ const PROFILE_FIELDS = [
   { key: 'verification_base_url', label: 'Verification base URL', helperText: 'Documents\' QR codes link to {this}/{document_number}' },
 ];
 
+function MarketingSpend() {
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({ spend_date: new Date().toISOString().split('T')[0], channel: '', campaign: '', amount_inr: '', new_customers: 0, notes: '' });
+  const [saving, setSaving] = useState(false);
+  const isMobile = useMobile();
+
+  const load = useCallback(() => {
+    setLoading(true);
+    client.get('/analytics/marketing-spend', { params: { from: new Date(Date.now() - 365 * 86400000).toISOString().split('T')[0] } })
+      .then(({ data }) => { setEntries(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      if (editing) {
+        await client.put(`/analytics/marketing-spend/${editing.id}`, form);
+      } else {
+        await client.post('/analytics/marketing-spend', form);
+      }
+      setDialogOpen(false);
+      setEditing(null);
+      setForm({ spend_date: new Date().toISOString().split('T')[0], channel: '', campaign: '', amount_inr: '', new_customers: 0, notes: '' });
+      load();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this entry?')) return;
+    try {
+      await client.delete(`/analytics/marketing-spend/${id}`);
+      load();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to delete');
+    }
+  };
+
+  const openDialog = (entry = null) => {
+    if (entry) {
+      setEditing(entry);
+      setForm({ ...entry, spend_date: entry.spend_date.split('T')[0] });
+    } else {
+      setEditing(null);
+      setForm({ spend_date: new Date().toISOString().split('T')[0], channel: '', campaign: '', amount_inr: '', new_customers: 0, notes: '' });
+    }
+    setDialogOpen(true);
+  };
+
+  if (loading) return <Typography>Loading marketing spend…</Typography>;
+
+  return (
+    <Box>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
+        <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>
+          Record marketing spend by channel/campaign to enable accurate CAC calculation in Analytics → Unit Economics.
+        </Typography>
+        <MobileButton variant="contained" startIcon={<AddIcon />} onClick={() => openDialog()}>Add Spend Entry</MobileButton>
+      </Box>
+
+      <MobilePaper>
+        <ResponsiveTableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Date</TableCell>
+                <TableCell>Channel</TableCell>
+                <TableCell>Campaign</TableCell>
+                <TableCell align="right">Spend (₹)</TableCell>
+                <TableCell align="right">New Customers</TableCell>
+                <TableCell align="right">Implied CAC</TableCell>
+                <TableCell align="right">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {entries.map((e) => (
+                <TableRow key={e.id} hover>
+                  <TableCell sx={{ fontSize: '0.78rem' }}>{new Date(e.spend_date).toLocaleDateString()}</TableCell>
+                  <TableCell><Chip size="small" label={e.channel} variant="outlined" /></TableCell>
+                  <TableCell sx={{ fontSize: '0.78rem', color: 'text.secondary', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.campaign || '—'}</TableCell>
+                  <TableCell align="right"><Money amount={e.amount_inr} /></TableCell>
+                  <TableCell align="right">{e.new_customers}</TableCell>
+                  <TableCell align="right">{e.new_customers > 0 ? <Money amount={e.amount_inr / e.new_customers} /> : '—'}</TableCell>
+                  <TableCell align="right">
+                    <IconButton size="small" onClick={() => openDialog(e)}><EditIcon fontSize="small" /></IconButton>
+                    <IconButton size="small" color="error" onClick={() => handleDelete(e.id)}><DeleteIcon fontSize="small" /></IconButton>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!entries.length && <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>No marketing spend recorded yet. Click "Add Spend Entry" to start tracking.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </ResponsiveTableContainer>
+      </MobilePaper>
+
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
+        <form onSubmit={handleSubmit}>
+          <DialogTitle>{editing ? 'Edit' : 'Add'} Marketing Spend Entry</DialogTitle>
+          <DialogContent>
+            <MobileFormGrid sx={{ mt: 1 }}>
+              <MobileTextField fullWidth label="Date" type="date" name="spend_date" value={form.spend_date} onChange={(e) => setForm({ ...form, spend_date: e.target.value })} required />
+              <MobileTextField fullWidth select label="Channel" name="channel" value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })} required>
+                {CHANNELS.map(c => <TextField key={c} select={true} value={c} label={c.charAt(0).toUpperCase() + c.slice(1)} />)}
+              </MobileTextField>
+              <MobileTextField fullWidth label="Campaign (optional)" name="campaign" value={form.campaign} onChange={(e) => setForm({ ...form, campaign: e.target.value })} />
+              <MobileTextField fullWidth label="Amount (INR)" type="number" name="amount_inr" value={form.amount_inr} onChange={(e) => setForm({ ...form, amount_inr: e.target.value })} required inputProps={{ step: '0.01', min: '0' }} />
+              <MobileTextField fullWidth label="New Customers Attributed" type="number" name="new_customers" value={form.new_customers} onChange={(e) => setForm({ ...form, new_customers: parseInt(e.target.value) || 0 })} inputProps={{ min: '0' }} />
+              <MobileTextField fullWidth label="Notes (optional)" multiline rows={2} name="notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+            </MobileFormGrid>
+          </DialogContent>
+          <DialogActions>
+            <MobileButton onClick={() => setDialogOpen(false)}>Cancel</MobileButton>
+            <MobileButton variant="contained" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</MobileButton>
+          </DialogActions>
+        </form>
+      </Dialog>
+    </Box>
+  );
+}
+
 function CompanyProfile() {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -184,11 +317,13 @@ export default function Admin() {
           <Tab label="Permissions Matrix" />
           <Tab label="Audit Log" />
           <Tab label="Company Profile" />
+          <Tab label="Marketing Spend" />
         </Tabs>
       </MobilePaper>
       {tab === 0 && <PermissionsMatrix />}
       {tab === 1 && <AuditLog />}
       {tab === 2 && <CompanyProfile />}
+      {tab === 3 && <MarketingSpend />}
     </Box>
   );
 }

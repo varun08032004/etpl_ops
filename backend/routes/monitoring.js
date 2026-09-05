@@ -210,6 +210,58 @@ router.get('/screenshots/:id/url', async (req, res) => {
   }
 });
 
+// ── unified day endpoint — query: date, employee_id (optional for admin) ──
+router.get('/day', async (req, res) => {
+  try {
+    const date = req.query.date || today();
+    const targetEmployeeId = req.query.employee_id;
+
+    if (targetEmployeeId) {
+      const isSelf = req.staff.employee_id === targetEmployeeId;
+      if (!isSelf && !(await canViewAllMonitoring(req.staff))) {
+        return res.status(403).json({ error: 'Insufficient permissions to view this employee\'s activity' });
+      }
+    } else if (!req.staff.employee_id) {
+      return res.status(400).json({ error: 'No linked employee record for this account' });
+    }
+
+    const report = await buildDayReport(targetEmployeeId || req.staff.employee_id, date);
+    res.json({ date, employee_id: targetEmployeeId || req.staff.employee_id, ...report });
+  } catch (err) {
+    console.error('[monitoring:day]', err);
+    res.status(500).json({ error: 'Failed to load activity' });
+  }
+});
+
+// ── list screenshots for a date (admin/HR/HOD) ──
+router.get('/screenshots', async (req, res) => {
+  try {
+    if (!(await canViewAllMonitoring(req.staff))) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    const date = req.query.date || today();
+    const employeeId = req.query.employee_id;
+    const conditions = [`captured_at >= $1`, `captured_at < $2`];
+    const params = [date, new Date(new Date(date).getTime() + 86400000)];
+    if (employeeId) {
+      conditions.push(`employee_id = $${params.length + 1}`);
+      params.push(employeeId);
+    }
+    const { rows } = await safeQuery(
+      `SELECT s.*, e.full_name, e.work_email
+       FROM screenshots s
+       JOIN employees e ON e.id = s.employee_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY captured_at DESC`,
+      params
+    );
+    res.json({ screenshots: rows });
+  } catch (err) {
+    console.error('[monitoring:screenshots:list]', err);
+    res.status(500).json({ error: 'Failed to load screenshots' });
+  }
+});
+
 // ── productivity rules — admin/hr manage the app/domain → category map ────
 router.get('/productivity-rules', async (req, res) => {
   try {
@@ -223,7 +275,7 @@ router.get('/productivity-rules', async (req, res) => {
 
 router.post('/productivity-rules', requireMonitoringAdmin, async (req, res) => {
   try {
-    const { match_type, pattern, category } = req.body;
+    const { match_type, pattern, category, name } = req.body;
     if (!['app', 'domain'].includes(match_type)) return res.status(400).json({ error: 'match_type must be "app" or "domain"' });
     if (!pattern) return res.status(400).json({ error: 'pattern is required' });
     if (!['productive', 'unproductive', 'neutral', 'blocked'].includes(category)) {
@@ -231,10 +283,10 @@ router.post('/productivity-rules', requireMonitoringAdmin, async (req, res) => {
     }
 
     const { rows: [rule] } = await safeQuery(
-      `INSERT INTO productivity_rules (match_type, pattern, category, created_by) VALUES ($1,$2,$3,$4)
-       ON CONFLICT (match_type, pattern) DO UPDATE SET category = EXCLUDED.category
+      `INSERT INTO productivity_rules (match_type, pattern, category, name, created_by) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (match_type, pattern) DO UPDATE SET category = EXCLUDED.category, name = EXCLUDED.name
        RETURNING *`,
-      [match_type, pattern, category, req.staff.id]
+      [match_type, pattern, category, name || null, req.staff.id]
     );
     await logAction({ staffId: req.staff.id, action: 'monitoring.rule.upsert', entity: 'productivity_rules', entityId: rule.id, newValue: rule, ipAddress: req.ip });
     res.status(201).json({ rule });
@@ -255,6 +307,36 @@ router.delete('/productivity-rules/:id', requireMonitoringAdmin, async (req, res
   }
 });
 
+router.put('/productivity-rules/:id', requireMonitoringAdmin, async (req, res) => {
+  try {
+    const { match_type, pattern, category, name } = req.body;
+    if (match_type && !['app', 'domain'].includes(match_type)) return res.status(400).json({ error: 'match_type must be "app" or "domain"' });
+    if (category && !['productive', 'unproductive', 'neutral', 'blocked'].includes(category)) {
+      return res.status(400).json({ error: 'category must be productive, unproductive, neutral, or blocked' });
+    }
+
+    const sets = [];
+    const params = [];
+    if (match_type) { params.push(match_type); sets.push(`match_type = $${params.length}`); }
+    if (pattern) { params.push(pattern); sets.push(`pattern = $${params.length}`); }
+    if (category) { params.push(category); sets.push(`category = $${params.length}`); }
+    if (name !== undefined) { params.push(name); sets.push(`name = $${params.length}`); }
+    if (!sets.length) return res.status(400).json({ error: 'No valid fields to update' });
+
+    params.push(req.params.id);
+    const { rows: [rule] } = await safeQuery(
+      `UPDATE productivity_rules SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length} RETURNING *`,
+      params
+    );
+    if (!rule) return res.status(404).json({ error: 'Rule not found' });
+    await logAction({ staffId: req.staff.id, action: 'monitoring.rule.update', entity: 'productivity_rules', entityId: rule.id, newValue: rule, ipAddress: req.ip });
+    res.json({ rule });
+  } catch (err) {
+    console.error('[monitoring:rules:update]', err);
+    res.status(500).json({ error: 'Failed to update rule' });
+  }
+});
+
 // ── company-wide monitoring settings ────────────────────────────────────
 router.get('/settings', async (req, res) => {
   try {
@@ -269,21 +351,27 @@ router.get('/settings', async (req, res) => {
 router.put('/settings', requireMonitoringAdmin, async (req, res) => {
   try {
     const {
-      screenshots_enabled, screenshot_interval_seconds, idle_threshold_seconds, heartbeat_interval_seconds, consent_notice,
+      screenshots_enabled, screenshot_interval_sec, idle_threshold_seconds, heartbeat_interval_seconds, consent_notice,
       restrict_incognito, expected_daily_hours,
+      track_apps, track_websites, track_idle, blur_screenshots, privacy_mode_default,
     } = req.body;
     const { rows: [settings] } = await safeQuery(
       `UPDATE monitoring_settings SET
          screenshots_enabled = COALESCE($1, screenshots_enabled),
-         screenshot_interval_seconds = COALESCE($2, screenshot_interval_seconds),
+         screenshot_interval_sec = COALESCE($2, screenshot_interval_sec),
          idle_threshold_seconds = COALESCE($3, idle_threshold_seconds),
          heartbeat_interval_seconds = COALESCE($4, heartbeat_interval_seconds),
          consent_notice = COALESCE($5, consent_notice),
          restrict_incognito = COALESCE($6, restrict_incognito),
          expected_daily_hours = COALESCE($7, expected_daily_hours),
+         track_apps = COALESCE($8, track_apps),
+         track_websites = COALESCE($9, track_websites),
+         track_idle = COALESCE($10, track_idle),
+         blur_screenshots = COALESCE($11, blur_screenshots),
+         privacy_mode_default = COALESCE($12, privacy_mode_default),
          updated_at = NOW()
        WHERE id = 1 RETURNING *`,
-      [screenshots_enabled, screenshot_interval_seconds, idle_threshold_seconds, heartbeat_interval_seconds, consent_notice, restrict_incognito, expected_daily_hours]
+      [screenshots_enabled, screenshot_interval_sec, idle_threshold_seconds, heartbeat_interval_seconds, consent_notice, restrict_incognito, expected_daily_hours, track_apps, track_websites, track_idle, blur_screenshots, privacy_mode_default]
     );
     await logAction({ staffId: req.staff.id, action: 'monitoring.settings.update', entity: 'monitoring_settings', entityId: '1', newValue: settings, ipAddress: req.ip });
     res.json({ settings });

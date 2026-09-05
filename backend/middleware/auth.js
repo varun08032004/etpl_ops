@@ -15,17 +15,42 @@ if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
 const ACCESS_TOKEN_EXPIRY = '30m';
 const REFRESH_TOKEN_EXPIRY = '7d';
 const REFRESH_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+const ACCESS_COOKIE_MAX_AGE = 30 * 60 * 1000; // 30 minutes
 
-function cookieOptions(maxAge) {
+function accessCookieOptions(maxAge) {
   const isProd = process.env.NODE_ENV === 'production';
-  // In development (localhost), use lax + non-secure for cookies to work
   const isDev = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
-  return {
+  const options = {
     httpOnly: true,
-    secure: isProd && !isDev,  // Secure only in production
-    sameSite: isProd && !isDev ? 'none' : 'lax',  // 'none' only with secure in prod
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    path: '/',
     ...(maxAge ? { maxAge } : {}),
   };
+  if (isDev) {
+    options.secure = false;
+    // Don't set domain in dev - let browser use default (current host)
+    // This works better with proxy setups where frontend and backend are on different ports
+  }
+  return options;
+}
+
+function refreshCookieOptions(maxAge) {
+  const isProd = process.env.NODE_ENV === 'production';
+  const isDev = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+  const options = {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    path: '/api/auth/refresh', // Restrict refresh cookie to refresh endpoint only
+    ...(maxAge ? { maxAge } : {}),
+  };
+  if (isDev) {
+    options.secure = false;
+    // Don't set domain in dev - let browser use default (current host)
+    // This works better with proxy setups where frontend and backend are on different ports
+  }
+  return options;
 }
 
 function hashRefreshToken(token) {
@@ -35,12 +60,16 @@ function hashRefreshToken(token) {
 async function authenticate(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : req.cookies?.internal_ops_token;
+  console.log('[authenticate] Token source:', header.startsWith('Bearer ') ? 'header' : 'cookie');
+  console.log('[authenticate] Token present:', !!token);
   if (!token) return res.status(401).json({ error: 'Not authenticated', code: 'NO_TOKEN' });
 
   let decoded;
   try {
     decoded = jwt.verify(token, JWT_SECRET || 'dev-only-insecure-secret');
+    console.log('[authenticate] JWT decoded:', decoded);
   } catch (err) {
+    console.error('[authenticate] JWT verify failed:', err.message);
     if (err.name === 'TokenExpiredError') {
       return res.status(401).json({ error: 'Access token expired', code: 'TOKEN_EXPIRED' });
     }
@@ -52,6 +81,7 @@ async function authenticate(req, res, next) {
       `SELECT id, email, role, employee_id, is_active, ai_access_level FROM staff_accounts WHERE id = $1`,
       [decoded.sub]
     );
+    console.log('[authenticate] DB rows:', rows.length);
     const staff = rows[0];
     if (!staff || !staff.is_active) return res.status(401).json({ error: 'Account inactive or not found' });
 
@@ -62,7 +92,7 @@ async function authenticate(req, res, next) {
     req.staff = staff;
     next();
   } catch (err) {
-    console.error('[auth] DB/downstream error during authenticate (token was valid):', err.message);
+    console.error('[authenticate] DB error:', err.message);
     return res.status(503).json({ error: 'Temporarily unavailable — please retry.' });
   }
 }
@@ -76,6 +106,7 @@ function signAccessToken(staff) {
 function signRefreshToken(staff) {
   return jwt.sign({ sub: staff.id, type: 'refresh' }, REFRESH_SECRET || 'dev-only-insecure-secret', {
     expiresIn: REFRESH_TOKEN_EXPIRY,
+    jwtid: crypto.randomUUID(),
   });
 }
 
@@ -193,6 +224,12 @@ module.exports = {
   revokeAllRefreshTokens,
   validateRefreshToken,
   enforceSessionLimit,
-  cookieOptions,
+  cookieOptions: accessCookieOptions,
+  accessCookieOptions,
+  refreshCookieOptions,
   hashRefreshToken,
+  ACCESS_TOKEN_EXPIRY,
+  REFRESH_TOKEN_EXPIRY,
+  REFRESH_COOKIE_MAX_AGE,
+  ACCESS_COOKIE_MAX_AGE,
 };

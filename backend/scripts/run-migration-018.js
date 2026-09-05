@@ -1,0 +1,31 @@
+const fs = require('fs');
+const path = require('path');
+const { Pool } = require('pg');
+require('dotenv').config();
+
+const pool = new Pool({
+  connectionString: process.env.INTERNAL_OPS_DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+async function runMigration() {
+  const migrationPath = path.join(__dirname, '..', 'db', '018_carbon_academy_extensions.sql');
+  const sql = fs.readFileSync(migrationPath, 'utf8');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(sql);
+    await client.query('COMMIT');
+    console.log('✅ Migration 018_carbon_academy_extensions.sql applied successfully');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ Migration failed:', err.message);
+    throw err;
+  } finally {
+    client.release();
+    await pool.end();
+  }
+}
+
+runMigration().catch(() => process.exit(1));
