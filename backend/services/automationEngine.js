@@ -10,7 +10,7 @@
 'use strict';
 
 const { safeQuery } = require('../db/pool');
-const emailService = require('./emailService');
+const { sendEmail } = require('./email');
 
 function renderTemplate(template, payload) {
   if (!template) return '';
@@ -61,14 +61,12 @@ async function runAction(rule, payload) {
       }
 
       try {
-        await emailService.sendMail({
+        await sendEmail({
           to: recipients.join(','),
           subject: renderTemplate(subject, payload),
-          text: renderTemplate(body_template, payload),
+          html: renderTemplate(body_template, payload).replace(/\n/g, '<br>'),
         });
       } catch (err) {
-        // emailService itself falls back to a console-logged stub when unconfigured,
-        // so an error here means something actually went wrong sending, not just "no SMTP set up".
         console.error(`[automation:send_email] rule "${rule.name}" failed to send:`, err.message);
       }
       break;

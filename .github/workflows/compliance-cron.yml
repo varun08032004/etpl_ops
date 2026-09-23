@@ -1,0 +1,69 @@
+name: Daily Compliance Cron
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC (11:30 AM IST)
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    # Allow manual triggering
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  compliance-cron:
+    name: Run Compliance Daily Job
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          npm ci
+
+      - name: Run compliance cron job
+        run: |
+          cd backend
+          npm run compliance:cron
+        env:
+          INTERNAL_OPS_DATABASE_URL: ${{ secrets.INTERNAL_OPS_DATABASE_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL: ${{ secrets.RESEND_FROM_EMAIL }}
+          INTERNAL_OPS_JWT_SECRET: ${{ secrets.INTERNAL_OPS_JWT_SECRET }}
+          INTERNAL_OPS_REFRESH_SECRET: ${{ secrets.INTERNAL_OPS_REFRESH_SECRET }}
+          INTERNAL_OPS_ALLOWED_ORIGIN: ${{ secrets.INTERNAL_OPS_ALLOWED_ORIGIN }}
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          COMPLIANCE_CRON_SECRET: ${{ secrets.COMPLIANCE_CRON_SECRET }}
+          NODE_ENV: production
+
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.23.0
+        with:
+          payload: |
+            {
+              "text": "⚠ Compliance cron job failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*⚠ Compliance Daily Cron Failed*\nRepository: ${{ github.repository }}\nRun: ${{ github.run_id }}\nTime: ${{ github.event.repository.updated_at }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
