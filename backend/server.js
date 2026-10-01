@@ -83,8 +83,8 @@ const isAllowedOrigin = (origin) => {
   if (allowedOrigins.includes(normalized)) return true;
   // Allow Vercel preview deployments (*.vercel.app)
   if (normalized.endsWith('.vercel.app')) return true;
-  // Allow the production domain
-  if (normalized === 'https://ops.ethertrack.in') return true;
+  // Allow production domains from env var or defaults
+  if (normalized === 'https://app.ethertrack.in' || normalized === 'https://ops.ethertrack.in') return true;
   // Allow local React dev server (127.0.0.1 variant) and common Vite port
   if (normalized === 'http://127.0.0.1:3001' || normalized === 'http://localhost:3000' || normalized === 'http://127.0.0.1:3000' || normalized === 'http://localhost:5173' || normalized === 'http://127.0.0.1:5173') return true;
   return false;
