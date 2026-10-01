@@ -29,8 +29,10 @@ function accessCookieOptions(maxAge) {
   };
   if (isDev) {
     options.secure = false;
+    // For localhost cross-port development, use 'none' with secure:false
+    // Modern browsers allow this for localhost
+    options.sameSite = 'none';
     // Don't set domain in dev - let browser use default (current host)
-    // This works better with proxy setups where frontend and backend are on different ports
   }
   return options;
 }
@@ -42,13 +44,14 @@ function refreshCookieOptions(maxAge) {
     httpOnly: true,
     secure: isProd,
     sameSite: isProd ? 'none' : 'lax',
-    path: '/api/auth/refresh', // Restrict refresh cookie to refresh endpoint only
+    path: '/',
     ...(maxAge ? { maxAge } : {}),
   };
   if (isDev) {
     options.secure = false;
+    // For localhost cross-port development, use 'none' with secure:false
+    options.sameSite = 'none';
     // Don't set domain in dev - let browser use default (current host)
-    // This works better with proxy setups where frontend and backend are on different ports
   }
   return options;
 }

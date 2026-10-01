@@ -9,6 +9,50 @@ const { logAction } = require('../services/auditLog');
 const { registerApprovalAction, createApprovalRequest } = require('../services/approvals');
 const { buildEmployeeActionChain } = require('../services/approvalChain');
 const { isHeadOfDepartmentGrantingRole } = require('../services/departmentAccess');
+const { validateBody, schemas } = require('../middleware/validation');
+const { z } = require('zod');
+
+// Employee creation validation schema
+const createEmployeeSchema = z.object({
+  full_name: z.string().min(1, 'Full name is required').max(255),
+  personal_email: schemas.email.optional().nullable(),
+  work_email: schemas.email.optional().nullable(),
+  phone: z.string().regex(/^[6-9]\d{9}$/, 'Invalid Indian phone number').optional().nullable(),
+  gender: z.enum(['male', 'female', 'other', 'prefer_not_to_say']).optional().nullable(),
+  date_of_birth: schemas.isoDate.optional().nullable(),
+  address_line: z.string().max(500).optional().nullable(),
+  city: z.string().max(100).optional().nullable(),
+  state: z.string().max(100).optional().nullable(),
+  pincode: z.string().regex(/^\d{6}$/, 'Invalid pincode').optional().nullable(),
+  pan_number: schemas.pan.optional().nullable(),
+  department_id: schemas.uuid.optional().nullable(),
+  team_id: schemas.uuid.optional().nullable(),
+  designation_id: schemas.uuid.optional().nullable(),
+  manager_id: schemas.uuid.optional().nullable(),
+  employment_type: z.enum(['full_time', 'part_time', 'contract', 'intern']).optional(),
+  date_of_joining: schemas.isoDate,
+  ctc_annual: schemas.money.optional().nullable(),
+  basic_monthly: schemas.money.optional().nullable(),
+  hra_monthly: schemas.money.optional().nullable(),
+  other_allowances_monthly: schemas.money.optional().nullable(),
+  employer_pf_monthly: schemas.money.optional().default(0),
+  da_monthly: schemas.money.optional().default(0),
+  tax_regime: z.enum(['old', 'new']).optional().default('new'),
+  pf_applicable: schemas.boolean.optional().default(true),
+  bank_account_number: z.string().max(50).optional().nullable(),
+  bank_ifsc: schemas.ifsc.optional().nullable(),
+});
+
+// Employee update validation schema (all fields optional)
+const updateEmployeeSchema = createEmployeeSchema.partial().extend({
+  status: z.enum(['active', 'on_leave', 'notice_period', 'exited']).optional(),
+  declared_deductions: z.object({
+    section_80c: schemas.money.optional(),
+    section_80d: schemas.money.optional(),
+    hra_exemption_annual: schemas.money.optional(),
+  }).optional(),
+  notes: z.string().max(2000).optional().nullable(),
+}).strict();
 
 router.use(authenticate);
 
@@ -17,16 +61,23 @@ router.use(authenticate);
 // Founder signs off (the admin-initiated path). Audit logging happens
 // inside approveRequest() for the admin path, and explicitly here for the
 // owner/hr-immediate path.
-async function exitEmployee(employeeId, payload) {
+async function exitEmployee(employeeId, payload, client = null) {
   const { exit_date, reason } = payload || {};
-  const { rows } = await safeQuery(
-    `UPDATE employees SET status = 'exited', date_of_exit = $1, exit_reason = $2 WHERE id = $3 RETURNING id, full_name, status`,
-    [exit_date, reason || null, employeeId]
-  );
-  if (rows.length) {
-    await safeQuery(`UPDATE staff_accounts SET is_active = false WHERE employee_id = $1`, [employeeId]);
+  const doExit = async (client) => {
+    const { rows } = await client.query(
+      `UPDATE employees SET status = 'exited', date_of_exit = $1, exit_reason = $2 WHERE id = $3 RETURNING id, full_name, status`,
+      [exit_date, reason || null, employeeId]
+    );
+    if (rows.length) {
+      await client.query(`UPDATE staff_accounts SET is_active = false WHERE employee_id = $1`, [employeeId]);
+    }
+    return rows[0];
+  };
+
+  if (client) {
+    return doExit(client);
   }
-  return rows[0];
+  return withTransaction(doExit);
 }
 registerApprovalAction('employee.exit', (targetId, payload) => exitEmployee(targetId, payload));
 
@@ -59,8 +110,8 @@ async function getEmployeeDependencyCounts(employeeId) {
 // happens — the owner themselves on the immediate path, or the Founder who
 // gave final sign-off on the admin/HR-HOD-initiated path (services/
 // approvals.js passes this as the 3rd argument to every registered executor).
-async function hardDeleteEmployee(employeeId, payload, actingStaffId) {
-  return withTransaction(async (client) => {
+async function hardDeleteEmployee(employeeId, payload, actingStaffId, client = null) {
+  const doDelete = async (client) => {
     const { rows: [employee] } = await client.query(`SELECT * FROM employees WHERE id = $1`, [employeeId]);
     if (!employee) throw Object.assign(new Error('Employee not found'), { status: 404 });
 
@@ -95,6 +146,16 @@ async function hardDeleteEmployee(employeeId, payload, actingStaffId) {
     await logAction({
       staffId: actingStaffId, action: 'employee.hard_deleted', entity: 'employees', entityId: employeeId,
       oldValue: employee,
+    });
+
+    return { id: employee.id, full_name: employee.full_name };
+  };
+
+  if (client) {
+    return doDelete(client);
+  }
+  return withTransaction(doDelete);
+}
     });
 
     return { id: employee.id, full_name: employee.full_name };
@@ -220,12 +281,9 @@ router.get('/:id', async (req, res) => {
 });
 
 // ── create employee (onboarding) ───────────────────────────────────────────
-router.post('/', requireRole('hr'), async (req, res) => {
+router.post('/', requireRole('hr'), validateBody(createEmployeeSchema), async (req, res) => {
   try {
     const b = req.body;
-    if (!b.full_name || !b.date_of_joining) {
-      return res.status(400).json({ error: 'full_name and date_of_joining are required' });
-    }
 
     // Generate next employee_code: ET-EMP-0001, 0002, ...
     const { rows: [{ next_code }] } = await safeQuery(
@@ -258,6 +316,14 @@ router.post('/', requireRole('hr'), async (req, res) => {
 
     fireEvent('employee.created', { employeeId: employee.id, employeeName: employee.full_name });
 
+    await logAction({
+      staffId: req.staff.id,
+      action: 'employee.created',
+      entity: 'employees',
+      entityId: employee.id,
+      newValue: employee,
+    });
+
     res.status(201).json({ employee });
   } catch (err) {
     console.error('[employees:create]', err);
@@ -266,7 +332,7 @@ router.post('/', requireRole('hr'), async (req, res) => {
 });
 
 // ── update employee ─────────────────────────────────────────────────────────
-router.put('/:id', requireRole('hr'), async (req, res) => {
+router.put('/:id', requireRole('hr'), validateBody(updateEmployeeSchema), async (req, res) => {
   try {
     const allowed = [
       'full_name', 'personal_email', 'work_email', 'phone', 'gender', 'date_of_birth',
@@ -306,11 +372,22 @@ router.put('/:id', requireRole('hr'), async (req, res) => {
     if (!sets.length) return res.status(400).json({ error: 'No valid fields to update' });
 
     params.push(req.params.id);
+    const { rows: [before] } = await safeQuery(`SELECT * FROM employees WHERE id = $1`, [req.params.id]);
     const { rows } = await safeQuery(
       `UPDATE employees SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
       params
     );
     if (!rows.length) return res.status(404).json({ error: 'Employee not found' });
+
+    await logAction({
+      staffId: req.staff.id,
+      action: 'employee.updated',
+      entity: 'employees',
+      entityId: req.params.id,
+      oldValue: before,
+      newValue: rows[0],
+    });
+
     res.json({ employee: rows[0] });
   } catch (err) {
     console.error('[employees:update]', err);
@@ -375,24 +452,26 @@ router.post('/:id/exit', requireRole('hr'), async (req, res) => {
 // different role.
 router.post('/:id/reinstate', requireRole('hr'), async (req, res) => {
   try {
-    const { rows } = await safeQuery(
-      `UPDATE employees SET status = 'active', date_of_exit = NULL, exit_reason = NULL
-       WHERE id = $1 AND status = 'exited' RETURNING id, full_name, status`,
-      [req.params.id]
-    );
-    if (!rows.length) return res.status(404).json({ error: 'Employee not found, or is not currently exited' });
+    return withTransaction(async (client) => {
+      const { rows } = await client.query(
+        `UPDATE employees SET status = 'active', date_of_exit = NULL, exit_reason = NULL
+         WHERE id = $1 AND status = 'exited' RETURNING id, full_name, status`,
+        [req.params.id]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Employee not found, or is not currently exited' });
 
-    const { rows: [reactivatedLogin] } = await safeQuery(
-      `UPDATE staff_accounts SET is_active = true WHERE employee_id = $1 RETURNING id, email`,
-      [req.params.id]
-    );
+      const { rows: [reactivatedLogin] } = await client.query(
+        `UPDATE staff_accounts SET is_active = true WHERE employee_id = $1 RETURNING id, email`,
+        [req.params.id]
+      );
 
-    await logAction({
-      staffId: req.staff.id, action: 'employee.reinstated', entity: 'employees', entityId: rows[0].id,
-      newValue: { full_name: rows[0].full_name, reactivated_login: reactivatedLogin?.email || null },
+      await logAction({
+        staffId: req.staff.id, action: 'employee.reinstated', entity: 'employees', entityId: rows[0].id,
+        newValue: { full_name: rows[0].full_name, reactivated_login: reactivatedLogin?.email || null },
+      });
+
+      res.json({ employee: rows[0], reactivated_login: reactivatedLogin || null });
     });
-
-    res.json({ employee: rows[0], reactivated_login: reactivatedLogin || null });
   } catch (err) {
     console.error('[employees:reinstate]', err);
     res.status(500).json({ error: 'Failed to reinstate employee' });
@@ -554,26 +633,28 @@ router.post('/leave/:leaveId/decision', async (req, res) => {
     }
     if (!isAuthorized) return res.status(403).json({ error: 'Only HR, this employee\'s manager, or their department head can decide on this request' });
 
-    const { rows } = await safeQuery(
-      `UPDATE leave_requests SET status = $1, approved_by = $2, approved_at = NOW() WHERE id = $3 RETURNING *`,
-      [decision, req.staff.id, req.params.leaveId]
-    );
-    if (!rows.length) return res.status(404).json({ error: 'Leave request not found' });
+    return withTransaction(async (client) => {
+      const { rows } = await client.query(
+        `UPDATE leave_requests SET status = $1, approved_by = $2, approved_at = NOW() WHERE id = $3 RETURNING *`,
+        [decision, req.staff.id, req.params.leaveId]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Leave request not found' });
 
-    if (decision === 'approved') {
-      const { rows: [empInfo] } = await safeQuery(`SELECT full_name FROM employees WHERE id = $1`, [rows[0].employee_id]);
-      fireEvent('leave.approved', {
-        employee_name: empInfo?.full_name, start_date: rows[0].start_date?.toISOString().slice(0,10),
-        end_date: rows[0].end_date?.toISOString().slice(0,10), link: `/employees/${rows[0].employee_id}`,
-      });
-      const lr = rows[0];
-      const { rows: [lt] } = await safeQuery(`SELECT name FROM leave_types WHERE id = $1`, [lr.leave_type_id]);
-      const col = /sick/i.test(lt?.name) ? 'leave_balance_sick' : /annual/i.test(lt?.name) ? 'leave_balance_annual' : null;
-      if (col) {
-        await safeQuery(`UPDATE employees SET ${col} = GREATEST(0, ${col} - $1) WHERE id = $2`, [lr.num_days, lr.employee_id]);
+      if (decision === 'approved') {
+        const { rows: [empInfo] } = await client.query(`SELECT full_name FROM employees WHERE id = $1`, [rows[0].employee_id]);
+        fireEvent('leave.approved', {
+          employee_name: empInfo?.full_name, start_date: rows[0].start_date?.toISOString().slice(0,10),
+          end_date: rows[0].end_date?.toISOString().slice(0,10), link: `/employees/${rows[0].employee_id}`,
+        });
+        const lr = rows[0];
+        const { rows: [lt] } = await client.query(`SELECT name FROM leave_types WHERE id = $1`, [lr.leave_type_id]);
+        const col = /sick/i.test(lt?.name) ? 'leave_balance_sick' : /annual/i.test(lt?.name) ? 'leave_balance_annual' : null;
+        if (col) {
+          await client.query(`UPDATE employees SET ${col} = GREATEST(0, ${col} - $1) WHERE id = $2`, [lr.num_days, lr.employee_id]);
+        }
       }
-    }
-    res.json({ leave: rows[0] });
+      res.json({ leave: rows[0] });
+    });
   } catch (err) {
     console.error('[employees:leave:decision]', err);
     res.status(500).json({ error: 'Failed to process leave decision' });

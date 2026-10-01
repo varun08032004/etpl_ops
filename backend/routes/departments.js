@@ -10,9 +10,16 @@ const { buildDepartmentChain } = require('../services/approvalChain');
 
 router.use(authenticate);
 
-async function deleteDepartment(targetId) {
-  const { rows } = await safeQuery(`DELETE FROM departments WHERE id = $1 RETURNING id, name`, [targetId]);
-  return rows[0];
+async function deleteDepartment(targetId, client = null) {
+  const doDelete = async (client) => {
+    const { rows } = await client.query(`DELETE FROM departments WHERE id = $1 RETURNING id, name`, [targetId]);
+    return rows[0];
+  };
+
+  if (client) {
+    return doDelete(client);
+  }
+  return withTransaction(doDelete);
 }
 registerApprovalAction('department.delete', deleteDepartment);
 

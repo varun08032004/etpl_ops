@@ -562,9 +562,9 @@ function AdminContentEditor({ lesson, onSave, onClose }) {
       </DialogTitle>
       <DialogContent sx={{ maxHeight: '70vh', overflow: 'auto', p: 2 }}>
         <Tabs value={format} onChange={(_, v) => setFormat(v)} sx={{ mb: 2 }}>
-          <Tab label="Markdown" icon={<Article />} disabled={!lesson.content?.text && format !== 'markdown'} />
-          <Tab label="JSON" icon={<Code />} />
-          <Tab label="PDF" icon={<PictureAsPdf />} disabled={!pdfUrl && format !== 'pdf'} />
+          <Tab label="Markdown" icon={<Article />} value="markdown" disabled={!lesson.content?.text && format !== 'markdown'} />
+          <Tab label="JSON" icon={<Code />} value="json" />
+          <Tab label="PDF" icon={<PictureAsPdf />} value="pdf" disabled={!pdfUrl && format !== 'pdf'} />
         </Tabs>
 
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -638,7 +638,7 @@ export default function TrainingCourseDetail() {
   const [adminEditorOpen, setAdminEditorOpen] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
 
-  const isAdmin = staff?.role === 'owner' || staff?.role === 'admin';
+  const isAdmin = staff?.role === 'owner';
 
   const fetchData = useCallback(async () => {
     setLoading(true);

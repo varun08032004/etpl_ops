@@ -6,12 +6,26 @@ const crypto = require('crypto');
 const { safeQuery, withTransaction } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { logAction } = require('../services/auditLog');
+const { withIdempotency } = require('../middleware/idempotency');
+const { validateBody, schemas } = require('../middleware/validation');
+const { z } = require('zod');
 const ledger = require('../services/ledger');
 const axisPayoutAdapter = require('../services/bankFeeds/axisPayoutAdapter');
 const { generatePayslipPDF } = require('../services/payslipGenerator'); // npm install pdfkit
 const { ZipArchive } = require('archiver'); // npm install archiver@^8 — v8 replaced the old archiver('zip', opts) factory with a ZipArchive class; everything else (pipe/append/finalize) is unchanged
 const storage = require('../services/storage'); // your existing Supabase Storage wrapper
 const rateLimit = require('express-rate-limit'); // npm install express-rate-limit (skip if already installed for expenses.js)
+
+// Payroll run creation validation schema
+const createPayrollRunSchema = z.object({
+  month: schemas.month,
+  year: schemas.year,
+});
+
+// Add employee to payroll run validation schema
+const addPayrollItemSchema = z.object({
+  employee_id: schemas.uuid,
+});
 
 router.use(authenticate);
 
@@ -228,11 +242,9 @@ async function computePayrollItemForEmployee(client, emp, { month, year, monthSt
 }
 
 // ── create a draft payroll run for a month, computed from attendance + full statutory compliance ──
-router.post('/runs', requireRole('finance'), async (req, res) => {
+router.post('/runs', requireRole('finance'), validateBody(createPayrollRunSchema), async (req, res) => {
   try {
     const { month, year } = req.body;
-    if (!isValidMonth(month)) return res.status(400).json({ error: 'month must be an integer between 1 and 12' });
-    if (!isValidYear(year)) return res.status(400).json({ error: 'year must be a valid 4-digit year' });
 
     const { rows: employees } = await safeQuery(
       `SELECT * FROM employees WHERE status IN ('active','on_leave','notice_period') AND employment_type != 'contract'`
@@ -276,6 +288,14 @@ router.post('/runs', requireRole('finance'), async (req, res) => {
       return { ...payrollRun, total_gross: totalGross, total_deductions: totalDeductions, total_net: totalNet };
     });
 
+    await logAction({
+      staffId: req.staff.id,
+      action: 'payroll_run.created',
+      entity: 'payroll_runs',
+      entityId: run.id,
+      newValue: { period_month: run.period_month, period_year: run.period_year, total_gross: run.total_gross, total_net: run.total_net },
+    });
+
     res.status(201).json({ payrollRun: run });
   } catch (err) {
     console.error('[payroll:create-run]', err);
@@ -288,10 +308,9 @@ router.post('/runs', requireRole('finance'), async (req, res) => {
 // For someone missed by the bulk run (e.g. a contractor being paid this one
 // cycle, or someone whose status changed after the run was created). Uses
 // the exact same calculation as bulk creation above.
-router.post('/runs/:id/items', requireRole('finance'), async (req, res) => {
+router.post('/runs/:id/items', requireRole('finance'), validateBody(addPayrollItemSchema), async (req, res) => {
   try {
     const { employee_id } = req.body;
-    if (!employee_id) return res.status(400).json({ error: 'employee_id is required' });
 
     const { rows: [run] } = await safeQuery(`SELECT * FROM payroll_runs WHERE id = $1`, [req.params.id]);
     if (!run) return res.status(404).json({ error: 'Payroll run not found' });
@@ -736,7 +755,7 @@ router.post('/runs/:id/sync-payout-status', requireRole('finance'), async (req, 
 // real documentation before trusting this in production. Do not remove the
 // signature check — an unverified webhook here could let anyone mark payroll
 // items as paid/failed by guessing this URL.
-router.post('/webhooks/axis-payout', express.raw({ type: 'application/json' }), async (req, res) => {
+router.post('/webhooks/axis-payout', express.raw({ type: 'application/json' }), withIdempotency(async (req, res) => {
   try {
     const signature = req.headers['x-axis-signature']; // TODO: confirm actual header name from Axis docs
     const secret = process.env.AXIS_PAYOUT_WEBHOOK_SECRET;
@@ -775,6 +794,6 @@ router.post('/webhooks/axis-payout', express.raw({ type: 'application/json' }), 
     console.error('[payroll:axis-webhook]', err);
     res.status(200).json({ received: true });
   }
-});
+}));
 
 module.exports = router;

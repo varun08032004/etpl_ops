@@ -478,8 +478,19 @@ CREATE INDEX idx_payroll_items_run       ON payroll_items(payroll_run_id);
 CREATE INDEX idx_payroll_items_employee  ON payroll_items(employee_id);
 
 -- ══════════════════════════════════════════════════════════════════════════
--- TRIGGERS — auto update updated_at
+-- IDEMPOTENCY KEYS (for webhook deduplication)
 -- ══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE idempotency_keys (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  key           VARCHAR(255) UNIQUE NOT NULL,
+  endpoint      VARCHAR(255) NOT NULL,
+  response_body JSONB,
+  response_code INTEGER,
+  created_at    TIMESTAMP DEFAULT NOW(),
+  expires_at    TIMESTAMP NOT NULL
+);
+CREATE INDEX idx_idempotency_keys_expires ON idempotency_keys(expires_at);
 
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$

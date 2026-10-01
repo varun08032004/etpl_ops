@@ -218,4 +218,5 @@ module.exports = {
   computeFinalSettlementDeadline,
   currentFiscalYearLabel,
   fyMonthNumber,
+  addWorkingDays,
 };

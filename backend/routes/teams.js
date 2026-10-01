@@ -12,9 +12,16 @@ router.use(authenticate);
 
 // Same pattern as department.delete: owner deletes immediately, admin's
 // delete goes through Founder approval.
-async function deleteTeam(targetId) {
-  const { rows } = await safeQuery(`DELETE FROM teams WHERE id = $1 RETURNING id, name`, [targetId]);
-  return rows[0];
+async function deleteTeam(targetId, client = null) {
+  const doDelete = async (client) => {
+    const { rows } = await client.query(`DELETE FROM teams WHERE id = $1 RETURNING id, name`, [targetId]);
+    return rows[0];
+  };
+
+  if (client) {
+    return doDelete(client);
+  }
+  return withTransaction(doDelete);
 }
 registerApprovalAction('team.delete', deleteTeam);
 

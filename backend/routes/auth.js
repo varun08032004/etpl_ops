@@ -681,20 +681,24 @@ router.post('/logout', async (req, res) => {
   try {
     const refreshToken = req.cookies?.internal_ops_refresh;
     if (refreshToken) {
-      const { hashRefreshToken, validateRefreshToken, revokeRefreshToken } = require('../middleware/auth');
+      const { hashRefreshToken, validateRefreshToken, revokeRefreshToken, accessCookieOptions, refreshCookieOptions } = require('../middleware/auth');
       const tokenHash = hashRefreshToken(refreshToken);
       const validated = await validateRefreshToken(refreshToken);
       if (validated) {
         await revokeRefreshToken(validated.staffId, tokenHash);
       }
     }
-    res.clearCookie('internal_ops_token', accessCookieOptions());
-    res.clearCookie('internal_ops_refresh', refreshCookieOptions());
+    const accessOpts = accessCookieOptions();
+    const refreshOpts = refreshCookieOptions();
+    res.clearCookie('internal_ops_token', accessOpts);
+    res.clearCookie('internal_ops_refresh', refreshOpts);
     res.json({ ok: true });
   } catch (err) {
     console.error('[auth:logout]', err);
-    res.clearCookie('internal_ops_token', accessCookieOptions());
-    res.clearCookie('internal_ops_refresh', refreshCookieOptions());
+    const accessOpts = accessCookieOptions();
+    const refreshOpts = refreshCookieOptions();
+    res.clearCookie('internal_ops_token', accessOpts);
+    res.clearCookie('internal_ops_refresh', refreshOpts);
     res.json({ ok: true });
   }
 });
@@ -703,8 +707,10 @@ router.post('/logout', async (req, res) => {
 router.post('/revoke-all-sessions', authenticate, async (req, res) => {
   try {
     await revokeAllRefreshTokens(req.staff.id);
-    res.clearCookie('internal_ops_token', accessCookieOptions());
-    res.clearCookie('internal_ops_refresh', refreshCookieOptions());
+    const accessOpts = accessCookieOptions();
+    const refreshOpts = refreshCookieOptions();
+    res.clearCookie('internal_ops_token', accessOpts);
+    res.clearCookie('internal_ops_refresh', refreshOpts);
     await logAction({ staffId: req.staff.id, action: 'auth.all_sessions_revoked', entity: 'staff_accounts', entityId: req.staff.id, ipAddress: req.ip });
     res.json({ ok: true, message: 'All sessions revoked' });
   } catch (err) {
@@ -713,36 +719,72 @@ router.post('/revoke-all-sessions', authenticate, async (req, res) => {
   }
 });
 
+// POST /auth/clear-stale-cookies — clear both old and new cookie paths
+// Useful for migrations where cookies were set with different paths
+router.post('/clear-stale-cookies', (req, res) => {
+  const accessOpts = accessCookieOptions();
+  const refreshOpts = refreshCookieOptions();
+  
+  // Clear all known cookie path variations
+  const paths = ['/', '/api/', '/api/v1/', '/api/auth/'];
+  for (const path of paths) {
+    res.clearCookie('internal_ops_token', { ...accessOpts, path });
+    res.clearCookie('internal_ops_refresh', { ...refreshOpts, path });
+    res.clearCookie('trusted_device_id', { ...accessOpts, path });
+    res.clearCookie('pending_device_id', { ...accessOpts, path });
+  }
+  
+  res.json({ ok: true, message: 'Stale cookies cleared', clearedPaths: paths });
+});
+
 // POST /auth/refresh — exchange valid refresh token for new access token
 // Called by frontend when access token expires (401) or on app init
 router.post('/refresh', async (req, res) => {
+  const requestId = req.id || require('crypto').randomUUID();
+  const logPrefix = `[auth:refresh][${requestId}]`;
+  
+  console.log(`${logPrefix} START — cookies:`, Object.keys(req.cookies || {}));
+  console.log(`${logPrefix} Headers:`, { cookie: req.headers.cookie?.substring(0, 100), ua: req.headers['user-agent']?.substring(0, 50) });
+  
   try {
     const refreshToken = req.cookies?.internal_ops_refresh;
+    console.log(`${logPrefix} Refresh token present:`, !!refreshToken, refreshToken ? 'length=' + refreshToken.length : '');
+    
     if (!refreshToken) {
+      console.warn(`${logPrefix} NO_REFRESH_TOKEN — cookie keys:`, Object.keys(req.cookies || {}));
       return res.status(401).json({ error: 'No refresh token', code: 'NO_REFRESH_TOKEN' });
     }
 
     const validated = await validateRefreshToken(refreshToken);
+    console.log(`${logPrefix} validateRefreshToken result:`, validated ? { staffId: validated.staffId, hasStaff: !!validated.staff } : 'null');
+    
     if (!validated) {
+      console.warn(`${logPrefix} REFRESH_TOKEN_INVALID — token hash:`, require('crypto').createHash('sha256').update(refreshToken).digest('hex').substring(0, 16) + '...');
       return res.status(401).json({ error: 'Refresh token invalid or expired', code: 'REFRESH_TOKEN_INVALID' });
     }
 
     const { staffId, tokenHash, staff } = validated;
+    console.log(`${logPrefix} Validated staff:`, { id: staff.id, email: staff.email, role: staff.role, is_active: staff.is_active });
 
     // Rotate: revoke old refresh token, issue new one
     await revokeRefreshToken(staffId, tokenHash);
+    console.log(`${logPrefix} Old refresh token revoked`);
     
     const newAccessToken = signAccessToken({ id: staff.id, role: staff.role });
     const newRefreshToken = signRefreshToken({ id: staff.id, role: staff.role });
+    console.log(`${logPrefix} New tokens generated`);
     
     try {
       await storeRefreshToken(staffId, newRefreshToken, req.headers['user-agent'] || null, req.ip);
+      console.log(`${logPrefix} New refresh token stored`);
     } catch (storeErr) {
       // Handle FK constraint (user deleted) - clear cookies and force re-login
       if (storeErr.code === '23503') {
-        console.warn('[auth:refresh] User no longer exists, clearing cookies');
-        res.clearCookie('internal_ops_token', accessCookieOptions());
-        res.clearCookie('internal_ops_refresh', refreshCookieOptions());
+        console.warn(`${logPrefix} User no longer exists (FK violation), clearing cookies`);
+        const accessOpts = accessCookieOptions();
+        const refreshOpts = refreshCookieOptions();
+        res.clearCookie('internal_ops_token', accessOpts);
+        res.clearCookie('internal_ops_refresh', refreshOpts);
         return res.status(401).json({ error: 'Session invalid — please log in again', code: 'USER_NOT_FOUND' });
       }
       throw storeErr;
@@ -751,18 +793,22 @@ router.post('/refresh', async (req, res) => {
     // Set new cookies (both access and refresh)
     const accessCookieOpts = accessCookieOptions(ACCESS_COOKIE_MAX_AGE);
     const refreshCookieOpts = refreshCookieOptions(REFRESH_COOKIE_MAX_AGE);
-    console.log('[auth:refresh] Setting access cookie:', accessCookieOpts);
-    console.log('[auth:refresh] Setting refresh cookie:', refreshCookieOpts);
+    console.log(`${logPrefix} Setting cookies:`, { 
+      access: { ...accessCookieOpts, sameSite: accessCookieOpts.sameSite, secure: accessCookieOpts.secure },
+      refresh: { ...refreshCookieOpts, sameSite: refreshCookieOpts.sameSite, secure: refreshCookieOpts.secure }
+    });
     res.cookie('internal_ops_token', newAccessToken, accessCookieOpts);
     res.cookie('internal_ops_refresh', newRefreshToken, refreshCookieOpts);
+    console.log(`${logPrefix} Cookies set successfully`);
 
     // Return staff info + access token (for immediate use before cookie propagates)
     res.json({ 
       accessToken: newAccessToken,
       staff: { id: staff.id, email: staff.email, role: staff.role, employee_id: staff.employee_id }
     });
+    console.log(`${logPrefix} Response sent`);
   } catch (err) {
-    console.error('[auth:refresh]', err);
+    console.error(`${logPrefix} ERROR:`, err.message, err.stack);
     res.status(500).json({ error: 'Token refresh failed' });
   }
 });

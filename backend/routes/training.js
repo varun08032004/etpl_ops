@@ -675,15 +675,22 @@ router.put('/lessons/:id', requireRole('owner'), async (req, res) => {
     const { rows: [current] } = await safeQuery(`SELECT * FROM training_lessons WHERE id = $1`, [req.params.id]);
     if (!current) return res.status(404).json({ error: 'Lesson not found' });
 
+    let versionIncremented = false;
     for (const key of allowed) {
       if (key in req.body) {
         let value = req.body[key];
         if (value === '') value = null;
         params.push(value);
         sets.push(`${key} = $${params.length}`);
+        if (key === 'content') versionIncremented = true;
       }
     }
     if (!sets.length) return res.status(400).json({ error: 'No valid fields to update' });
+
+    if (versionIncremented) {
+      params.push(current.version + 1);
+      sets.push(`version = $${params.length}`);
+    }
 
     params.push(req.staff.id);
     sets.push(`updated_by = $${params.length}`);
@@ -699,8 +706,11 @@ router.put('/lessons/:id', requireRole('owner'), async (req, res) => {
 
     res.json({ lesson });
   } catch (err) {
-    console.error('[training:lessons:update]', err);
-    res.status(500).json({ error: 'Failed to update lesson' });
+    console.error('[training:lessons:update] Error:', err.message);
+    console.error('[training:lessons:update] Stack:', err.stack);
+    console.error('[training:lessons:update] Code:', err.code);
+    console.error('[training:lessons:update] Detail:', err.detail);
+    res.status(500).json({ error: 'Failed to update lesson', detail: err.message });
   }
 });
 

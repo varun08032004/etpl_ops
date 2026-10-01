@@ -14,7 +14,7 @@
 // createApprovalRequest() (with a chain) instead of performing the action
 // directly when the actor isn't authorized to do it immediately.
 
-const { safeQuery } = require('../db/pool');
+const { safeQuery, withTransaction } = require('../db/pool');
 const { logAction } = require('./auditLog');
 const { notifyStaff, notifyMany } = require('./notifications');
 
@@ -103,25 +103,28 @@ async function approveRequest(requestId, reviewedBy) {
   if (!executor) {
     throw new Error(`No executor registered for action_type "${request.action_type}" — is that module loaded?`);
   }
-  const result = await executor(request.target_id, request.payload, reviewedBy);
 
-  const { rows: [updated] } = await safeQuery(
-    `UPDATE approval_requests SET status = 'approved', reviewed_by = $1, reviewed_at = NOW() WHERE id = $2 RETURNING *`,
-    [reviewedBy, requestId]
-  );
+  return withTransaction(async (client) => {
+    const result = await executor(request.target_id, request.payload, reviewedBy, client);
 
-  await logAction({
-    staffId: reviewedBy, action: `${request.action_type}.approved`, entity: request.target_type, entityId: request.target_id,
-    oldValue: { requestedBy: request.requested_by, reason: request.reason }, newValue: { targetLabel: request.target_label },
+    const { rows: [updated] } = await client.query(
+      `UPDATE approval_requests SET status = 'approved', reviewed_by = $1, reviewed_at = NOW() WHERE id = $2 RETURNING *`,
+      [reviewedBy, requestId]
+    );
+
+    await logAction({
+      staffId: reviewedBy, action: `${request.action_type}.approved`, entity: request.target_type, entityId: request.target_id,
+      oldValue: { requestedBy: request.requested_by, reason: request.reason }, newValue: { targetLabel: request.target_label },
+    });
+
+    await notifyStaff({
+      staffId: request.requested_by, type: 'approval.approved',
+      title: `Approved: ${request.action_type.replace('.', ' ')} — ${request.target_label || request.target_type}`,
+      link: '/team',
+    });
+
+    return { request: updated, result, finalized: true };
   });
-
-  await notifyStaff({
-    staffId: request.requested_by, type: 'approval.approved',
-    title: `Approved: ${request.action_type.replace('.', ' ')} — ${request.target_label || request.target_type}`,
-    link: '/team',
-  });
-
-  return { request: updated, result, finalized: true };
 }
 
 async function rejectRequest(requestId, reviewedBy, reason) {

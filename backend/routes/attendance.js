@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { withIdempotency } = require('../middleware/idempotency');
 
 router.use(authenticate);
 
@@ -82,7 +83,7 @@ function verifyAgentSignature(req) {
   }
 }
 
-router.post('/webhooks/agent', express.raw({ type: 'application/json', limit: '50mb' }), async (req, res) => {
+router.post('/webhooks/agent', express.raw({ type: 'application/json', limit: '50mb' }), withIdempotency(async (req, res) => {
   try {
     verifyAgentSignature(req);
   } catch (err) {
@@ -114,7 +115,7 @@ router.post('/webhooks/agent', express.raw({ type: 'application/json', limit: '5
     console.error('[attendance:webhook:agent]', err);
     res.status(200).json({ received: true }); // ack anyway to avoid retry storms
   }
-});
+}));
 
 // ── view attendance ─────────────────────────────────────────────────────────
 router.get('/', async (req, res) => {

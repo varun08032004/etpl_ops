@@ -14,7 +14,7 @@
 // - INTERNAL_OPS_ALLOWED_ORIGIN
 
 require('dotenv').config();
-const fetch = require('node-fetch');
+// Using native fetch (Node 18+)
 
 const API_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:3001';
 const CRON_SECRET = process.env.COMPLIANCE_CRON_SECRET; // Optional shared secret for auth
