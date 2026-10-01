@@ -156,13 +156,7 @@ async function hardDeleteEmployee(employeeId, payload, actingStaffId, client = n
   }
   return withTransaction(doDelete);
 }
-    });
-
-    return { id: employee.id, full_name: employee.full_name };
-  });
-}
 registerApprovalAction('employee.hard_delete', (targetId, payload, actingStaffId) => hardDeleteEmployee(targetId, payload, actingStaffId));
-
 // ── self-service: resolve the logged-in staff member's own employee record ──
 // Must be defined BEFORE the /:id routes below, or Express would treat "me" as an :id.
 router.get('/me', async (req, res) => {
