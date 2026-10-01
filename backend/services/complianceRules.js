@@ -169,6 +169,24 @@ async function getRulesForSlug(slug) {
   if (slug === 'professional_tax') {
     return getProfessionalTaxRules();
   }
+  if (slug === 'gst') {
+    const { rows } = await safeQuery(`SELECT value FROM compliance_settings WHERE key = 'gstr1_filing_frequency'`);
+    const frequency = rows[0]?.value || 'monthly';
+    const baseRules = RECURRING_RULES.gst || [];
+    return baseRules.map(rule => {
+      if (rule.key === 'gstr1') {
+        if (frequency === 'quarterly') {
+          return {
+            ...rule,
+            interval: 'quarterly',
+            dueRule: { type: 'fixed_annual', month: 7, day: 13 },
+            note: 'QRMP scheme (turnover ≤₹5Cr) — due 13th of month following quarter-end. Quarterly returns: Q1=Jul 13, Q2=Oct 13, Q3=Jan 13, Q4=Apr 13.'
+          };
+        }
+      }
+      return rule;
+    });
+  }
   return RECURRING_RULES[slug] || [];
 }
 
