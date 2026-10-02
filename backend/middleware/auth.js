@@ -19,7 +19,6 @@ const ACCESS_COOKIE_MAX_AGE = 30 * 60 * 1000; // 30 minutes
 
 function accessCookieOptions(maxAge) {
   const isProd = process.env.NODE_ENV === 'production';
-  const isDev = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
   const options = {
     httpOnly: true,
     secure: isProd,
@@ -27,16 +26,11 @@ function accessCookieOptions(maxAge) {
     path: '/',
     ...(maxAge ? { maxAge } : {}),
   };
-  if (isDev) {
-    options.secure = false;
-    options.sameSite = 'none';
-  }
   return options;
 }
 
 function refreshCookieOptions(maxAge) {
   const isProd = process.env.NODE_ENV === 'production';
-  const isDev = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
   const options = {
     httpOnly: true,
     secure: isProd,
@@ -44,10 +38,6 @@ function refreshCookieOptions(maxAge) {
     path: '/',
     ...(maxAge ? { maxAge } : {}),
   };
-  if (isDev) {
-    options.secure = false;
-    options.sameSite = 'none';
-  }
   return options;
 }
 

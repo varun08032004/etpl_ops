@@ -75,16 +75,23 @@ const allowedOrigins = (process.env.INTERNAL_OPS_ALLOWED_ORIGIN || 'http://local
   .split(',')
   .map(o => o.trim());
 
-// Also allow Vercel preview deployments and the production domain
+// Production frontend domains - add these to environment variable INTERNAL_OPS_ALLOWED_ORIGIN in production
+const productionDomains = [
+  'https://ops.ethertrack.in',
+  'https://app.ethertrack.in',
+];
+
+// Also allow Vercel preview deployments (*.vercel.app) and Railway deployments (*.railway.app)
 const isAllowedOrigin = (origin) => {
   if (!origin) return true;
   // Normalize: remove trailing slash
   const normalized = origin.replace(/\/$/, '');
   if (allowedOrigins.includes(normalized)) return true;
+  if (productionDomains.includes(normalized)) return true;
   // Allow Vercel preview deployments (*.vercel.app)
   if (normalized.endsWith('.vercel.app')) return true;
-  // Allow production domains from env var or defaults
-  if (normalized === 'https://app.ethertrack.in' || normalized === 'https://ops.ethertrack.in') return true;
+  // Allow Railway deployments (*.railway.app, *.up.railway.app)
+  if (normalized.endsWith('.railway.app') || normalized.endsWith('.up.railway.app')) return true;
   // Allow local React dev server (127.0.0.1 variant) and common Vite port
   if (normalized === 'http://127.0.0.1:3001' || normalized === 'http://localhost:3000' || normalized === 'http://127.0.0.1:3000' || normalized === 'http://localhost:5173' || normalized === 'http://127.0.0.1:5173') return true;
   return false;
@@ -97,9 +104,11 @@ app.use(cors({
     const normalizedOrigin = origin?.replace(/\/$/, '');
     console.log('[CORS DEBUG] Origin received:', origin, '-> normalized:', normalizedOrigin);
     console.log('[CORS DEBUG] Allowed origins:', allowedOrigins);
+    console.log('[CORS DEBUG] Production domains:', productionDomains);
     console.log('[CORS DEBUG] isAllowedOrigin result:', isAllowedOrigin(normalizedOrigin));
     if (!normalizedOrigin) return callback(null, true);
     if (isAllowedOrigin(normalizedOrigin)) return callback(null, true);
+    console.warn('[CORS DEBUG] Blocked origin:', normalizedOrigin);
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
