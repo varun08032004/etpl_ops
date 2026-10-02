@@ -27,9 +27,6 @@ function accessCookieOptions(maxAge) {
     path: '/',
     ...(maxAge ? { maxAge } : {}),
   };
-  if (isProd) {
-    options.domain = '.ethertrack.in';
-  }
   if (isDev) {
     options.secure = false;
     options.sameSite = 'none';
@@ -47,9 +44,6 @@ function refreshCookieOptions(maxAge) {
     path: '/',
     ...(maxAge ? { maxAge } : {}),
   };
-  if (isProd) {
-    options.domain = '.ethertrack.in';
-  }
   if (isDev) {
     options.secure = false;
     options.sameSite = 'none';
