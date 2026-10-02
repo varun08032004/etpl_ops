@@ -27,12 +27,12 @@ function accessCookieOptions(maxAge) {
     path: '/',
     ...(maxAge ? { maxAge } : {}),
   };
+  if (isProd) {
+    options.domain = '.ethertrack.in';
+  }
   if (isDev) {
     options.secure = false;
-    // For localhost cross-port development, use 'none' with secure:false
-    // Modern browsers allow this for localhost
     options.sameSite = 'none';
-    // Don't set domain in dev - let browser use default (current host)
   }
   return options;
 }
@@ -47,11 +47,12 @@ function refreshCookieOptions(maxAge) {
     path: '/',
     ...(maxAge ? { maxAge } : {}),
   };
+  if (isProd) {
+    options.domain = '.ethertrack.in';
+  }
   if (isDev) {
     options.secure = false;
-    // For localhost cross-port development, use 'none' with secure:false
     options.sameSite = 'none';
-    // Don't set domain in dev - let browser use default (current host)
   }
   return options;
 }
