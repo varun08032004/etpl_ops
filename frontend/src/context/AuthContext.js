@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import client from '../api/client';
-import { clearStaleCookies, forceClearCookiesClientSide } from '../utils/cookieCleanup';
 
 const AuthContext = createContext(null);
 
@@ -26,26 +25,17 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  // Clear stale cookies on first load (handles migrations from old cookie paths)
+  // Initialize auth on first load
   useEffect(() => {
     let mounted = true;
     (async () => {
-      await clearStaleCookies();
-      if (mounted) {
-        refresh();
+      try {
+        await refresh();
+      } finally {
+        if (mounted) setLoading(false);
       }
     })();
     return () => { mounted = false; };
-  }, []);
-
-  // Also run refresh on subsequent loads (but not on first load since we already did it)
-  const hasInitialized = useRef(false);
-  useEffect(() => {
-    if (hasInitialized.current) {
-      refresh();
-    } else {
-      hasInitialized.current = true;
-    }
   }, [refresh]);
 
   const login = async (email, password, twoFactorCode) => {
