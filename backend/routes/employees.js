@@ -15,16 +15,16 @@ const { z } = require('zod');
 // Employee creation validation schema
 const createEmployeeSchema = z.object({
   full_name: z.string().min(1, 'Full name is required').max(255),
-  personal_email: schemas.email.optional().nullable(),
-  work_email: schemas.email.optional().nullable(),
-  phone: z.string().regex(/^[6-9]\d{9}$/, 'Invalid Indian phone number').optional().nullable(),
+  personal_email: schemas.email,
+  work_email: schemas.email,
+  phone: schemas.phone,
   gender: z.enum(['male', 'female', 'other', 'prefer_not_to_say']).optional().nullable(),
   date_of_birth: schemas.isoDate.optional().nullable(),
-  address_line: z.string().max(500).optional().nullable(),
-  city: z.string().max(100).optional().nullable(),
-  state: z.string().max(100).optional().nullable(),
-  pincode: z.string().regex(/^\d{6}$/, 'Invalid pincode').optional().nullable(),
-  pan_number: schemas.pan.optional().nullable(),
+  address_line: schemas.nullableString(500),
+  city: schemas.nullableString(100),
+  state: schemas.nullableString(100),
+  pincode: z.union([z.string().regex(/^\d{6}$/, 'Invalid pincode'), z.literal(''), z.null()]).transform((val) => (val === '' ? null : val)).optional().nullable(),
+  pan_number: schemas.pan,
   department_id: schemas.uuid.optional().nullable(),
   team_id: schemas.uuid.optional().nullable(),
   designation_id: schemas.uuid.optional().nullable(),
@@ -39,8 +39,8 @@ const createEmployeeSchema = z.object({
   da_monthly: schemas.money.optional().default(0),
   tax_regime: z.enum(['old', 'new']).optional().default('new'),
   pf_applicable: schemas.boolean.optional().default(true),
-  bank_account_number: z.string().max(50).optional().nullable(),
-  bank_ifsc: schemas.ifsc.optional().nullable(),
+  bank_account_number: schemas.nullableString(50),
+  bank_ifsc: schemas.ifsc,
 });
 
 // Employee update validation schema (all fields optional)
@@ -52,6 +52,7 @@ const updateEmployeeSchema = createEmployeeSchema.partial().extend({
     hra_exemption_annual: schemas.money.optional(),
   }).optional(),
   notes: z.string().max(2000).optional().nullable(),
+  esic_applicable: schemas.boolean.optional(),
 }).strict();
 
 router.use(authenticate);
@@ -229,7 +230,7 @@ router.get('/', async (req, res) => {
        LEFT JOIN designations des ON des.id = e.designation_id
        LEFT JOIN teams t ON t.id = e.team_id
        ${where}
-       ORDER BY e.created_at DESC`,
+       ORDER BY CAST(SUBSTRING(e.employee_code FROM '\d+$') AS INTEGER) DESC`,
       params
     );
     res.json({ employees: rows });
@@ -333,7 +334,7 @@ router.put('/:id', requireRole('hr'), validateBody(updateEmployeeSchema), async 
       'address_line', 'city', 'state', 'pincode', 'pan_number',
       'department_id', 'team_id', 'designation_id', 'manager_id', 'employment_type', 'status',
       'ctc_annual', 'basic_monthly', 'hra_monthly', 'other_allowances_monthly', 'employer_pf_monthly',
-      'da_monthly', 'tax_regime', 'pf_applicable', 'esic_applicable', 'declared_deductions',
+      'da_monthly', 'tax_regime', 'pf_applicable', 'declared_deductions',
       'bank_account_number', 'bank_ifsc', 'notes',
     ];
     // 'exited' must go through POST /:id/exit — that's what captures exit_date/

@@ -24,16 +24,30 @@ import {
   useMobile,
 } from '../components/MobileResponsive';
 
-const ROLE_LABELS = { owner: 'Founder (MD)', admin: 'CEO' };
-const roleLabel = (role) => ROLE_LABELS[role] || (role?.charAt(0).toUpperCase() + role?.slice(1));
+// Default tier labels (will be overridden by API data)
+const DEFAULT_TIERS = [
+  { name: 'Managing Director / Executive Director', display_order: 0, color: '#7c3aed' },
+  { name: 'Director(s)', display_order: 10, color: '#6d28d9' },
+  { name: 'CEO', display_order: 20, color: '#5b21b6' },
+  { name: 'Department Head (HOD)', display_order: 30, color: '#3730a3' },
+  { name: 'Senior Management', display_order: 40, color: '#1e40af' },
+  { name: 'Management', display_order: 50, color: '#0f766e' },
+  { name: 'Employee', display_order: 60, color: '#166534' },
+];
 
-function TierRow({ title, people, color = 'primary.main', isMobile }) {
-  if (!people.length) return null;
+function TierRow({ title, people, color = 'primary.main', isMobile, canEdit, onEdit }) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: isMobile ? 2 : 3 }}>
-      <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 1 }}>
-        {title}
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', justifyContent: 'space-between', mb: 1 }}>
+        <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          {title}
+        </Typography>
+        {canEdit && onEdit && (
+          <IconButton size="small" onClick={onEdit}>
+            <EditIcon fontSize="small" />
+          </IconButton>
+        )}
+      </Box>
       <MobileStack gap={isMobile ? 1 : 1.5}>
         {people.map((p) => (
           <MobilePaper key={p.id} sx={{ px: isMobile ? 1.5 : 2, py: isMobile ? 1 : 1, borderLeft: '3px solid', borderColor: color, minWidth: isMobile ? 'auto' : 160, width: isMobile ? '100%' : 'auto' }}>
@@ -41,6 +55,11 @@ function TierRow({ title, people, color = 'primary.main', isMobile }) {
             <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: 'text.secondary' }}>{p.email}</Typography>
           </MobilePaper>
         ))}
+        {!people.length && (
+          <MobilePaper sx={{ px: isMobile ? 1.5 : 2, py: isMobile ? 1 : 1, borderLeft: '3px solid', borderColor: color, minWidth: isMobile ? 'auto' : 160, width: isMobile ? '100%' : 'auto', opacity: 0.5 }}>
+            <Typography sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem', fontStyle: 'italic' }}>No one assigned</Typography>
+          </MobilePaper>
+        )}
       </MobileStack>
     </Box>
   );
@@ -192,10 +211,12 @@ export default function OrgStructure() {
   const { staff: me } = useAuth();
   const canEdit = ['owner', 'admin'].includes(me?.role);
 
-  const [staffByRole, setStaffByRole] = useState({ owner: [], admin: [], hr: [] });
+  const [tiers, setTiers] = useState(DEFAULT_TIERS);
+  const [staffByTier, setStaffByTier] = useState({});
   const [departments, setDepartments] = useState([]);
   const [teams, setTeams] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [designations, setDesignations] = useState([]);
   const [message, setMessage] = useState(null);
 
   const [deptDialogOpen, setDeptDialogOpen] = useState(false);
@@ -211,20 +232,74 @@ export default function OrgStructure() {
   const [teamSaving, setTeamSaving] = useState(false);
   const [teamError, setTeamError] = useState('');
 
+  const [tierDialogOpen, setTierDialogOpen] = useState(false);
+  const [editingTier, setEditingTier] = useState(null);
+  const [tierForm, setTierForm] = useState({ name: '', display_order: 0, description: '', color: '#6366f1', icon: '' });
+  const [tierSaving, setTierSaving] = useState(false);
+  const [tierError, setTierError] = useState('');
+
   const load = () => {
-    client.get('/staff-accounts').then(({ data }) => {
-      const byRole = { owner: [], admin: [], hr: [] };
-      for (const s of data.staff) {
-        if (byRole[s.role]) byRole[s.role].push(s);
-      }
-      setStaffByRole(byRole);
+    client.get('/org-hierarchy-tiers').then(({ data }) => {
+      const sortedTiers = data.tiers.sort((a, b) => a.display_order - b.display_order);
+      setTiers(sortedTiers);
+      const byTier = {};
+      sortedTiers.forEach(t => byTier[t.id] = []);
+      setStaffByTier(byTier);
     }).catch(() => {});
+
+    client.get('/staff-accounts').then(({ data }) => {
+      // Will populate staffByTier after designations loaded
+    }).catch(() => {});
+
     client.get('/departments').then(({ data }) => setDepartments(data.departments)).catch(() => {});
     client.get('/teams').then(({ data }) => setTeams(data.teams)).catch(() => {});
     client.get('/employees').then(({ data }) => setEmployees(data.employees)).catch(() => {});
+    client.get('/designations').then(({ data }) => setDesignations(data.designations)).catch(() => {});
   };
 
   useEffect(() => { load(); }, []);
+
+  // Populate staffByTier when staff and designations are loaded
+  useEffect(() => {
+    if (!tiers.length) return;
+    client.get('/staff-accounts').then(({ data }) => {
+      const byTier = {};
+      tiers.forEach(t => byTier[t.id] = []);
+      
+      for (const s of data.staff) {
+        if (!s.employee_id) continue;
+        const emp = employees.find(e => e.id === s.employee_id);
+        if (!emp) continue;
+        
+        let tierId = null;
+        if (emp.designation_id) {
+          const des = designations.find(d => d.id === emp.designation_id);
+          if (des?.tier_id) tierId = des.tier_id;
+        }
+        
+        // Fallback: map by role
+        if (!tierId) {
+          if (s.role === 'owner') {
+            tierId = tiers.find(t => t.name.includes('Managing Director'))?.id;
+          } else if (s.role === 'admin') {
+            tierId = tiers.find(t => t.name === 'CEO')?.id;
+          } else if (s.role === 'hr') {
+            tierId = tiers.find(t => t.name === 'Department Head (HOD)')?.id;
+          }
+        }
+        
+        // Default to Employee tier
+        if (!tierId) {
+          tierId = tiers.find(t => t.name === 'Employee')?.id;
+        }
+        
+        if (tierId && byTier[tierId]) {
+          byTier[tierId].push({ ...s, employee_name: emp.full_name });
+        }
+      }
+      setStaffByTier(byTier);
+    }).catch(() => {});
+  }, [tiers, employees, designations]);
 
   const teamsForDept = (deptId) => teams.filter((t) => t.department_id === deptId);
 
@@ -332,6 +407,42 @@ export default function OrgStructure() {
     }
   };
 
+  const openTierDialog = (tier) => {
+    if (tier) {
+      setEditingTier(tier);
+      setTierForm({
+        name: tier.name,
+        display_order: tier.display_order,
+        description: tier.description || '',
+        color: tier.color || '#6366f1',
+        icon: tier.icon || '',
+      });
+    } else {
+      setEditingTier(null);
+      setTierForm({ name: '', display_order: 0, description: '', color: '#6366f1', icon: '' });
+    }
+    setTierError('');
+    setTierDialogOpen(true);
+  };
+
+  const saveTier = async () => {
+    setTierSaving(true);
+    setTierError('');
+    try {
+      if (editingTier) {
+        await client.put(`/org-hierarchy-tiers/${editingTier.id}`, tierForm);
+      } else {
+        await client.post('/org-hierarchy-tiers', tierForm);
+      }
+      setTierDialogOpen(false);
+      load();
+    } catch (err) {
+      setTierError(err.response?.data?.error || 'Failed to save tier');
+    } finally {
+      setTierSaving(false);
+    }
+  };
+
   const teamHeadCandidates = teamForm.department_id
     ? employees.filter((e) => e.department_id === teamForm.department_id)
     : employees;
@@ -345,15 +456,32 @@ export default function OrgStructure() {
 
       {message && <Alert severity={message.severity} sx={{ mb: 3 }}>{message.text}</Alert>}
 
-      {/* Founder → CEO → HR — the top of the chart, above any department */}
+      {/* Hierarchy Tiers — Editable org chart levels */}
       <MobilePaper sx={{ mb: isMobile ? 2 : 4 }}>
-        <TierRow title={roleLabel('owner')} people={staffByRole.owner} color="primary.main" isMobile={isMobile} />
-        <TierRow title={roleLabel('admin')} people={staffByRole.admin} color="secondary.main" isMobile={isMobile} />
-        <TierRow title="HR" people={staffByRole.hr} color="info.main" isMobile={isMobile} />
-
-        {(staffByRole.owner.length + staffByRole.admin.length + staffByRole.hr.length === 0) && (
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
+          <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            Organization Hierarchy
+          </Typography>
+          {canEdit && (
+            <MobileButton variant="outlined" size="small" startIcon={<AddIcon />} onClick={() => openTierDialog(null)}>
+              Add Tier
+            </MobileButton>
+          )}
+        </Box>
+        {tiers.map((tier) => (
+          <TierRow
+            key={tier.id}
+            title={tier.name}
+            people={staffByTier[tier.id] || []}
+            color={tier.color}
+            isMobile={isMobile}
+            canEdit={canEdit}
+            onEdit={() => openTierDialog(tier)}
+          />
+        ))}
+        {tiers.length === 0 && (
           <Typography sx={{ textAlign: 'center', color: 'text.secondary', fontSize: isMobile ? '0.75rem' : '0.85rem' }}>
-            No Founder/CEO/HR logins found yet.
+            No hierarchy tiers configured.
           </Typography>
         )}
       </MobilePaper>
@@ -471,6 +599,28 @@ export default function OrgStructure() {
           <MobileButton onClick={() => setTeamDialogOpen(false)}>Cancel</MobileButton>
           <MobileButton variant="contained" onClick={saveTeam} disabled={teamSaving || !teamForm.name || !teamForm.department_id}>
             {teamSaving ? 'Saving…' : 'Save'}
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
+
+      {/* ── tier dialog ────────────────────────────────────────────────────── */}
+      <MobileDialog open={tierDialogOpen} onClose={() => setTierDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>{editingTier ? 'Edit tier' : 'New tier'}</DialogTitle>
+        <DialogContent>
+          <MobileFormGrid>
+            <MobileTextField fullWidth label="Name" value={tierForm.name} onChange={(e) => setTierForm({ ...tierForm, name: e.target.value })} required />
+            <MobileTextField fullWidth type="number" label="Display order (lower = higher)" value={tierForm.display_order} onChange={(e) => setTierForm({ ...tierForm, display_order: parseInt(e.target.value) || 0 })} />
+            <MobileTextField fullWidth label="Description" multiline rows={2} value={tierForm.description} onChange={(e) => setTierForm({ ...tierForm, description: e.target.value })} />
+            <MobileTextField fullWidth label="Color (hex)" value={tierForm.color} onChange={(e) => setTierForm({ ...tierForm, color: e.target.value })} helperText="e.g. #7c3aed" />
+            <MobileTextField fullWidth label="Icon (optional)" value={tierForm.icon} onChange={(e) => setTierForm({ ...tierForm, icon: e.target.value })} helperText="Material icon name, e.g. 'account_circle'" />
+          </MobileFormGrid>
+          {tierError && <Alert severity="error" sx={{ mt: 1 }}>{tierError}</Alert>}
+          {editingTier?.is_system && <Alert severity="info" sx={{ mt: 1 }}>System tier — name cannot be changed via API.</Alert>}
+        </DialogContent>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setTierDialogOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={saveTier} disabled={tierSaving || !tierForm.name}>
+            {tierSaving ? 'Saving…' : 'Save'}
           </MobileButton>
         </MobileActionButtons>
       </MobileDialog>

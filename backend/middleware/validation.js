@@ -9,8 +9,8 @@ const { z } = require('zod');
 
 // Common reusable schemas
 const schemas = {
-  // UUID validation
-  uuid: z.string().uuid({ message: 'Invalid UUID format' }),
+  // UUID validation (accepts empty string -> null)
+  uuid: z.union([z.string().uuid({ message: 'Invalid UUID format' }), z.literal(''), z.null()]).transform((val) => (val === '' ? null : val)),
   
   // Pagination
   pagination: z.object({
@@ -30,26 +30,27 @@ const schemas = {
   // Non-negative amount
   nonNegativeAmount: z.number().min(0).multipleOf(0.01),
   
-  // Email
-  email: z.string().email({ message: 'Invalid email format' }).toLowerCase(),
+  // Email (accepts empty string -> null)
+  email: z.union([z.string().email({ message: 'Invalid email format' }).toLowerCase(), z.literal(''), z.null()]).transform((val) => (val === '' ? null : val)),
   
-  // Phone (Indian format)
-  phone: z.string().regex(/^[6-9]\d{9}$/, 'Invalid Indian phone number'),
+  // Phone (Indian format, accepts empty string -> null)
+  phone: z.union([z.string().regex(/^[6-9]\d{9}$/, 'Invalid Indian phone number'), z.literal(''), z.null()]).transform((val) => (val === '' ? null : val)),
   
-  // PAN (Indian)
-  pan: z.string().regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/i, 'Invalid PAN format').toUpperCase(),
+  // PAN (Indian, accepts empty string -> null)
+  pan: z.union([z.string().regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/i, 'Invalid PAN format').toUpperCase(), z.literal(''), z.null()]).transform((val) => (val === '' ? null : val)),
   
-  // GSTIN (Indian)
-  gstin: z.string().regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/i, 'Invalid GSTIN format').toUpperCase(),
+  // GSTIN (Indian, accepts empty string -> null)
+  gstin: z.union([z.string().regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/i, 'Invalid GSTIN format').toUpperCase(), z.literal(''), z.null()]).transform((val) => (val === '' ? null : val)),
   
-  // IFSC (Indian)
-  ifsc: z.string().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/i, 'Invalid IFSC format').toUpperCase(),
+  // IFSC (Indian, accepts empty string -> null)
+  ifsc: z.union([z.string().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/i, 'Invalid IFSC format').toUpperCase(), z.literal(''), z.null()]).transform((val) => (val === '' ? null : val)),
   
-  // Money (numeric string or number, 2 decimal places)
-  money: z.union([z.number(), z.string()]).transform((val) => {
+  // Money (numeric string or number, 2 decimal places, accepts empty string -> null)
+  money: z.union([z.number(), z.string(), z.literal(''), z.null()]).transform((val) => {
+    if (val === '' || val === null) return null;
     const num = typeof val === 'string' ? parseFloat(val) : val;
     return Math.round(num * 100) / 100;
-  }).refine((val) => val >= 0 && val === Math.round(val * 100) / 100, {
+  }).refine((val) => val === null || (val >= 0 && val === Math.round(val * 100) / 100), {
     message: 'Amount must be non-negative with max 2 decimal places',
   }),
   
@@ -76,6 +77,9 @@ const schemas = {
   
   // Search query
   searchQuery: z.string().max(200).optional(),
+  
+  // Nullable string that accepts empty string -> null
+  nullableString: (maxLength) => z.union([z.string().max(maxLength), z.literal(''), z.null()]).transform((val) => (val === '' ? null : val)).optional().nullable(),
   
   // File upload (base64)
   base64File: z.object({
