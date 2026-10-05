@@ -19,9 +19,6 @@ import DownloadIcon from '@mui/icons-material/Download';
 import PrintIcon from '@mui/icons-material/Print';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 
-const CARD_WIDTH = 540;
-const CARD_HEIGHT = 340;
-
 function generateQRCode(data) {
   return `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(data)}`;
 }
@@ -84,73 +81,13 @@ export default function IDCards() {
     return null;
   };
 
-  const downloadCard = async (emp) => {
-    const cardHtml = generateCardHTML(emp);
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>ID Card - ${emp.full_name}</title>
-        <style>
-          @media print {
-            @page { margin: 0; size: 3.375in 2.125in; }
-            body { margin: 0; padding: 0; }
-          }
-          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f0f0f0; }
-          .card { width: 3.375in; height: 2.125in; border: 2px solid #1e3a8a; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: white; }
-        </style>
-      </head>
-      <body>${cardHtml}</body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.onload = () => { printWindow.print(); setTimeout(() => printWindow.close(), 1000); };
-  };
-
-  const downloadCardImage = async (emp) => {
-    const cardHtml = generateCardHTML(emp);
-    const printWindow = window.open('', '_blank');
-    const fileName = `ID_Card_${emp.employee_code}.png`;
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>ID Card - ${emp.full_name}</title>
-        <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
-        <style>
-          body { margin: 0; padding: 20px; background: #f0f0f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-          .card { width: 3.375in; height: 2.125in; border: 2px solid #1e3a8a; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: white; }
-        </style>
-      </head>
-      <body>
-        <div id="card">${cardHtml}</div>
-        <button onclick="downloadImage()" style="position:fixed;top:20px;right:20px;z-index:999;padding:10px 20px;background:#1e3a8a;color:white;border:none;border-radius:4px;cursor:pointer;">Download as PNG</button>
-        <script>
-          async function downloadImage() {
-            const canvas = await html2canvas(document.getElementById('card'), { scale: 4, useCORS: true });
-            const link = document.createElement('a');
-            link.download = '${fileName}';
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-          }
-        </script>
-      </body>
-      </html>
-    `);
-    printWindow.document.close();
-  };
-
   const generateCardHTML = (emp) => {
-    // Use EtherTrack brand colors: Green #22C55E, Dark #050807, Card background white
     const primaryGreen = '#22C55E';
     const primaryDark = '#050807';
     const tierColor = primaryGreen;
     const photoUrl = getEmployeePhoto(emp);
     const qrData = `ETPL:${emp.employee_code}|${emp.full_name}|${emp.designation || ''}|${emp.department || ''}`;
     const barcodeData = emp.employee_code;
-    const qrUrl = generateQRCode(qrData);
-    const barcodeUrl = generateBarcode(barcodeData);
     const validityDate = emp.date_of_joining ? new Date(new Date(emp.date_of_joining).getFullYear() + 5, 11, 31).toLocaleDateString('en-IN') : '—';
     const bloodGroup = emp.blood_group || '—';
     const emergencyContact = emp.emergency_contact || emp.emergency_phone || '—';
@@ -167,11 +104,8 @@ export default function IDCards() {
         background: white;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       ">
-        <!-- Top green strip -->
         <div style="height: 4px; background: ${primaryGreen};"></div>
-        
-        <!-- Header -->
-        <div style="background: ${primaryDark}; color: white; padding: 14px 16px; display: flex; align-items: center; gap: 14px; position: relative;">
+        <div style="background: ${primaryDark}; color: white; padding: 14px 16px; display: flex; align-items: center; gap: 14px;">
           <div style="width: 54px; height: 54px; border-radius: 50%; background: rgba(255,255,255,0.1); padding: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.2); backdrop-filter: blur(4px);">
             <img src="${logo}" alt="EtherTrack Logo" style="width: 100%; height: 100%; object-fit: contain;" />
           </div>
@@ -184,10 +118,7 @@ export default function IDCards() {
             <img src="${generateQRCode(qrData)}" alt="QR Code" style="width: 100%; height: 100%;" />
           </div>
         </div>
-
-        <!-- Body -->
         <div style="padding: 14px 16px; display: flex; gap: 14px; height: calc(2.125in - 104px);">
-          <!-- Photo Section -->
           <div style="width: 85px; flex-shrink: 0;">
             <div style="width: 85px; height: 108px; border-radius: 6px; overflow: hidden; border: 2px solid #e5e7eb; background: #f9fafb; position: relative; box-shadow: 0 1px 4px rgba(0,0,0,0.05);">
               ${photoUrl ? `
@@ -200,18 +131,14 @@ export default function IDCards() {
               `}
             </div>
           </div>
-
-          <!-- Details Section -->
           <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between;">
             <div>
               <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;">
                 <div style="font-size: 15px; font-weight: 800; color: #111827; letter-spacing: -0.01em;">${emp.full_name}</div>
                 <span style="background: ${tierColor}; color: white; padding: 2px 8px; border-radius: 10px; font-size: 7px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">${emp.designation || 'Employee'}</span>
               </div>
-              
               <div style="font-size: 9px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Employee Code</div>
               <div style="font-size: 14px; font-weight: 700; color: #111827; font-family: 'SF Mono', Monaco, monospace; letter-spacing: 0.5px; margin-bottom: 8px;">${emp.employee_code}</div>
-
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <div>
                   <div style="font-size: 8px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Designation</div>
@@ -222,7 +149,6 @@ export default function IDCards() {
                   <div style="font-size: 11px; font-weight: 600; color: #111827;">${emp.department || '—'}</div>
                 </div>
               </div>
-
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
                 <div>
                   <div style="font-size: 8px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Date of Joining</div>
@@ -233,7 +159,6 @@ export default function IDCards() {
                   <div style="font-size: 11px; font-weight: 600; color: #111827;">${validityDate}</div>
                 </div>
               </div>
-
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
                 <div>
                   <div style="font-size: 8px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Blood Group</div>
@@ -245,20 +170,14 @@ export default function IDCards() {
                 </div>
               </div>
             </div>
-
-            <!-- Barcode at bottom of details -->
             <div style="text-align: center; padding-top: 8px; border-top: 1px solid #e5e7eb;">
               <img src="${generateBarcode(barcodeData)}" alt="Barcode: ${barcodeData}" style="height: 28px; max-width: 100%;" />
               <div style="font-family: 'Courier New', monospace; font-size: 9px; font-weight: 600; color: #374151; margin-top: 4px; letter-spacing: 2px;">${barcodeData}</div>
             </div>
           </div>
         </div>
-
-        <!-- Footer -->
         <div style="background: #f8fafc; padding: 8px 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; font-size: 8px; color: #64748b;">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span style="font-weight: 600;">Authorized Signature</span>
-          </div>
+          <div style="display: flex; align-items: center; gap: 6px;"><span style="font-weight: 600;">Authorized Signature</span></div>
           <div style="display: flex; align-items: center; gap: 12px;">
             <span>Valid while employed</span>
             <span style="font-family: 'Courier New', monospace; font-size: 9px; font-weight: 600; color: #374151;">${barcodeData}</span>
@@ -266,6 +185,67 @@ export default function IDCards() {
         </div>
       </div>
     `;
+  };
+
+  const downloadCard = () => {
+    const emp = myEmployee;
+    const cardHtml = generateCardHTML(emp);
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>ID Card - ${emp.full_name}</title>
+        <style>
+          @media print {
+            @page { margin: 0; size: 3.375in 2.125in; }
+            body { margin: 0; padding: 0; }
+          }
+          body { margin: 0; padding: 0; background: transparent; }
+          .card { width: 3.375in; height: 2.125in; }
+        </style>
+      </head>
+      <body>${cardHtml}</body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.onload = () => { printWindow.print(); setTimeout(() => printWindow.close(), 1000); };
+  };
+
+  const downloadCardImage = () => {
+    const emp = myEmployee;
+    const cardHtml = generateCardHTML(emp);
+    const printWindow = window.open('', '_blank');
+    const fileName = `ID_Card_${emp.employee_code}.png`;
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>ID Card - ${emp.full_name}</title>
+        <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+        <style>
+          body { margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+          #card { width: 3.375in; height: 2.125in; }
+        </style>
+      </head>
+      <body>
+        <div id="card">${cardHtml}</div>
+        <script>
+          (async function() {
+            await new Promise(r => setTimeout(r, 100));
+            const card = document.getElementById('card');
+            const canvas = await html2canvas(card, { scale: 4, useCORS: true, backgroundColor: null, logging: false });
+            const link = document.createElement('a');
+            link.download = '${fileName}';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            window.close();
+          })();
+        </script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   const openPhotoDialog = () => {
@@ -290,10 +270,10 @@ export default function IDCards() {
           <MobileButton variant="outlined" startIcon={<PhotoCameraIcon />} onClick={openPhotoDialog}>
             Upload Photo
           </MobileButton>
-          <MobileButton variant="contained" startIcon={<DownloadIcon />} onClick={() => downloadCardImage(myEmployee)}>
+          <MobileButton variant="contained" startIcon={<DownloadIcon />} onClick={downloadCardImage}>
             Download PNG
           </MobileButton>
-          <MobileButton variant="contained" startIcon={<PrintIcon />} onClick={() => downloadCard(myEmployee)}>
+          <MobileButton variant="contained" startIcon={<PrintIcon />} onClick={downloadCard}>
             Print Card
           </MobileButton>
         </MobileStack>
@@ -310,12 +290,12 @@ export default function IDCards() {
             </IconButton>
           </Tooltip>
           <Tooltip title="Download as PNG">
-            <IconButton onClick={() => downloadCardImage(myEmployee)} size="small">
+            <IconButton onClick={downloadCardImage} size="small">
               <DownloadIcon />
             </IconButton>
           </Tooltip>
           <Tooltip title="Print Card">
-            <IconButton onClick={() => downloadCard(myEmployee)} size="small">
+            <IconButton onClick={downloadCard} size="small">
               <PrintIcon />
             </IconButton>
           </Tooltip>
@@ -327,7 +307,6 @@ export default function IDCards() {
         </div>
       </MobilePaper>
 
-      {/* Photo Upload Dialog */}
       <MobileDialog open={photoDialogOpen} onClose={() => setPhotoDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Upload ID Photo</DialogTitle>
         <DialogContent>
