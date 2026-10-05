@@ -21,6 +21,7 @@ import logo from '../assets/ethertrack-logo.png';
 import DownloadIcon from '@mui/icons-material/Download';
 import PrintIcon from '@mui/icons-material/Print';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import QrCodeIcon from '@mui/icons-material/QrCode';
 
 function generateQRCode(data) {
   return `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(data)}`;
