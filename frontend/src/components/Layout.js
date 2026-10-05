@@ -82,6 +82,7 @@ export const NAV_GROUPS = [
       // their own payslips/leave/assets without disturbing '/' staying on
       // Dashboard as the shared home screen for this whole role set.
       { to: '/my-profile', label: 'My Profile', icon: PersonOutlinedIcon },
+      { to: '/id-cards', label: 'My ID Card', icon: BadgeOutlinedIcon },
       { to: '/my-activity', label: 'My Activity', icon: TimelineOutlinedIcon },
     ],
   },
@@ -92,7 +93,6 @@ export const NAV_GROUPS = [
       { to: '/attendance', label: 'Attendance', icon: AccessTimeOutlinedIcon },
       { to: '/monitoring', label: 'Monitoring', icon: MonitorHeartOutlinedIcon },
       { to: '/org-structure', label: 'Org Structure', icon: AccountTreeOutlinedIcon },
-      { to: '/id-cards', label: 'ID Cards', icon: BadgeOutlinedIcon },
       { to: '/team', label: 'Team logins', icon: GroupOutlinedIcon },
       { to: '/recruitment', label: 'Recruitment', icon: PersonSearchOutlinedIcon },
       { to: '/performance', label: 'Performance', icon: AssessmentOutlinedIcon },

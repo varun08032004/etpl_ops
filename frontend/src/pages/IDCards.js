@@ -33,6 +33,7 @@ function generateBarcode(data) {
 export default function IDCards() {
   const isMobile = useMobile();
   const { staff: me } = useAuth();
+  const isSelfService = !['owner', 'admin', 'hr'].includes(me?.role);
   const canManage = ['owner', 'admin', 'hr'].includes(me?.role);
 
   const [employees, setEmployees] = useState([]);
@@ -57,10 +58,22 @@ export default function IDCards() {
   });
 
   useEffect(() => {
-    client.get('/employees').then(({ data }) => setEmployees(data.employees)).catch(() => {});
+    // For self-service users, only fetch their own employee record
+    if (isSelfService && me?.employee_id) {
+      client.get(`/employees/${me.employee_id}`).then(({ data }) => setEmployees([data.employee])).catch(() => {});
+    } else {
+      client.get('/employees').then(({ data }) => setEmployees(data.employees)).catch(() => {});
+    }
     client.get('/departments').then(({ data }) => setDepartments(data.departments)).catch(() => {});
     client.get('/org-hierarchy-tiers').then(({ data }) => setTiers(data.tiers)).catch(() => {});
-  }, []);
+  }, [me?.employee_id, isSelfService]);
+
+  // Auto-select own employee record for self-service users
+  useEffect(() => {
+    if (isSelfService && employees.length === 1 && !selectedEmployee) {
+      setSelectedEmployee(employees[0]);
+    }
+  }, [isSelfService, employees, selectedEmployee]);
 
   const handlePhotoUpload = async () => {
     if (!photoFile || !selectedEmployee) return;
@@ -369,17 +382,17 @@ export default function IDCards() {
       <MobilePageHeader>
         <Typography variant={isMobile ? 'h6' : 'h5'}>Employee ID Cards</Typography>
         <MobileStack gap={1} direction="row" sx={{ flexWrap: 'wrap' }}>
-          {canManage && (
-            <>
-              <MobileButton variant="outlined" startIcon={<PhotoCameraIcon />} onClick={() => openPhotoDialog(selectedEmployee)} disabled={!selectedEmployee}>
-                Upload Photo
-              </MobileButton>
-              <MobileButton variant="outlined" startIcon={<QrCodeIcon />} onClick={() => setBatchDialogOpen(true)}>
-                Batch Print
-              </MobileButton>
-            </>
+          {selectedEmployee && (
+            <MobileButton variant="outlined" startIcon={<PhotoCameraIcon />} onClick={() => openPhotoDialog(selectedEmployee)}>
+              Upload Photo
+            </MobileButton>
           )}
-          {selectedEmployee && canManage && (
+          {canManage && (
+            <MobileButton variant="outlined" startIcon={<QrCodeIcon />} onClick={() => setBatchDialogOpen(true)}>
+              Batch Print
+            </MobileButton>
+          )}
+          {selectedEmployee && (
             <MobileButton variant="contained" startIcon={<DownloadIcon />} onClick={() => downloadCardImage(selectedEmployee)}>
               Download PNG
             </MobileButton>
@@ -394,9 +407,10 @@ export default function IDCards() {
 
       {message && <Alert severity={message.severity} sx={{ mb: 2 }}>{message.text}</Alert>}
 
-      {/* Design Settings */}
-      <MobilePaper sx={{ mb: 2 }}>
-        <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600 }}>Card Design Settings</Typography>
+      {/* Design Settings - only for HR/Admin */}
+      {!isSelfService && (
+        <MobilePaper sx={{ mb: 2 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600 }}>Card Design Settings</Typography>
         <MobileFormGrid>
           <MobileTextField
             fullWidth
@@ -435,8 +449,10 @@ export default function IDCards() {
           </Box>
         </MobileFormGrid>
       </MobilePaper>
+      )}
 
-      <MobilePaper>
+      {!isSelfService && (
+        <MobilePaper>
         <MobileFormGrid sx={{ mb: 2 }}>
           <FormControl fullWidth size="small">
             <InputLabel id="employee-select-label">Select Employee</InputLabel>
@@ -461,6 +477,7 @@ export default function IDCards() {
           </FormControl>
         </MobileFormGrid>
       </MobilePaper>
+      )}
 
       {selectedEmployee && (
         <MobilePaper sx={{ mt: 2 }}>
