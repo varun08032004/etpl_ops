@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Box, Typography, Button, Dialog, DialogTitle,
   DialogContent, Alert, IconButton, Tooltip,
+  ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import { useAuth } from '../context/AuthContext';
 import client from '../api/client';
@@ -18,25 +19,55 @@ import logo from '../assets/ethertrack-logo.png';
 import DownloadIcon from '@mui/icons-material/Download';
 import PrintIcon from '@mui/icons-material/Print';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import FlipCameraAndroidIcon from '@mui/icons-material/FlipCameraAndroid';
+import { toPng } from 'html-to-image';
+import { jsPDF } from 'jspdf';
+import JsBarcode from 'jsbarcode';
 
-function generateQRCode(data) {
-  return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(data)}`;
+const CARD_RATIO = 53.98 / 85.6;
+const CARD_WIDTH_PX = 340;
+const CARD_HEIGHT_PX = Math.round(CARD_WIDTH_PX / CARD_RATIO);
+const CARD_MM = { width: 53.98, height: 85.6 };
+const PRIMARY_GREEN = '#22C55E';
+const PRIMARY_DARK = '#050505';
+const TEXT_DARK = '#111827';
+const TEXT_MUTED = '#6b7280';
+const TEXT_WHITE = '#ffffff';
+const BODY_BG = '#ffffff';
+const FOOTER_BG = '#f3f4f6';
+const BORDER_GREY = '#e5e7eb';
+
+function getInitials(name) {
+  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
 }
 
-function generateBarcode(data) {
-  return `https://barcode.tec-it.com/barcode.ashx?data=${encodeURIComponent(data)}&code=Code128&dpi=300&dataseparator=`;
+function formatDate(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-const CARD_DIMENSIONS = {
-  inches: { width: 2.125, height: 3.375 },
-  mm: { width: 54, height: 86 },
-  screen: { width: 204, height: 460 },
-  print: { width: 638, height: 1438 },
-};
+function getEmployeePhoto(emp) {
+  if (emp.id_photo_url) return emp.id_photo_url;
+  if (emp.documents) {
+    const photoDoc = emp.documents.find(d => d.doc_type === 'photo' || d.doc_type === 'id_photo' || d.doc_type === 'id_proof');
+    if (photoDoc) return photoDoc.file_url;
+  }
+  return null;
+}
+
+function generateVerificationUrl(emp) {
+  return `${window.location.origin}/verify/${emp.employee_code}`;
+}
 
 export default function IDCards() {
   const isMobile = useMobile();
   const { staff: me } = useAuth();
+  const cardRef = useRef(null);
+  const barcodeRef = useRef(null);
+  const qrRef = useRef(null);
 
   const [myEmployee, setMyEmployee] = useState(null);
   const [photoDialogOpen, setPhotoDialogOpen] = useState(false);
@@ -44,6 +75,8 @@ export default function IDCards() {
   const [photoPreview, setPhotoPreview] = useState(null);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [message, setMessage] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [showBack, setShowBack] = useState(false);
 
   useEffect(() => {
     if (me?.employee_id) {
@@ -52,6 +85,34 @@ export default function IDCards() {
       }).catch(() => {});
     }
   }, [me?.employee_id]);
+
+  useEffect(() => {
+    if (barcodeRef.current && myEmployee?.employee_code) {
+      JsBarcode(barcodeRef.current, myEmployee.employee_code, {
+        format: 'CODE128',
+        width: 2,
+        height: 50,
+        displayValue: false,
+        margin: 0,
+        background: '#ffffff',
+        color: '#000000',
+      });
+    }
+  }, [myEmployee?.employee_code]);
+
+  useEffect(() => {
+    if (qrRef.current && myEmployee?.employee_code) {
+      const url = generateVerificationUrl(myEmployee);
+      new QRCode(qrRef.current, {
+        text: url,
+        width: 100,
+        height: 100,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M,
+      });
+    }
+  }, [myEmployee?.employee_code]);
 
   const handlePhotoUpload = async () => {
     if (!photoFile || !myEmployee) return;
@@ -65,7 +126,6 @@ export default function IDCards() {
       fd.append('entity_id', myEmployee.id);
       fd.append('allow_duplicate', 'true');
       const response = await client.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      console.log('Photo upload response:', response.data);
       
       let docId = response.data.document?.id;
       if (response.data.duplicate && response.data.existing?.id) {
@@ -73,8 +133,7 @@ export default function IDCards() {
       }
       
       if (docId) {
-        const photoUrl = `/api/documents/${docId}/download`;
-        console.log('Updating employee with photo URL:', photoUrl);
+        const photoUrl = `/api/documents/${docId}/file`;
         await client.put(`/employees/${myEmployee.id}`, { id_photo_url: photoUrl });
       }
       
@@ -86,208 +145,91 @@ export default function IDCards() {
       setMessage({ severity: 'success', text: 'Photo uploaded successfully' });
     } catch (err) {
       console.error('Photo upload error:', err.response?.data || err.message);
-      console.error('Full error:', err.response);
-      setMessage({ severity: 'error', text: err.response?.data?.error || err.message || 'Failed to upload photo' });
+      setMessage({ severity: 'error', text: err.response?.data?.error || 'Failed to upload photo' });
     } finally {
       setPhotoUploading(false);
     }
   };
 
-  const getEmployeePhoto = (emp) => {
-    if (emp.id_photo_url) return emp.id_photo_url;
-    if (emp.documents) {
-      const photoDoc = emp.documents.find(d => d.doc_type === 'photo' || d.doc_type === 'id_photo' || d.doc_type === 'id_proof');
-      if (photoDoc) return photoDoc.file_url;
+  const waitForImages = (container) => {
+    const images = container.querySelectorAll('img');
+    return Promise.all(Array.from(images).map(img => {
+      if (img.complete) return Promise.resolve();
+      return new Promise(resolve => {
+        img.onload = resolve;
+        img.onerror = resolve;
+        img.crossOrigin = 'anonymous';
+      });
+    }));
+  };
+
+  const waitForFonts = () => document.fonts?.ready || Promise.resolve();
+
+  const exportCard = async (format) => {
+    if (!cardRef.current || !myEmployee) return;
+    setExporting(true);
+    try {
+      await waitForFonts();
+      await waitForImages(cardRef.current);
+      await new Promise(r => setTimeout(r, 100));
+
+      if (format === 'png') {
+        const dataUrl = await toPng(cardRef.current, {
+          pixelRatio: 3,
+          backgroundColor: BODY_BG,
+          skipFonts: false,
+        });
+        const link = document.createElement('a');
+        link.download = `${myEmployee.employee_code}-id-card.png`;
+        link.href = dataUrl;
+        link.click();
+        setMessage({ severity: 'success', text: 'PNG downloaded successfully' });
+      } else if (format === 'pdf') {
+        const dataUrl = await toPng(cardRef.current, {
+          pixelRatio: 3,
+          backgroundColor: BODY_BG,
+          skipFonts: false,
+        });
+        const pdf = new jsPDF({
+          orientation: 'portrait',
+          unit: 'mm',
+          format: [CARD_MM.width, CARD_MM.height],
+        });
+        pdf.addImage(dataUrl, 'PNG', 0, 0, CARD_MM.width, CARD_MM.height);
+        pdf.save(`${myEmployee.employee_code}-id-card.pdf`);
+        setMessage({ severity: 'success', text: 'PDF downloaded successfully' });
+      }
+    } catch (err) {
+      console.error('Export error:', err);
+      setMessage({ severity: 'error', text: 'Export failed' });
+    } finally {
+      setExporting(false);
     }
-    return null;
   };
 
-  const generateCardHTML = (emp, options = {}) => {
-    const { forPrint = false } = options;
-    const primaryGreen = '#22C55E';
-    const primaryDark = '#050807';
-    const tierColor = primaryGreen;
-    const photoUrl = getEmployeePhoto(emp);
-    const qrData = `ETPL:${emp.employee_code}|${emp.full_name}|${emp.designation || ''}|${emp.department || ''}`;
-    const barcodeData = emp.employee_code;
-    const validityDate = emp.date_of_joining ? new Date(new Date(emp.date_of_joining).getFullYear() + 5, 11, 31).toLocaleDateString('en-IN') : '—';
-    const bloodGroup = emp.blood_group || '—';
-    const emergencyContact = emp.emergency_contact || emp.emergency_phone || '—';
-
-    const W = forPrint ? CARD_DIMENSIONS.print.width : CARD_DIMENSIONS.screen.width;
-    const H = forPrint ? CARD_DIMENSIONS.print.height : CARD_DIMENSIONS.screen.height;
-    const scale = forPrint ? 3.125 : 1;
-
-    const HEADER_H = Math.round(85 * scale);
-    const FOOTER_H = Math.round(45 * scale);
-    const BODY_H = H - HEADER_H - FOOTER_H;
-    const PHOTO_W = Math.round(140 * scale);
-    const PHOTO_H = Math.round(140 * scale);
-    const DETAIL_W = W - PHOTO_W - Math.round(32 * scale);
-    const PADDING = Math.round(14 * scale);
-    const GAP = Math.round(10 * scale);
-
-    const fontSize = (base) => Math.round(base * scale * 0.75);
-
-    return `
-      <div class="card" style="
-        width: ${W}px; 
-        height: ${H}px; 
-        border: ${Math.round(3 * scale)}px solid ${primaryGreen}; 
-        border-radius: ${Math.round(12 * scale)}px; 
-        overflow: hidden; 
-        position: relative; 
-        box-shadow: 0 ${Math.round(8 * scale)}px ${Math.round(24 * scale)}px rgba(0,0,0,0.15);
-        background: white;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        font-size: ${fontSize(11)}px;
-      ">
-        <div style="height: ${Math.round(5 * scale)}px; background: ${primaryGreen};"></div>
-        <div style="background: ${primaryDark}; color: white; padding: ${Math.round(10 * scale)}px ${PADDING}px; display: flex; flex-direction: column; align-items: center; gap: ${Math.round(6 * scale)}px; height: ${HEADER_H}px; box-sizing: border-box;">
-          <div style="width: ${Math.round(48 * scale)}px; height: ${Math.round(48 * scale)}px; border-radius: 50%; background: rgba(255,255,255,0.1); padding: ${Math.round(3 * scale)}px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 ${Math.round(2 * scale)}px ${Math.round(6 * scale)}px rgba(0,0,0,0.2); backdrop-filter: blur(4px);">
-            <img src="${logo}" alt="EtherTrack Logo" style="width: 100%; height: 100%; object-fit: contain;" />
-          </div>
-          <div style="text-align: center; width: 100%;">
-            <div style="font-size: ${fontSize(13)}px; font-weight: 800; letter-spacing: -0.02em; margin: 0; line-height: 1.2;">EtherTrack</div>
-            <div style="font-size: ${fontSize(8)}px; opacity: 0.9; margin-top: ${Math.round(1 * scale)}px; font-weight: 500;">EtherTrack Technologies Pvt. Ltd.</div>
-            <div style="font-size: ${fontSize(7)}px; opacity: 0.7; margin-top: ${Math.round(1 * scale)}px;">CIN: U72900MH2020PTC123456</div>
-          </div>
-          <div style="width: ${Math.round(44 * scale)}px; height: ${Math.round(44 * scale)}px; background: rgba(255,255,255,0.1); border-radius: ${Math.round(5 * scale)}px; padding: ${Math.round(3 * scale)}px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-            <img src="${generateQRCode(qrData)}" alt="QR Code" style="width: 100%; height: 100%;" />
-          </div>
-        </div>
-        <div style="padding: ${Math.round(10 * scale)}px ${PADDING}px; display: flex; flex-direction: column; gap: ${Math.round(6 * scale)}px; height: ${BODY_H}px; box-sizing: border-box;">
-          <div style="display: flex; gap: ${GAP}px; align-items: flex-start;">
-            <div style="width: ${PHOTO_W}px; flex-shrink: 0;">
-              <div style="width: ${PHOTO_W}px; height: ${PHOTO_H}px; border-radius: ${Math.round(8 * scale)}px; overflow: hidden; border: ${Math.round(2 * scale)}px solid #e5e7eb; background: #f9fafb; position: relative; box-shadow: 0 ${Math.round(2 * scale)}px ${Math.round(6 * scale)}px rgba(0,0,0,0.08);">
-                ${photoUrl ? `
-                  <img src="${photoUrl}" alt="${emp.full_name}" style="width: 100%; height: 100%; object-fit: cover;" />
-                ` : `
-                  <div style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #9ca3af; font-size: ${fontSize(8)}px; text-align: center; padding: ${Math.round(8 * scale)}px;">
-                    <svg width="${Math.round(24 * scale)}" height="${Math.round(24 * scale)}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: ${Math.round(4 * scale)}px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                    No Photo
-                  </div>
-                `}
-              </div>
-            </div>
-            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between;">
-              <div>
-                <div style="display: flex; align-items: baseline; gap: ${Math.round(6 * scale)}px; margin-bottom: ${Math.round(4 * scale)}px; flex-wrap: wrap;">
-                  <div style="font-size: ${fontSize(13)}px; font-weight: 800; color: #111827; letter-spacing: -0.01em;">${emp.full_name}</div>
-                  <span style="background: ${tierColor}; color: white; padding: ${Math.round(1 * scale)}px ${Math.round(5 * scale)}px; border-radius: ${Math.round(8 * scale)}px; font-size: ${fontSize(6)}px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">${emp.designation || 'Employee'}</span>
-                </div>
-                <div style="font-size: ${fontSize(7)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Employee Code</div>
-                <div style="font-size: ${fontSize(12)}px; font-weight: 700; color: #111827; font-family: 'SF Mono', Monaco, monospace; letter-spacing: 0.5px; margin-bottom: ${Math.round(4 * scale)}px;">${emp.employee_code}</div>
-                <div style="display: flex; flex-direction: column; gap: ${Math.round(3 * scale)}px;">
-                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: ${Math.round(6 * scale)}px;">
-                    <div>
-                      <div style="font-size: ${fontSize(6)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Designation</div>
-                      <div style="font-size: ${fontSize(9)}px; font-weight: 600; color: #111827;">${emp.designation || '—'}</div>
-                    </div>
-                    <div>
-                      <div style="font-size: ${fontSize(6)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Department</div>
-                      <div style="font-size: ${fontSize(9)}px; font-weight: 600; color: #111827;">${emp.department || '—'}</div>
-                    </div>
-                  </div>
-                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: ${Math.round(6 * scale)}px;">
-                    <div>
-                      <div style="font-size: ${fontSize(6)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Date of Joining</div>
-                      <div style="font-size: ${fontSize(9)}px; font-weight: 600; color: #111827;">${emp.date_of_joining?.slice(0,10) || '—'}</div>
-                    </div>
-                    <div>
-                      <div style="font-size: ${fontSize(6)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Valid Until</div>
-                      <div style="font-size: ${fontSize(9)}px; font-weight: 600; color: #111827;">${validityDate}</div>
-                    </div>
-                  </div>
-                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: ${Math.round(6 * scale)}px;">
-                    <div>
-                      <div style="font-size: ${fontSize(6)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Blood Group</div>
-                      <div style="font-size: ${fontSize(9)}px; font-weight: 600; color: #111827;">${bloodGroup}</div>
-                    </div>
-                    <div>
-                      <div style="font-size: ${fontSize(6)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Emergency</div>
-                      <div style="font-size: ${fontSize(8)}px; font-weight: 600; color: #111827;">${emergencyContact}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div style="text-align: center; padding-top: ${Math.round(6 * scale)}px; border-top: ${Math.round(1 * scale)}px solid #e5e7eb;">
-            <img src="${generateBarcode(barcodeData)}" alt="Barcode: ${barcodeData}" style="height: ${Math.round(22 * scale)}px; max-width: 100%;" />
-            <div style="font-family: 'Courier New', monospace; font-size: ${fontSize(7)}px; font-weight: 600; color: #374151; margin-top: ${Math.round(3 * scale)}px; letter-spacing: ${Math.round(1 * scale)}px;">${barcodeData}</div>
-          </div>
-        </div>
-        <div style="background: #f8fafc; padding: ${Math.round(7 * scale)}px ${PADDING}px; border-top: ${Math.round(1 * scale)}px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; font-size: ${fontSize(7)}px; color: #64748b;">
-          <div style="display: flex; align-items: center; gap: ${Math.round(6 * scale)}px;"><span style="font-weight: 600;">Authorized Signature</span></div>
-          <div style="display: flex; align-items: center; gap: ${Math.round(10 * scale)}px;">
-            <span>Valid while employed</span>
-            <span style="font-family: 'Courier New', monospace; font-size: ${fontSize(8)}px; font-weight: 600; color: #374151;">${barcodeData}</span>
-          </div>
-        </div>
-      </div>
-    `;
-  };
-
-  const downloadCard = () => {
-    const emp = myEmployee;
-    const cardHtml = generateCardHTML(emp, { forPrint: true });
+  const printCard = () => {
+    if (!cardRef.current) return;
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>ID Card - ${emp.full_name}</title>
+        <title>ID Card - ${myEmployee.full_name}</title>
         <style>
           @media print {
-            @page { margin: 0; size: ${CARD_DIMENSIONS.print.width}px ${CARD_DIMENSIONS.print.height}px; }
-            body { margin: 0; padding: 0; }
+            @page { size: ${CARD_MM.width}mm ${CARD_MM.height}mm; margin: 0; }
+            html, body { margin: 0; padding: 0; width: ${CARD_MM.width}mm; height: ${CARD_MM.height}mm; }
+            .card { width: ${CARD_MM.width}mm; height: ${CARD_MM.height}mm; }
+            * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }
-          body { margin: 0; padding: 0; background: transparent; }
-          .card { width: ${CARD_DIMENSIONS.print.width}px; height: ${CARD_DIMENSIONS.print.height}px; }
+          body { margin: 0; padding: 0; background: white; }
         </style>
       </head>
-      <body>${cardHtml}</body>
+      <body>${cardRef.current.outerHTML}</body>
       </html>
     `);
     printWindow.document.close();
     printWindow.onload = () => { printWindow.print(); setTimeout(() => printWindow.close(), 1000); };
-  };
-
-  const downloadCardImage = () => {
-    const emp = myEmployee;
-    const cardHtml = generateCardHTML(emp, { forPrint: true });
-    const printWindow = window.open('', '_blank');
-    const fileName = `ID_Card_${emp.employee_code}.png`;
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>ID Card - ${emp.full_name}</title>
-        <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
-        <style>
-          body { margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-          #card { width: ${CARD_DIMENSIONS.print.width}px; height: ${CARD_DIMENSIONS.print.height}px; }
-        </style>
-      </head>
-      <body>
-        <div id="card">${cardHtml}</div>
-        <script>
-          (async function() {
-            await new Promise(r => setTimeout(r, 200));
-            const card = document.getElementById('card');
-            const canvas = await html2canvas(card, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
-            const link = document.createElement('a');
-            link.download = '${fileName}';
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-            window.close();
-          })();
-        </script>
-      </body>
-      </html>
-    `);
-    printWindow.document.close();
   };
 
   const openPhotoDialog = () => {
@@ -304,6 +246,21 @@ export default function IDCards() {
     );
   }
 
+  const emp = myEmployee;
+  const photoUrl = getEmployeePhoto(emp);
+  const initials = getInitials(emp.full_name);
+  const designation = emp.designation;
+  const department = emp.department;
+  const doj = formatDate(emp.date_of_joining);
+  const validUntil = emp.date_of_joining ? formatDate(new Date(new Date(emp.date_of_joining).getFullYear() + 5, 11, 31).toISOString()) : null;
+
+  const details = [
+    { label: 'EMPLOYEE CODE', value: emp.employee_code, monospace: true },
+    { label: 'DEPARTMENT', value: department },
+    { label: 'DATE OF JOINING', value: doj },
+    { label: 'VALID UNTIL', value: validUntil },
+  ].filter(d => d.value);
+
   return (
     <Box>
       <MobilePageHeader>
@@ -312,10 +269,13 @@ export default function IDCards() {
           <MobileButton variant="outlined" startIcon={<PhotoCameraIcon />} onClick={openPhotoDialog}>
             Upload Photo
           </MobileButton>
-          <MobileButton variant="contained" startIcon={<DownloadIcon />} onClick={downloadCardImage}>
+          <MobileButton variant="contained" startIcon={<DownloadIcon />} onClick={() => exportCard('png')} disabled={exporting}>
             Download PNG
           </MobileButton>
-          <MobileButton variant="contained" startIcon={<PrintIcon />} onClick={downloadCard}>
+          <MobileButton variant="contained" startIcon={<PictureAsPdfIcon />} onClick={() => exportCard('pdf')} disabled={exporting}>
+            Download PDF
+          </MobileButton>
+          <MobileButton variant="contained" startIcon={<PrintIcon />} onClick={printCard} disabled={exporting}>
             Print Card
           </MobileButton>
         </MobileStack>
@@ -323,36 +283,203 @@ export default function IDCards() {
 
       {message && <Alert severity={message.severity} sx={{ mb: 2 }}>{message.text}</Alert>}
 
-      <MobilePaper sx={{ mt: 2, overflow: 'visible', minHeight: 520, pb: 3 }}>
+      <MobilePaper sx={{ mt: 2, overflow: 'visible', pb: 3 }}>
         <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600 }}>ID Card Preview</Typography>
-        <MobileStack gap={1} direction="row" sx={{ flexWrap: 'wrap', mb: 2 }}>
-          <Tooltip title="Upload/Change Photo">
-            <IconButton onClick={openPhotoDialog} size="small">
-              <PhotoCameraIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Download as PNG">
-            <IconButton onClick={downloadCardImage} size="small">
-              <DownloadIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Print Card">
-            <IconButton onClick={downloadCard} size="small">
-              <PrintIcon />
-            </IconButton>
-          </Tooltip>
-        </MobileStack>
-        <div style={{ display: 'flex', justifyContent: 'center', overflow: 'visible', minHeight: 520 }}>
-          <Box sx={{ overflow: 'visible', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', minHeight: '480px' }}>
-            <div 
-              dangerouslySetInnerHTML={{ __html: generateCardHTML(myEmployee) }}
-              style={{
-                transform: isMobile ? 'scale(0.5)' : 'scale(0.7)',
-                transformOrigin: 'top center',
-                width: '204px',
-              }}
-            />
-          </Box>
+        
+        <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+          <ToggleButtonGroup value={showBack ? 'back' : 'front'} exclusive onChange={(e, v) => setShowBack(v === 'back')} aria-label="Card side">
+            <ToggleButton value="front" startIcon={<FlipCameraAndroidIcon />}>Front</ToggleButton>
+            <ToggleButton value="back" startIcon={<FlipCameraAndroidIcon />}>Back</ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'flex-start',
+          minHeight: `${CARD_HEIGHT_PX + 40}px`,
+          padding: 24,
+        }}>
+          <div 
+            ref={cardRef}
+            style={{ 
+              width: `${CARD_WIDTH_PX}px`, 
+              height: `${CARD_HEIGHT_PX}px`,
+              background: BODY_BG,
+              borderRadius: '16px',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.15)',
+              overflow: 'hidden',
+              position: 'relative',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+              color: TEXT_DARK,
+            }}
+          >
+            <div style={{ height: '4px', background: PRIMARY_GREEN }} />
+            
+            {showBack ? (
+              <div style={{ 
+                height: '100%', 
+                padding: '24px', 
+                boxSizing: 'border-box',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '20px',
+                textAlign: 'center',
+              }}>
+                <div style={{ fontSize: '20px', fontWeight: 800, color: PRIMARY_DARK, letterSpacing: '-0.02em' }}>EtherTrack</div>
+                <div style={{ fontSize: '11px', color: TEXT_MUTED, fontWeight: 500 }}>EtherTrack Technologies Pvt. Ltd.</div>
+                <div style={{ fontSize: '10px', color: TEXT_MUTED }}>CIN: U72900MH2020PTC123456</div>
+                <div style={{ width: '1px', height: '24px', background: BORDER_GREY, margin: '8px 0' }} />
+                <div style={{ fontSize: '13px', color: TEXT_DARK, fontWeight: 600, marginTop: '8px' }}>If found, please return to:</div>
+                <div style={{ fontSize: '12px', color: TEXT_MUTED, lineHeight: 1.6 }}>
+                  EtherTrack Technologies Pvt. Ltd.<br />
+                  Registered Office Address<br />
+                  Mumbai, Maharashtra, India
+                </div>
+                <div style={{ width: '1px', height: '24px', background: BORDER_GREY, margin: '8px 0' }} />
+                <div style={{ fontSize: '13px', color: TEXT_DARK, fontWeight: 600 }}>Emergency Contact</div>
+                <div style={{ fontSize: '14px', color: TEXT_DARK, fontWeight: 600, fontFamily: 'monospace' }}>{emp.emergency_contact || emp.emergency_phone || '—'}</div>
+                <div ref={qrRef} style={{ marginTop: '16px' }} />
+                <div style={{ fontSize: '10px', color: TEXT_MUTED, marginTop: '8px' }}>Scan to verify employee</div>
+              </div>
+            ) : (
+              <>
+                <header style={{
+                  background: PRIMARY_DARK,
+                  color: TEXT_WHITE,
+                  padding: '16px 20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                }}>
+                  <div style={{
+                    width: '48px', height: '48px', borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.12)', padding: '4px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                  }}>
+                    <img src={logo} alt="EtherTrack Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} crossOrigin="anonymous" />
+                  </div>
+                  <div style={{ textAlign: 'left', lineHeight: 1.2 }}>
+                    <div style={{ fontSize: '20px', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>EtherTrack</div>
+                    <div style={{ fontSize: '10px', opacity: 0.75, marginTop: '2px', fontWeight: 500 }}>EtherTrack Technologies Pvt. Ltd.</div>
+                  </div>
+                </header>
+
+                <div style={{
+                  position: 'relative',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  paddingTop: '50px',
+                }}>
+                  <div style={{
+                    width: '110px', height: '110px', borderRadius: '16px',
+                    border: `3px solid ${PRIMARY_GREEN}`,
+                    overflow: 'hidden',
+                    boxShadow: '0 8px 24px rgba(34,197,94,0.2), 0 2px 8px rgba(0,0,0,0.08)',
+                    background: '#f9fafb',
+                    marginTop: '-50px',
+                    position: 'relative',
+                    zIndex: 2,
+                  }}>
+                    {photoUrl ? (
+                      <img src={photoUrl} alt={`${emp.full_name}'s photo`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} crossOrigin="anonymous" />
+                    ) : (
+                      <div style={{
+                        width: '100%', height: '100%', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center',
+                        fontSize: '32px', fontWeight: 700, color: PRIMARY_GREEN,
+                        background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)',
+                      }}>
+                        {initials}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ width: '100%', padding: '0 20px 8px', boxSizing: 'border-box', textAlign: 'center' }}>
+                    <div style={{
+                      fontSize: '22px', fontWeight: 800, color: TEXT_DARK,
+                      lineHeight: 1.2, marginBottom: '6px',
+                      wordBreak: 'break-word', overflowWrap: 'break-word',
+                    }}>
+                      {emp.full_name}
+                    </div>
+                    {designation && (
+                      <span style={{
+                        display: 'inline-block',
+                        background: PRIMARY_GREEN, color: TEXT_WHITE,
+                        padding: '3px 12px', borderRadius: '14px',
+                        fontSize: '10px', fontWeight: 700,
+                        textTransform: 'uppercase', letterSpacing: '0.5px',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {designation}
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{
+                    width: '100%', padding: '8px 20px 0', boxSizing: 'border-box',
+                    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px',
+                  }}>
+                    {details.map((d, i) => (
+                      <div key={d.label} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <div style={{
+                          fontSize: '10px', color: TEXT_MUTED,
+                          fontWeight: 600, textTransform: 'uppercase',
+                          letterSpacing: '0.5px',
+                        }}>
+                          {d.label}
+                        </div>
+                        <div style={{
+                          fontSize: '14px', color: TEXT_DARK,
+                          fontWeight: 600,
+                          fontFamily: d.monospace ? '"SF Mono", Monaco, Consolas, monospace' : 'inherit',
+                          letterSpacing: d.monospace ? '0.5px' : 'normal',
+                        }}>
+                          {d.value}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{
+                    width: '100%', padding: '16px 20px 0', boxSizing: 'border-box',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+                  }}>
+                    <svg ref={barcodeRef} style={{ width: '220px', height: '50px' }} />
+                    <div style={{
+                      fontFamily: '"SF Mono", Monaco, Consolas, monospace',
+                      fontSize: '12px', fontWeight: 600, color: TEXT_DARK,
+                      letterSpacing: '3px',
+                    }}>
+                      {emp.employee_code}
+                    </div>
+                  </div>
+                </div>
+
+                <footer style={{
+                  position: 'absolute', bottom: 0, left: 0, right: 0,
+                  background: FOOTER_BG,
+                  padding: '10px 20px',
+                  borderTop: `1px solid ${BORDER_GREY}`,
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  fontSize: '10px', color: TEXT_MUTED,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontWeight: 600 }}>Authorized Signature</span>
+                    <div style={{ width: '80px', height: '1px', background: BORDER_GREY, marginLeft: '8px' }} />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <span>Valid while employed</span>
+                  </div>
+                </footer>
+              </>
+            )}
+          </div>
         </div>
       </MobilePaper>
 
