@@ -53,7 +53,7 @@ export default function IDCards() {
       const fd = new FormData();
       fd.append('file', photoFile);
       fd.append('title', `${myEmployee.full_name} - ID Photo`);
-      fd.append('doc_type', 'photo');
+      fd.append('doc_type', 'id_proof');
       fd.append('entity_type', 'employee');
       fd.append('entity_id', myEmployee.id);
       const response = await client.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
