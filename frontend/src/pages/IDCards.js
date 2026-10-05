@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Button, Dialog, DialogTitle,
-  DialogContent, Alert, FormControl,
-  InputLabel, IconButton, Tooltip,
+  DialogContent, Alert, IconButton, Tooltip,
 } from '@mui/material';
 import { useAuth } from '../context/AuthContext';
 import client from '../api/client';
@@ -10,10 +9,8 @@ import {
   MobilePageHeader,
   MobilePaper,
   MobileButton,
-  MobileTextField,
   MobileDialog,
   MobileActionButtons,
-  MobileFormGrid,
   MobileStack,
   useMobile,
 } from '../components/MobileResponsive';
@@ -21,7 +18,9 @@ import logo from '../assets/ethertrack-logo.png';
 import DownloadIcon from '@mui/icons-material/Download';
 import PrintIcon from '@mui/icons-material/Print';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
-import QrCodeIcon from '@mui/icons-material/QrCode';
+
+const CARD_WIDTH = 540;
+const CARD_HEIGHT = 340;
 
 function generateQRCode(data) {
   return `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(data)}`;
@@ -65,7 +64,6 @@ export default function IDCards() {
       setPhotoDialogOpen(false);
       setPhotoFile(null);
       setPhotoPreview(null);
-      // Reload employee to get updated photo
       const { data } = await client.get(`/employees/${myEmployee.id}`);
       setMyEmployee(data.employee);
       setMessage({ severity: 'success', text: 'Photo uploaded successfully' });
@@ -80,25 +78,38 @@ export default function IDCards() {
   const getEmployeePhoto = (emp) => {
     if (emp.id_photo_url) return emp.id_photo_url;
     if (emp.documents) {
-      const photoDoc = emp.documents.find(d => d.doc_type === 'id_photo' || d.doc_type === 'photo');
+      const photoDoc = emp.documents.find(d => d.doc_type === 'photo' || d.doc_type === 'id_photo');
       if (photoDoc) return photoDoc.file_url;
     }
     return null;
   };
 
   const downloadCard = async (emp) => {
-    const cardHtml = generateCardHTML(emp, true);
+    const cardHtml = generateCardHTML(emp);
     const printWindow = window.open('', '_blank');
-    printWindow.document.write(cardHtml);
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>ID Card - ${emp.full_name}</title>
+        <style>
+          @media print {
+            @page { margin: 0; size: 3.375in 2.125in; }
+            body { margin: 0; padding: 0; }
+          }
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f0f0f0; }
+          .card { width: 3.375in; height: 2.125in; border: 2px solid #1e3a8a; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: white; }
+        </style>
+      </head>
+      <body>${cardHtml}</body>
+      </html>
+    `);
     printWindow.document.close();
-    printWindow.onload = () => {
-      printWindow.print();
-      setTimeout(() => printWindow.close(), 1000);
-    };
+    printWindow.onload = () => { printWindow.print(); setTimeout(() => printWindow.close(), 1000); };
   };
 
   const downloadCardImage = async (emp) => {
-    const cardHtml = generateCardHTML(emp, false);
+    const cardHtml = generateCardHTML(emp);
     const printWindow = window.open('', '_blank');
     const fileName = `ID_Card_${emp.employee_code}.png`;
     printWindow.document.write(`
@@ -109,7 +120,7 @@ export default function IDCards() {
         <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
         <style>
           body { margin: 0; padding: 20px; background: #f0f0f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-          .card { width: 3.375in; height: 2.125in; border: 2px solid #333; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: white; }
+          .card { width: 3.375in; height: 2.125in; border: 2px solid #1e3a8a; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: white; }
         </style>
       </head>
       <body>
@@ -130,22 +141,13 @@ export default function IDCards() {
     printWindow.document.close();
   };
 
-  const getTier = (emp) => {
-    // For now, return a default tier since we don't have tier info in employee detail
-    // In a real app, you'd fetch tier from designation
-    return { name: 'Employee', color: '#166534' };
-  };
-
-  const getTierColor = (emp) => {
-    const tier = getTier(emp);
-    return tier?.color || '#6366f1';
-  };
-
-  const generateCardHTML = (emp, forPrint) => {
-    const tier = getTier(emp);
-    const tierColor = getTierColor(emp);
+  const generateCardHTML = (emp) => {
+    // Use EtherTrack brand colors: Green #22C55E, Dark #050807, Card background white
+    const primaryGreen = '#22C55E';
+    const primaryDark = '#050807';
+    const tierColor = primaryGreen;
     const photoUrl = getEmployeePhoto(emp);
-    const qrData = `ETPL:${emp.employee_code}|${emp.full_name}|${emp.designation || ''}|${emp.department || ''}|${tier?.name || ''}`;
+    const qrData = `ETPL:${emp.employee_code}|${emp.full_name}|${emp.designation || ''}|${emp.department || ''}`;
     const barcodeData = emp.employee_code;
     const qrUrl = generateQRCode(qrData);
     const barcodeUrl = generateBarcode(barcodeData);
@@ -157,30 +159,29 @@ export default function IDCards() {
       <div class="card" style="
         width: 3.375in; 
         height: 2.125in; 
-        border: 2px solid #1e3a8a; 
+        border: 2px solid ${primaryGreen}; 
         border-radius: 8px; 
         overflow: hidden; 
         position: relative; 
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         background: white;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        ${forPrint ? 'page-break-after: always;' : ''}
       ">
-        <!-- Top colored strip -->
-        <div style="height: 4px; background: linear-gradient(90deg, ${tierColor} 0%, #1e3a8a 100%);"></div>
+        <!-- Top green strip -->
+        <div style="height: 4px; background: ${primaryGreen};"></div>
         
         <!-- Header -->
-        <div style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 14px 16px; display: flex; align-items: center; gap: 14px; position: relative;">
-          <div style="width: 54px; height: 54px; border-radius: 50%; background: rgba(255,255,255,0.15); padding: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.15); backdrop-filter: blur(4px);">
+        <div style="background: ${primaryDark}; color: white; padding: 14px 16px; display: flex; align-items: center; gap: 14px; position: relative;">
+          <div style="width: 54px; height: 54px; border-radius: 50%; background: rgba(255,255,255,0.1); padding: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.2); backdrop-filter: blur(4px);">
             <img src="${logo}" alt="EtherTrack Logo" style="width: 100%; height: 100%; object-fit: contain;" />
           </div>
           <div style="flex: 1; min-width: 0;">
             <div style="font-size: 16px; font-weight: 800; letter-spacing: -0.02em; margin: 0; line-height: 1.2;">EtherTrack</div>
             <div style="font-size: 9px; opacity: 0.9; margin-top: 2px; font-weight: 500;">EtherTrack Technologies Pvt. Ltd.</div>
-            <div style="font-size: 8px; opacity: 0.8; margin-top: 1px;">CIN: U72900MH2020PTC123456</div>
+            <div style="font-size: 8px; opacity: 0.7; margin-top: 1px;">CIN: U72900MH2020PTC123456</div>
           </div>
-          <div style="width: 50px; height: 50px; background: white; border-radius: 6px; padding: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-            <img src="${qrUrl}" alt="QR Code" style="width: 100%; height: 100%;" />
+          <div style="width: 50px; height: 50px; background: rgba(255,255,255,0.1); border-radius: 6px; padding: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+            <img src="${generateQRCode(qrData)}" alt="QR Code" style="width: 100%; height: 100%;" />
           </div>
         </div>
 
@@ -198,19 +199,14 @@ export default function IDCards() {
                 </div>
               `}
             </div>
-            <button onclick="event.stopPropagation(); window.parent.postMessage({type:'OPEN_PHOTO_DIALOG', employeeId: '${emp.id}'}, '*')" 
-              style="margin-top: 6px; width: 100%; padding: 4px 8px; background: ${tierColor}; color: white; border: none; border-radius: 4px; font-size: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="12" r="4"/></svg>
-              Change Photo
-            </button>
           </div>
 
           <!-- Details Section -->
           <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between;">
             <div>
               <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;">
-                <div style="font-size: 15px; font-weight: 700; color: #111827; letter-spacing: -0.01em;">${emp.full_name}</div>
-                <span style="background: ${tierColor}; color: white; padding: 2px 8px; border-radius: 10px; font-size: 7px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">${tier.name}</span>
+                <div style="font-size: 15px; font-weight: 800; color: #111827; letter-spacing: -0.01em;">${emp.full_name}</div>
+                <span style="background: ${tierColor}; color: white; padding: 2px 8px; border-radius: 10px; font-size: 7px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">${emp.designation || 'Employee'}</span>
               </div>
               
               <div style="font-size: 9px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">Employee Code</div>
@@ -252,7 +248,7 @@ export default function IDCards() {
 
             <!-- Barcode at bottom of details -->
             <div style="text-align: center; padding-top: 8px; border-top: 1px solid #e5e7eb;">
-              <img src="${barcodeUrl}" alt="Barcode: ${barcodeData}" style="height: 28px; max-width: 100%;" />
+              <img src="${generateBarcode(barcodeData)}" alt="Barcode: ${barcodeData}" style="height: 28px; max-width: 100%;" />
               <div style="font-family: 'Courier New', monospace; font-size: 9px; font-weight: 600; color: #374151; margin-top: 4px; letter-spacing: 2px;">${barcodeData}</div>
             </div>
           </div>
@@ -305,7 +301,7 @@ export default function IDCards() {
 
       {message && <Alert severity={message.severity} sx={{ mb: 2 }}>{message.text}</Alert>}
 
-      <MobilePaper sx={{ mt: 2, overflow: 'visible' }}>
+      <MobilePaper sx={{ mt: 2, overflow: 'visible', minHeight: 380 }}>
         <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600 }}>ID Card Preview</Typography>
         <MobileStack gap={1} direction="row" sx={{ flexWrap: 'wrap', mb: 2 }}>
           <Tooltip title="Upload/Change Photo">
@@ -324,51 +320,50 @@ export default function IDCards() {
             </IconButton>
           </Tooltip>
         </MobileStack>
-        <div style={{ display: 'flex', justifyContent: 'center', overflow: 'visible', minHeight: 360 }}>
+        <div style={{ display: 'flex', justifyContent: 'center', overflow: 'visible', minHeight: 380 }}>
           <Box sx={{ overflow: 'visible' }}>
-            <div dangerouslySetInnerHTML={{ __html: generateCardHTML(myEmployee, false) }} />
+            <div dangerouslySetInnerHTML={{ __html: generateCardHTML(myEmployee) }} />
           </Box>
         </div>
       </MobilePaper>
 
+      {/* Photo Upload Dialog */}
       <MobileDialog open={photoDialogOpen} onClose={() => setPhotoDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Upload ID Photo</DialogTitle>
         <DialogContent>
-          <MobileFormGrid>
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, p: 2 }}>
-              {photoPreview ? (
-                <img src={photoPreview} alt="Preview" style={{ width: 150, height: 180, objectFit: 'cover', borderRadius: 8, border: '2px solid #e5e7eb' }} />
-              ) : (
-                <Box sx={{ width: 150, height: 180, border: '2px dashed #d1d5db', borderRadius: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: '0.85rem' }}>
-                  <PhotoCameraIcon sx={{ fontSize: 32, mb: 1 }} />
-                  No photo selected
-                </Box>
-              )}
-              <Button
-                variant="outlined"
-                component="label"
-                startIcon={<PhotoCameraIcon />}
-                disabled={photoUploading}
-              >
-                {photoFile ? 'Change Photo' : 'Select Photo'}
-                <input
-                  type="file"
-                  accept="image/*"
-                  hidden
-                  onChange={(e) => {
-                    const file = e.target.files[0];
-                    if (file) {
-                      setPhotoFile(file);
-                      setPhotoPreview(URL.createObjectURL(file));
-                    }
-                  }}
-                />
-              </Button>
-              <Typography variant="caption" color="text.secondary">
-                Recommended: 300x380px (3:4 ratio), max 2MB. JPG/PNG.
-              </Typography>
-            </Box>
-          </MobileFormGrid>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, p: 2 }}>
+            {photoPreview ? (
+              <img src={photoPreview} alt="Preview" style={{ width: 150, height: 180, objectFit: 'cover', borderRadius: 8, border: '2px solid #e5e7eb' }} />
+            ) : (
+              <Box sx={{ width: 150, height: 180, border: '2px dashed #d1d5db', borderRadius: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: '0.85rem' }}>
+                <PhotoCameraIcon sx={{ fontSize: 32, mb: 1 }} />
+                No photo selected
+              </Box>
+            )}
+            <Button
+              variant="outlined"
+              component="label"
+              startIcon={<PhotoCameraIcon />}
+              disabled={photoUploading}
+            >
+              {photoFile ? 'Change Photo' : 'Select Photo'}
+              <input
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files[0];
+                  if (file) {
+                    setPhotoFile(file);
+                    setPhotoPreview(URL.createObjectURL(file));
+                  }
+                }}
+              />
+            </Button>
+            <Typography variant="caption" color="text.secondary">
+              Recommended: 300x380px (3:4 ratio), max 2MB. JPG/PNG.
+            </Typography>
+          </Box>
         </DialogContent>
         <MobileActionButtons>
           <MobileButton onClick={() => setPhotoDialogOpen(false)}>Cancel</MobileButton>
