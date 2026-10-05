@@ -30,8 +30,8 @@ function generateBarcode(data) {
 const CARD_DIMENSIONS = {
   inches: { width: 2.125, height: 3.375 },
   mm: { width: 54, height: 86 },
-  screen: { width: 204, height: 324 },
-  print: { width: 638, height: 1013 },
+  screen: { width: 204, height: 360 },
+  print: { width: 638, height: 1125 },
 };
 
 export default function IDCards() {
@@ -63,10 +63,16 @@ export default function IDCards() {
       fd.append('doc_type', 'id_proof');
       fd.append('entity_type', 'employee');
       fd.append('entity_id', myEmployee.id);
+      fd.append('allow_duplicate', 'true'); // Allow re-upload
       const response = await client.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       console.log('Photo upload response:', response.data);
       
-      const docId = response.data.document?.id;
+      let docId = response.data.document?.id;
+      // Handle duplicate case
+      if (response.data.duplicate && response.data.existing?.id) {
+        docId = response.data.existing.id;
+      }
+      
       if (docId) {
         // Update employee with the photo URL (using document download endpoint)
         const photoUrl = `/api/documents/${docId}/download`;
@@ -90,7 +96,7 @@ export default function IDCards() {
   const getEmployeePhoto = (emp) => {
     if (emp.id_photo_url) return emp.id_photo_url;
     if (emp.documents) {
-      const photoDoc = emp.documents.find(d => d.doc_type === 'photo' || d.doc_type === 'id_photo');
+      const photoDoc = emp.documents.find(d => d.doc_type === 'photo' || d.doc_type === 'id_photo' || d.doc_type === 'id_proof');
       if (photoDoc) return photoDoc.file_url;
     }
     return null;
@@ -112,16 +118,16 @@ export default function IDCards() {
     const H = forPrint ? CARD_DIMENSIONS.print.height : CARD_DIMENSIONS.screen.height;
     const scale = forPrint ? 3.125 : 1;
 
-    const HEADER_H = Math.round(120 * scale);
-    const FOOTER_H = Math.round(60 * scale);
+    const HEADER_H = Math.round(110 * scale);
+    const FOOTER_H = Math.round(55 * scale);
     const BODY_H = H - HEADER_H - FOOTER_H;
-    const PHOTO_W = Math.round(160 * scale);
-    const PHOTO_H = Math.round(180 * scale);
-    const DETAIL_W = W - PHOTO_W - Math.round(40 * scale);
-    const PADDING = Math.round(20 * scale);
-    const GAP = Math.round(16 * scale);
+    const PHOTO_W = Math.round(150 * scale);
+    const PHOTO_H = Math.round(160 * scale);
+    const DETAIL_W = W - PHOTO_W - Math.round(36 * scale);
+    const PADDING = Math.round(16 * scale);
+    const GAP = Math.round(12 * scale);
 
-    const fontSize = (base) => Math.round(base * scale);
+    const fontSize = (base) => Math.round(base * scale * 0.9);
 
     return `
       <div class="card" style="
@@ -150,7 +156,7 @@ export default function IDCards() {
             <img src="${generateQRCode(qrData)}" alt="QR Code" style="width: 100%; height: 100%;" />
           </div>
         </div>
-        <div style="padding: ${Math.round(18 * scale)}px ${PADDING}px; display: flex; flex-direction: column; gap: ${Math.round(16 * scale)}px; height: ${BODY_H}px; box-sizing: border-box;">
+        <div style="padding: ${Math.round(14 * scale)}px ${PADDING}px; display: flex; flex-direction: column; gap: ${Math.round(10 * scale)}px; height: ${BODY_H}px; box-sizing: border-box;">
           <div style="display: flex; gap: ${GAP}px; align-items: flex-start;">
             <div style="width: ${PHOTO_W}px; flex-shrink: 0;">
               <div style="width: ${PHOTO_W}px; height: ${PHOTO_H}px; border-radius: ${Math.round(10 * scale)}px; overflow: hidden; border: ${Math.round(3 * scale)}px solid #e5e7eb; background: #f9fafb; position: relative; box-shadow: 0 ${Math.round(2 * scale)}px ${Math.round(8 * scale)}px rgba(0,0,0,0.08);">
@@ -315,7 +321,7 @@ export default function IDCards() {
 
       {message && <Alert severity={message.severity} sx={{ mb: 2 }}>{message.text}</Alert>}
 
-      <MobilePaper sx={{ mt: 2, overflow: 'visible', minHeight: 360 }}>
+      <MobilePaper sx={{ mt: 2, overflow: 'visible', minHeight: 420, pb: 3 }}>
         <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600 }}>ID Card Preview</Typography>
         <MobileStack gap={1} direction="row" sx={{ flexWrap: 'wrap', mb: 2 }}>
           <Tooltip title="Upload/Change Photo">
@@ -334,12 +340,12 @@ export default function IDCards() {
             </IconButton>
           </Tooltip>
         </MobileStack>
-        <div style={{ display: 'flex', justifyContent: 'center', overflow: 'visible', minHeight: 360 }}>
-          <Box sx={{ overflow: 'visible' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', overflow: 'visible', minHeight: 400 }}>
+          <Box sx={{ overflow: 'visible', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', minHeight: '340px' }}>
             <div 
               dangerouslySetInnerHTML={{ __html: generateCardHTML(myEmployee) }}
               style={{
-                transform: isMobile ? 'scale(0.7)' : 'none',
+                transform: isMobile ? 'scale(0.65)' : 'scale(0.9)',
                 transformOrigin: 'top center',
                 width: '204px',
               }}
