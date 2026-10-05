@@ -92,10 +92,20 @@ export default function IDCards() {
     const bloodGroup = emp.blood_group || '—';
     const emergencyContact = emp.emergency_contact || emp.emergency_phone || '—';
 
+    // Explicit pixel dimensions: 3.375in x 2.125in at 96 DPI = 324px x 204px
+    const CARD_W = 324;
+    const CARD_H = 204;
+    const HEADER_H = 82;
+    const FOOTER_H = 40;
+    const BODY_H = CARD_H - HEADER_H - FOOTER_H;
+    const PHOTO_W = 85;
+    const PHOTO_H = BODY_H - 8; // 8px padding top/bottom
+    const DETAIL_W = CARD_W - PHOTO_W - 30; // gap + padding
+
     return `
       <div class="card" style="
-        width: 3.375in; 
-        height: 2.125in; 
+        width: ${CARD_W}px; 
+        height: ${CARD_H}px; 
         border: 2px solid ${primaryGreen}; 
         border-radius: 8px; 
         overflow: hidden; 
@@ -103,9 +113,10 @@ export default function IDCards() {
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         background: white;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 11px;
       ">
         <div style="height: 4px; background: ${primaryGreen};"></div>
-        <div style="background: ${primaryDark}; color: white; padding: 14px 16px; display: flex; align-items: center; gap: 14px;">
+        <div style="background: ${primaryDark}; color: white; padding: 14px 16px; display: flex; align-items: center; gap: 14px; height: ${HEADER_H}px; box-sizing: border-box;">
           <div style="width: 54px; height: 54px; border-radius: 50%; background: rgba(255,255,255,0.1); padding: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.2); backdrop-filter: blur(4px);">
             <img src="${logo}" alt="EtherTrack Logo" style="width: 100%; height: 100%; object-fit: contain;" />
           </div>
@@ -118,9 +129,9 @@ export default function IDCards() {
             <img src="${generateQRCode(qrData)}" alt="QR Code" style="width: 100%; height: 100%;" />
           </div>
         </div>
-        <div style="padding: 14px 16px; display: flex; gap: 14px; height: calc(2.125in - 104px);">
-          <div style="width: 85px; flex-shrink: 0;">
-            <div style="width: 85px; height: 108px; border-radius: 6px; overflow: hidden; border: 2px solid #e5e7eb; background: #f9fafb; position: relative; box-shadow: 0 1px 4px rgba(0,0,0,0.05);">
+        <div style="padding: 14px 16px; display: flex; gap: 14px; height: ${BODY_H}px; box-sizing: border-box;">
+          <div style="width: ${PHOTO_W}px; flex-shrink: 0;">
+            <div style="width: ${PHOTO_W}px; height: ${PHOTO_H}px; border-radius: 6px; overflow: hidden; border: 2px solid #e5e7eb; background: #f9fafb; position: relative; box-shadow: 0 1px 4px rgba(0,0,0,0.05);">
               ${photoUrl ? `
                 <img src="${photoUrl}" alt="${emp.full_name}" style="width: 100%; height: 100%; object-fit: cover;" />
               ` : `
@@ -198,11 +209,11 @@ export default function IDCards() {
         <title>ID Card - ${emp.full_name}</title>
         <style>
           @media print {
-            @page { margin: 0; size: 3.375in 2.125in; }
+            @page { margin: 0; size: 324px 204px; }
             body { margin: 0; padding: 0; }
           }
           body { margin: 0; padding: 0; background: transparent; }
-          .card { width: 3.375in; height: 2.125in; }
+          .card { width: 324px; height: 204px; }
         </style>
       </head>
       <body>${cardHtml}</body>
@@ -225,7 +236,7 @@ export default function IDCards() {
         <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
         <style>
           body { margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-          #card { width: 3.375in; height: 2.125in; }
+          #card { width: 324px; height: 204px; }
         </style>
       </head>
       <body>
@@ -281,7 +292,7 @@ export default function IDCards() {
 
       {message && <Alert severity={message.severity} sx={{ mb: 2 }}>{message.text}</Alert>}
 
-      <MobilePaper sx={{ mt: 2, overflow: 'visible', minHeight: 380 }}>
+      <MobilePaper sx={{ mt: 2, overflow: 'visible', minHeight: 240 }}>
         <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600 }}>ID Card Preview</Typography>
         <MobileStack gap={1} direction="row" sx={{ flexWrap: 'wrap', mb: 2 }}>
           <Tooltip title="Upload/Change Photo">
@@ -300,9 +311,16 @@ export default function IDCards() {
             </IconButton>
           </Tooltip>
         </MobileStack>
-        <div style={{ display: 'flex', justifyContent: 'center', overflow: 'visible', minHeight: 380 }}>
+        <div style={{ display: 'flex', justifyContent: 'center', overflow: 'visible', minHeight: 240 }}>
           <Box sx={{ overflow: 'visible' }}>
-            <div dangerouslySetInnerHTML={{ __html: generateCardHTML(myEmployee) }} />
+            <div 
+              dangerouslySetInnerHTML={{ __html: generateCardHTML(myEmployee) }}
+              style={{
+                transform: isMobile ? 'scale(0.85)' : 'none',
+                transformOrigin: 'top center',
+                width: '324px',
+              }}
+            />
           </Box>
         </div>
       </MobilePaper>
