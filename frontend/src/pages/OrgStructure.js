@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
-  Box, Typography, Paper, Grid, Chip, IconButton, Dialog, DialogTitle,
-  DialogContent, DialogActions, TextField, MenuItem, Alert, Collapse, Divider,
+  Box, Typography, Chip, IconButton, Dialog, DialogTitle,
+  DialogContent, TextField, MenuItem, Alert, Collapse, Divider,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -35,18 +35,25 @@ const DEFAULT_TIERS = [
   { name: 'Employee', display_order: 60, color: '#166534' },
 ];
 
-function TierRow({ title, people, color = 'primary.main', isMobile, canEdit, onEdit }) {
+function TierRow({ title, people, color = 'primary.main', isMobile, canEdit, onEdit, onAssign, tierId }) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: isMobile ? 2 : 3 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', justifyContent: 'space-between', mb: 1 }}>
         <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
           {title}
         </Typography>
-        {canEdit && onEdit && (
-          <IconButton size="small" onClick={onEdit}>
-            <EditIcon fontSize="small" />
-          </IconButton>
-        )}
+        <Box sx={{ display: 'flex', gap: 0.5 }}>
+          {canEdit && onEdit && (
+            <IconButton size="small" onClick={onEdit}>
+              <EditIcon fontSize="small" />
+            </IconButton>
+          )}
+          {canEdit && onAssign && tierId && (
+            <IconButton size="small" onClick={() => onAssign(tierId)}>
+              <GroupAddIcon fontSize="small" />
+            </IconButton>
+          )}
+        </Box>
       </Box>
       <MobileStack gap={isMobile ? 1 : 1.5}>
         {people.map((p) => (
@@ -237,6 +244,13 @@ export default function OrgStructure() {
   const [tierForm, setTierForm] = useState({ name: '', display_order: 0, description: '', color: '#6366f1', icon: '' });
   const [tierSaving, setTierSaving] = useState(false);
   const [tierError, setTierError] = useState('');
+  const [tierDeleting, setTierDeleting] = useState(false);
+
+  // Employee assignment via code
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [assignForm, setAssignForm] = useState({ employee_code: '', tier_id: '' });
+  const [assignSaving, setAssignSaving] = useState(false);
+  const [assignError, setAssignError] = useState('');
 
   const load = () => {
     client.get('/org-hierarchy-tiers').then(({ data }) => {
@@ -443,6 +457,67 @@ export default function OrgStructure() {
     }
   };
 
+  const handleDeleteTier = async () => {
+    if (!editingTier) return;
+    if (!window.confirm(`Delete tier "${editingTier.name}"? This cannot be undone.`)) return;
+    setTierDeleting(true);
+    try {
+      await client.delete(`/org-hierarchy-tiers/${editingTier.id}`);
+      setTierDialogOpen(false);
+      load();
+    } catch (err) {
+      setTierError(err.response?.data?.error || 'Failed to delete tier');
+    } finally {
+      setTierDeleting(false);
+    }
+  };
+
+  const openAssignDialog = (tierId) => {
+    setAssignForm({ employee_code: '', tier_id: tierId });
+    setAssignError('');
+    setAssignDialogOpen(true);
+  };
+
+  const handleAssignEmployee = async () => {
+    setAssignSaving(true);
+    setAssignError('');
+    try {
+      const { employee_code, tier_id } = assignForm;
+      if (!employee_code || !tier_id) {
+        setAssignError('Employee code and tier are required');
+        return;
+      }
+      // Find employee by code
+      const { data: empData } = await client.get('/employees', { params: { search: employee_code } });
+      const emp = empData.employees?.find(e => e.employee_code === employee_code.toUpperCase());
+      if (!emp) {
+        setAssignError(`Employee with code ${employee_code} not found`);
+        return;
+      }
+      // Get designation or create one with tier
+      let desId = emp.designation_id;
+      if (!desId) {
+        // Create a designation with the tier
+        const { data: desData } = await client.post('/designations', {
+          title: `${emp.full_name} - Auto`,
+          tier_id: tier_id,
+        });
+        desId = desData.designation.id;
+      } else {
+        // Update existing designation with tier
+        await client.put(`/designations/${desId}`, { tier_id: tier_id });
+      }
+      // Update employee with designation
+      await client.put(`/employees/${emp.id}`, { designation_id: desId });
+      setAssignDialogOpen(false);
+      load();
+    } catch (err) {
+      setAssignError(err.response?.data?.error || 'Failed to assign employee');
+    } finally {
+      setAssignSaving(false);
+    }
+  };
+
   const teamHeadCandidates = teamForm.department_id
     ? employees.filter((e) => e.department_id === teamForm.department_id)
     : employees;
@@ -457,7 +532,7 @@ export default function OrgStructure() {
       {message && <Alert severity={message.severity} sx={{ mb: 3 }}>{message.text}</Alert>}
 
       {/* Hierarchy Tiers — Editable org chart levels */}
-      <MobilePaper sx={{ mb: isMobile ? 2 : 4 }}>
+      <Box sx={{ mb: isMobile ? 2 : 4 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
           <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
             Organization Hierarchy
@@ -477,6 +552,8 @@ export default function OrgStructure() {
             isMobile={isMobile}
             canEdit={canEdit}
             onEdit={() => openTierDialog(tier)}
+            onAssign={openAssignDialog}
+            tierId={tier.id}
           />
         ))}
         {tiers.length === 0 && (
@@ -484,7 +561,7 @@ export default function OrgStructure() {
             No hierarchy tiers configured.
           </Typography>
         )}
-      </MobilePaper>
+      </Box>
 
       {/* Departments, each with a head, and — expanded — its teams with team heads, and employees below that. */}
       <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 1.5, textAlign: 'center' }}>
@@ -606,21 +683,59 @@ export default function OrgStructure() {
       {/* ── tier dialog ────────────────────────────────────────────────────── */}
       <MobileDialog open={tierDialogOpen} onClose={() => setTierDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{editingTier ? 'Edit tier' : 'New tier'}</DialogTitle>
-        <DialogContent>
-          <MobileFormGrid>
+        <DialogContent dividers sx={{ pt: 2 }}>
+          <MobileFormGrid sx={{ mb: 2 }}>
             <MobileTextField fullWidth label="Name" value={tierForm.name} onChange={(e) => setTierForm({ ...tierForm, name: e.target.value })} required />
             <MobileTextField fullWidth type="number" label="Display order (lower = higher)" value={tierForm.display_order} onChange={(e) => setTierForm({ ...tierForm, display_order: parseInt(e.target.value) || 0 })} />
             <MobileTextField fullWidth label="Description" multiline rows={2} value={tierForm.description} onChange={(e) => setTierForm({ ...tierForm, description: e.target.value })} />
             <MobileTextField fullWidth label="Color (hex)" value={tierForm.color} onChange={(e) => setTierForm({ ...tierForm, color: e.target.value })} helperText="e.g. #7c3aed" />
             <MobileTextField fullWidth label="Icon (optional)" value={tierForm.icon} onChange={(e) => setTierForm({ ...tierForm, icon: e.target.value })} helperText="Material icon name, e.g. 'account_circle'" />
           </MobileFormGrid>
-          {tierError && <Alert severity="error" sx={{ mt: 1 }}>{tierError}</Alert>}
-          {editingTier?.is_system && <Alert severity="info" sx={{ mt: 1 }}>System tier — name cannot be changed via API.</Alert>}
+          {tierError && <Alert severity="error" sx={{ mb: 2 }}>{tierError}</Alert>}
+          {editingTier?.is_system && <Alert severity="info" sx={{ mb: 2 }}>System tier — name cannot be changed via API.</Alert>}
         </DialogContent>
         <MobileActionButtons>
           <MobileButton onClick={() => setTierDialogOpen(false)}>Cancel</MobileButton>
+          {editingTier && !editingTier.is_system && (
+            <MobileButton variant="outlined" color="error" onClick={handleDeleteTier} disabled={tierDeleting}>
+              {tierDeleting ? 'Deleting…' : 'Delete'}
+            </MobileButton>
+          )}
           <MobileButton variant="contained" onClick={saveTier} disabled={tierSaving || !tierForm.name}>
             {tierSaving ? 'Saving…' : 'Save'}
+          </MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
+
+      {/* ── assign employee to tier dialog ───────────────────────────────── */}
+      <MobileDialog open={assignDialogOpen} onClose={() => setAssignDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Assign Employee to Tier</DialogTitle>
+        <DialogContent dividers sx={{ pt: 2 }}>
+          <MobileFormGrid sx={{ mb: 2 }}>
+            <MobileTextField
+              fullWidth
+              label="Employee Code"
+              value={assignForm.employee_code}
+              onChange={(e) => setAssignForm({ ...assignForm, employee_code: e.target.value.toUpperCase() })}
+              placeholder="e.g. ET-EMP-0002"
+              required
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Tier"
+              value={assignForm.tier_id}
+              onChange={(e) => setAssignForm({ ...assignForm, tier_id: e.target.value })}
+              options={tiers.map(t => ({ value: t.id, label: t.name }))}
+              required
+            />
+          </MobileFormGrid>
+          {assignError && <Alert severity="error" sx={{ mb: 2 }}>{assignError}</Alert>}
+        </DialogContent>
+        <MobileActionButtons>
+          <MobileButton onClick={() => setAssignDialogOpen(false)}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleAssignEmployee} disabled={assignSaving || !assignForm.employee_code || !assignForm.tier_id}>
+            {assignSaving ? 'Assigning…' : 'Assign'}
           </MobileButton>
         </MobileActionButtons>
       </MobileDialog>

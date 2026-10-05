@@ -31,6 +31,7 @@ import MyActivity from './pages/MyActivity';
 import Recruitment from './pages/Recruitment';
 import Performance from './pages/Performance';
 import OrgStructure from './pages/OrgStructure';
+import IDCards from './pages/IDCards';
 import Team from './pages/Team';
 import Import from './pages/Import';
 import Documents from './pages/Documents';
@@ -172,6 +173,7 @@ export default function App() {
               <Route path="/recruitment" element={<Recruitment />} />
               <Route path="/performance" element={<Performance />} />
               <Route path="/org-structure" element={<OrgStructure />} />
+              <Route path="/id-cards" element={<IDCards />} />
               <Route path="/team" element={<Team />} />
               <Route path="/import" element={<Import />} />
               <Route path="/documents" element={<Documents />} />

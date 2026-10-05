@@ -14,6 +14,7 @@ import SupportAgentOutlinedIcon from '@mui/icons-material/SupportAgentOutlined';
 import AccessTimeOutlinedIcon from '@mui/icons-material/AccessTimeOutlined';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
+import BadgeOutlinedIcon from '@mui/icons-material/BadgeOutlined';
 import PersonSearchOutlinedIcon from '@mui/icons-material/PersonSearchOutlined';
 import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
@@ -91,6 +92,7 @@ export const NAV_GROUPS = [
       { to: '/attendance', label: 'Attendance', icon: AccessTimeOutlinedIcon },
       { to: '/monitoring', label: 'Monitoring', icon: MonitorHeartOutlinedIcon },
       { to: '/org-structure', label: 'Org Structure', icon: AccountTreeOutlinedIcon },
+      { to: '/id-cards', label: 'ID Cards', icon: BadgeOutlinedIcon },
       { to: '/team', label: 'Team logins', icon: GroupOutlinedIcon },
       { to: '/recruitment', label: 'Recruitment', icon: PersonSearchOutlinedIcon },
       { to: '/performance', label: 'Performance', icon: AssessmentOutlinedIcon },
