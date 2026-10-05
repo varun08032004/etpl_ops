@@ -30,8 +30,8 @@ function generateBarcode(data) {
 const CARD_DIMENSIONS = {
   inches: { width: 2.125, height: 3.375 },
   mm: { width: 54, height: 86 },
-  screen: { width: 204, height: 360 },
-  print: { width: 638, height: 1125 },
+  screen: { width: 204, height: 460 },
+  print: { width: 638, height: 1438 },
 };
 
 export default function IDCards() {
@@ -63,19 +63,18 @@ export default function IDCards() {
       fd.append('doc_type', 'id_proof');
       fd.append('entity_type', 'employee');
       fd.append('entity_id', myEmployee.id);
-      fd.append('allow_duplicate', 'true'); // Allow re-upload
+      fd.append('allow_duplicate', 'true');
       const response = await client.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       console.log('Photo upload response:', response.data);
       
       let docId = response.data.document?.id;
-      // Handle duplicate case
       if (response.data.duplicate && response.data.existing?.id) {
         docId = response.data.existing.id;
       }
       
       if (docId) {
-        // Update employee with the photo URL (using document download endpoint)
         const photoUrl = `/api/documents/${docId}/download`;
+        console.log('Updating employee with photo URL:', photoUrl);
         await client.put(`/employees/${myEmployee.id}`, { id_photo_url: photoUrl });
       }
       
@@ -87,7 +86,8 @@ export default function IDCards() {
       setMessage({ severity: 'success', text: 'Photo uploaded successfully' });
     } catch (err) {
       console.error('Photo upload error:', err.response?.data || err.message);
-      setMessage({ severity: 'error', text: err.response?.data?.error || 'Failed to upload photo' });
+      console.error('Full error:', err.response);
+      setMessage({ severity: 'error', text: err.response?.data?.error || err.message || 'Failed to upload photo' });
     } finally {
       setPhotoUploading(false);
     }
@@ -118,16 +118,16 @@ export default function IDCards() {
     const H = forPrint ? CARD_DIMENSIONS.print.height : CARD_DIMENSIONS.screen.height;
     const scale = forPrint ? 3.125 : 1;
 
-    const HEADER_H = Math.round(110 * scale);
-    const FOOTER_H = Math.round(55 * scale);
+    const HEADER_H = Math.round(85 * scale);
+    const FOOTER_H = Math.round(45 * scale);
     const BODY_H = H - HEADER_H - FOOTER_H;
-    const PHOTO_W = Math.round(150 * scale);
-    const PHOTO_H = Math.round(160 * scale);
-    const DETAIL_W = W - PHOTO_W - Math.round(36 * scale);
-    const PADDING = Math.round(16 * scale);
-    const GAP = Math.round(12 * scale);
+    const PHOTO_W = Math.round(140 * scale);
+    const PHOTO_H = Math.round(140 * scale);
+    const DETAIL_W = W - PHOTO_W - Math.round(32 * scale);
+    const PADDING = Math.round(14 * scale);
+    const GAP = Math.round(10 * scale);
 
-    const fontSize = (base) => Math.round(base * scale * 0.9);
+    const fontSize = (base) => Math.round(base * scale * 0.75);
 
     return `
       <div class="card" style="
@@ -143,28 +143,28 @@ export default function IDCards() {
         font-size: ${fontSize(11)}px;
       ">
         <div style="height: ${Math.round(5 * scale)}px; background: ${primaryGreen};"></div>
-        <div style="background: ${primaryDark}; color: white; padding: ${Math.round(18 * scale)}px ${PADDING}px; display: flex; flex-direction: column; align-items: center; gap: ${Math.round(12 * scale)}px; height: ${HEADER_H}px; box-sizing: border-box;">
-          <div style="width: ${Math.round(70 * scale)}px; height: ${Math.round(70 * scale)}px; border-radius: 50%; background: rgba(255,255,255,0.1); padding: ${Math.round(6 * scale)}px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 ${Math.round(4 * scale)}px ${Math.round(12 * scale)}px rgba(0,0,0,0.2); backdrop-filter: blur(4px);">
+        <div style="background: ${primaryDark}; color: white; padding: ${Math.round(10 * scale)}px ${PADDING}px; display: flex; flex-direction: column; align-items: center; gap: ${Math.round(6 * scale)}px; height: ${HEADER_H}px; box-sizing: border-box;">
+          <div style="width: ${Math.round(48 * scale)}px; height: ${Math.round(48 * scale)}px; border-radius: 50%; background: rgba(255,255,255,0.1); padding: ${Math.round(3 * scale)}px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 ${Math.round(2 * scale)}px ${Math.round(6 * scale)}px rgba(0,0,0,0.2); backdrop-filter: blur(4px);">
             <img src="${logo}" alt="EtherTrack Logo" style="width: 100%; height: 100%; object-fit: contain;" />
           </div>
           <div style="text-align: center; width: 100%;">
-            <div style="font-size: ${fontSize(18)}px; font-weight: 800; letter-spacing: -0.02em; margin: 0; line-height: 1.2;">EtherTrack</div>
-            <div style="font-size: ${fontSize(10)}px; opacity: 0.9; margin-top: ${Math.round(3 * scale)}px; font-weight: 500;">EtherTrack Technologies Pvt. Ltd.</div>
-            <div style="font-size: ${fontSize(9)}px; opacity: 0.7; margin-top: ${Math.round(2 * scale)}px;">CIN: U72900MH2020PTC123456</div>
+            <div style="font-size: ${fontSize(13)}px; font-weight: 800; letter-spacing: -0.02em; margin: 0; line-height: 1.2;">EtherTrack</div>
+            <div style="font-size: ${fontSize(8)}px; opacity: 0.9; margin-top: ${Math.round(1 * scale)}px; font-weight: 500;">EtherTrack Technologies Pvt. Ltd.</div>
+            <div style="font-size: ${fontSize(7)}px; opacity: 0.7; margin-top: ${Math.round(1 * scale)}px;">CIN: U72900MH2020PTC123456</div>
           </div>
-          <div style="width: ${Math.round(64 * scale)}px; height: ${Math.round(64 * scale)}px; background: rgba(255,255,255,0.1); border-radius: ${Math.round(8 * scale)}px; padding: ${Math.round(6 * scale)}px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+          <div style="width: ${Math.round(44 * scale)}px; height: ${Math.round(44 * scale)}px; background: rgba(255,255,255,0.1); border-radius: ${Math.round(5 * scale)}px; padding: ${Math.round(3 * scale)}px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
             <img src="${generateQRCode(qrData)}" alt="QR Code" style="width: 100%; height: 100%;" />
           </div>
         </div>
-        <div style="padding: ${Math.round(14 * scale)}px ${PADDING}px; display: flex; flex-direction: column; gap: ${Math.round(10 * scale)}px; height: ${BODY_H}px; box-sizing: border-box;">
+        <div style="padding: ${Math.round(10 * scale)}px ${PADDING}px; display: flex; flex-direction: column; gap: ${Math.round(6 * scale)}px; height: ${BODY_H}px; box-sizing: border-box;">
           <div style="display: flex; gap: ${GAP}px; align-items: flex-start;">
             <div style="width: ${PHOTO_W}px; flex-shrink: 0;">
-              <div style="width: ${PHOTO_W}px; height: ${PHOTO_H}px; border-radius: ${Math.round(10 * scale)}px; overflow: hidden; border: ${Math.round(3 * scale)}px solid #e5e7eb; background: #f9fafb; position: relative; box-shadow: 0 ${Math.round(2 * scale)}px ${Math.round(8 * scale)}px rgba(0,0,0,0.08);">
+              <div style="width: ${PHOTO_W}px; height: ${PHOTO_H}px; border-radius: ${Math.round(8 * scale)}px; overflow: hidden; border: ${Math.round(2 * scale)}px solid #e5e7eb; background: #f9fafb; position: relative; box-shadow: 0 ${Math.round(2 * scale)}px ${Math.round(6 * scale)}px rgba(0,0,0,0.08);">
                 ${photoUrl ? `
                   <img src="${photoUrl}" alt="${emp.full_name}" style="width: 100%; height: 100%; object-fit: cover;" />
                 ` : `
-                  <div style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #9ca3af; font-size: ${fontSize(10)}px; text-align: center; padding: ${Math.round(12 * scale)}px;">
-                    <svg width="${Math.round(32 * scale)}" height="${Math.round(32 * scale)}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: ${Math.round(6 * scale)}px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                  <div style="width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #9ca3af; font-size: ${fontSize(8)}px; text-align: center; padding: ${Math.round(8 * scale)}px;">
+                    <svg width="${Math.round(24 * scale)}" height="${Math.round(24 * scale)}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: ${Math.round(4 * scale)}px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                     No Photo
                   </div>
                 `}
@@ -172,55 +172,57 @@ export default function IDCards() {
             </div>
             <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between;">
               <div>
-                <div style="display: flex; align-items: baseline; gap: ${Math.round(10 * scale)}px; margin-bottom: ${Math.round(14 * scale)}px; flex-wrap: wrap;">
-                  <div style="font-size: ${fontSize(18)}px; font-weight: 800; color: #111827; letter-spacing: -0.01em;">${emp.full_name}</div>
-                  <span style="background: ${tierColor}; color: white; padding: ${Math.round(3 * scale)}px ${Math.round(10 * scale)}px; border-radius: ${Math.round(14 * scale)}px; font-size: ${fontSize(8)}px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">${emp.designation || 'Employee'}</span>
+                <div style="display: flex; align-items: baseline; gap: ${Math.round(6 * scale)}px; margin-bottom: ${Math.round(4 * scale)}px; flex-wrap: wrap;">
+                  <div style="font-size: ${fontSize(13)}px; font-weight: 800; color: #111827; letter-spacing: -0.01em;">${emp.full_name}</div>
+                  <span style="background: ${tierColor}; color: white; padding: ${Math.round(1 * scale)}px ${Math.round(5 * scale)}px; border-radius: ${Math.round(8 * scale)}px; font-size: ${fontSize(6)}px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">${emp.designation || 'Employee'}</span>
                 </div>
-                <div style="font-size: ${fontSize(10)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(3 * scale)}px;">Employee Code</div>
-                <div style="font-size: ${fontSize(17)}px; font-weight: 700; color: #111827; font-family: 'SF Mono', Monaco, monospace; letter-spacing: 0.5px; margin-bottom: ${Math.round(12 * scale)}px;">${emp.employee_code}</div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: ${Math.round(10 * scale)}px;">
-                  <div>
-                    <div style="font-size: ${fontSize(9)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(3 * scale)}px;">Designation</div>
-                    <div style="font-size: ${fontSize(13)}px; font-weight: 600; color: #111827;">${emp.designation || '—'}</div>
+                <div style="font-size: ${fontSize(7)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Employee Code</div>
+                <div style="font-size: ${fontSize(12)}px; font-weight: 700; color: #111827; font-family: 'SF Mono', Monaco, monospace; letter-spacing: 0.5px; margin-bottom: ${Math.round(4 * scale)}px;">${emp.employee_code}</div>
+                <div style="display: flex; flex-direction: column; gap: ${Math.round(3 * scale)}px;">
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: ${Math.round(6 * scale)}px;">
+                    <div>
+                      <div style="font-size: ${fontSize(6)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Designation</div>
+                      <div style="font-size: ${fontSize(9)}px; font-weight: 600; color: #111827;">${emp.designation || '—'}</div>
+                    </div>
+                    <div>
+                      <div style="font-size: ${fontSize(6)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Department</div>
+                      <div style="font-size: ${fontSize(9)}px; font-weight: 600; color: #111827;">${emp.department || '—'}</div>
+                    </div>
                   </div>
-                  <div>
-                    <div style="font-size: ${fontSize(9)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(3 * scale)}px;">Department</div>
-                    <div style="font-size: ${fontSize(13)}px; font-weight: 600; color: #111827;">${emp.department || '—'}</div>
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: ${Math.round(6 * scale)}px;">
+                    <div>
+                      <div style="font-size: ${fontSize(6)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Date of Joining</div>
+                      <div style="font-size: ${fontSize(9)}px; font-weight: 600; color: #111827;">${emp.date_of_joining?.slice(0,10) || '—'}</div>
+                    </div>
+                    <div>
+                      <div style="font-size: ${fontSize(6)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Valid Until</div>
+                      <div style="font-size: ${fontSize(9)}px; font-weight: 600; color: #111827;">${validityDate}</div>
+                    </div>
                   </div>
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: ${Math.round(10 * scale)}px; margin-top: ${Math.round(10 * scale)}px;">
-                  <div>
-                    <div style="font-size: ${fontSize(9)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(3 * scale)}px;">Date of Joining</div>
-                    <div style="font-size: ${fontSize(13)}px; font-weight: 600; color: #111827;">${emp.date_of_joining?.slice(0,10) || '—'}</div>
-                  </div>
-                  <div>
-                    <div style="font-size: ${fontSize(9)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(3 * scale)}px;">Valid Until</div>
-                    <div style="font-size: ${fontSize(13)}px; font-weight: 600; color: #111827;">${validityDate}</div>
-                  </div>
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: ${Math.round(10 * scale)}px; margin-top: ${Math.round(10 * scale)}px;">
-                  <div>
-                    <div style="font-size: ${fontSize(9)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(3 * scale)}px;">Blood Group</div>
-                    <div style="font-size: ${fontSize(13)}px; font-weight: 600; color: #111827;">${bloodGroup}</div>
-                  </div>
-                  <div>
-                    <div style="font-size: ${fontSize(9)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(3 * scale)}px;">Emergency</div>
-                    <div style="font-size: ${fontSize(12)}px; font-weight: 600; color: #111827;">${emergencyContact}</div>
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: ${Math.round(6 * scale)}px;">
+                    <div>
+                      <div style="font-size: ${fontSize(6)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Blood Group</div>
+                      <div style="font-size: ${fontSize(9)}px; font-weight: 600; color: #111827;">${bloodGroup}</div>
+                    </div>
+                    <div>
+                      <div style="font-size: ${fontSize(6)}px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: ${Math.round(1 * scale)}px;">Emergency</div>
+                      <div style="font-size: ${fontSize(8)}px; font-weight: 600; color: #111827;">${emergencyContact}</div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-          <div style="text-align: center; padding-top: ${Math.round(12 * scale)}px; border-top: ${Math.round(2 * scale)}px solid #e5e7eb;">
-            <img src="${generateBarcode(barcodeData)}" alt="Barcode: ${barcodeData}" style="height: ${Math.round(36 * scale)}px; max-width: 100%;" />
-            <div style="font-family: 'Courier New', monospace; font-size: ${fontSize(11)}px; font-weight: 600; color: #374151; margin-top: ${Math.round(6 * scale)}px; letter-spacing: ${Math.round(2 * scale)}px;">${barcodeData}</div>
+          <div style="text-align: center; padding-top: ${Math.round(6 * scale)}px; border-top: ${Math.round(1 * scale)}px solid #e5e7eb;">
+            <img src="${generateBarcode(barcodeData)}" alt="Barcode: ${barcodeData}" style="height: ${Math.round(22 * scale)}px; max-width: 100%;" />
+            <div style="font-family: 'Courier New', monospace; font-size: ${fontSize(7)}px; font-weight: 600; color: #374151; margin-top: ${Math.round(3 * scale)}px; letter-spacing: ${Math.round(1 * scale)}px;">${barcodeData}</div>
           </div>
         </div>
-        <div style="background: #f8fafc; padding: ${Math.round(10 * scale)}px ${PADDING}px; border-top: ${Math.round(2 * scale)}px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; font-size: ${fontSize(9)}px; color: #64748b;">
-          <div style="display: flex; align-items: center; gap: ${Math.round(8 * scale)}px;"><span style="font-weight: 600;">Authorized Signature</span></div>
-          <div style="display: flex; align-items: center; gap: ${Math.round(16 * scale)}px;">
+        <div style="background: #f8fafc; padding: ${Math.round(7 * scale)}px ${PADDING}px; border-top: ${Math.round(1 * scale)}px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; font-size: ${fontSize(7)}px; color: #64748b;">
+          <div style="display: flex; align-items: center; gap: ${Math.round(6 * scale)}px;"><span style="font-weight: 600;">Authorized Signature</span></div>
+          <div style="display: flex; align-items: center; gap: ${Math.round(10 * scale)}px;">
             <span>Valid while employed</span>
-            <span style="font-family: 'Courier New', monospace; font-size: ${fontSize(10)}px; font-weight: 600; color: #374151;">${barcodeData}</span>
+            <span style="font-family: 'Courier New', monospace; font-size: ${fontSize(8)}px; font-weight: 600; color: #374151;">${barcodeData}</span>
           </div>
         </div>
       </div>
@@ -321,7 +323,7 @@ export default function IDCards() {
 
       {message && <Alert severity={message.severity} sx={{ mb: 2 }}>{message.text}</Alert>}
 
-      <MobilePaper sx={{ mt: 2, overflow: 'visible', minHeight: 420, pb: 3 }}>
+      <MobilePaper sx={{ mt: 2, overflow: 'visible', minHeight: 520, pb: 3 }}>
         <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600 }}>ID Card Preview</Typography>
         <MobileStack gap={1} direction="row" sx={{ flexWrap: 'wrap', mb: 2 }}>
           <Tooltip title="Upload/Change Photo">
@@ -340,12 +342,12 @@ export default function IDCards() {
             </IconButton>
           </Tooltip>
         </MobileStack>
-        <div style={{ display: 'flex', justifyContent: 'center', overflow: 'visible', minHeight: 400 }}>
-          <Box sx={{ overflow: 'visible', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', minHeight: '340px' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', overflow: 'visible', minHeight: 520 }}>
+          <Box sx={{ overflow: 'visible', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', minHeight: '480px' }}>
             <div 
               dangerouslySetInnerHTML={{ __html: generateCardHTML(myEmployee) }}
               style={{
-                transform: isMobile ? 'scale(0.65)' : 'scale(0.9)',
+                transform: isMobile ? 'scale(0.5)' : 'scale(0.7)',
                 transformOrigin: 'top center',
                 width: '204px',
               }}
