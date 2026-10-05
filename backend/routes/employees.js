@@ -53,6 +53,7 @@ const updateEmployeeSchema = createEmployeeSchema.partial().extend({
   }).optional(),
   notes: z.string().max(2000).optional().nullable(),
   esic_applicable: schemas.boolean.optional(),
+  id_photo_url: z.string().url().optional().nullable(),
 }).strict();
 
 router.use(authenticate);
@@ -336,6 +337,7 @@ router.put('/:id', requireRole('hr'), validateBody(updateEmployeeSchema), async 
       'ctc_annual', 'basic_monthly', 'hra_monthly', 'other_allowances_monthly', 'employer_pf_monthly',
       'da_monthly', 'tax_regime', 'pf_applicable', 'declared_deductions',
       'bank_account_number', 'bank_ifsc', 'notes',
+      'id_photo_url',
     ];
     // 'exited' must go through POST /:id/exit — that's what captures exit_date/
     // reason properly and deactivates the linked login, and now what routes
