@@ -1,6 +1,6 @@
 {
   "name": "ethertrack-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "EtherTrack desktop agent — attendance, activity tracking, idle detection for ETPL Ops",
   "main": "src/main.js",
   "author": "EtherTrack Technologies",
@@ -11,7 +11,8 @@
     "dist:dir": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win nsis --dir"
   },
   "dependencies": {
-    "active-win": "^8.2.1"
+    "active-win": "^8.2.1",
+    "node-windows": "^1.0.0-beta.8"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
@@ -21,13 +22,20 @@
   "build": {
     "appId": "in.ethertrack.agent",
     "productName": "EtherTrack Agent",
-    "directories": { "output": "dist" },
-    "files": ["src/**/*", "assets/**/*", "config.json", "package.json"],
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "config.json",
+      "package.json"
+    ],
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico"
     },
-    "nsis": {
+"nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
