@@ -8,9 +8,14 @@
 const fs = require('fs');
 const path = require('path');
 const { app, safeStorage } = require('electron');
+const crypto = require('crypto');
 
 function tokenFilePath() {
   return path.join(app.getPath('userData'), 'agent-token.bin');
+}
+
+function localServerTokenPath() {
+  return path.join(app.getPath('userData'), 'local-server-token.bin');
 }
 
 function saveToken(token) {
@@ -39,4 +44,30 @@ function clearToken() {
   }
 }
 
-module.exports = { saveToken, loadToken, clearToken };
+// Generate or load per-install local server token
+// This replaces the static token in config.json for browser extension communication
+function getOrCreateLocalServerToken() {
+  try {
+    const encrypted = fs.readFileSync(localServerTokenPath());
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('Encryption unavailable');
+    return safeStorage.decryptString(encrypted);
+  } catch {
+    // Generate new cryptographically secure token
+    const token = crypto.randomBytes(32).toString('hex');
+    if (safeStorage.isEncryptionAvailable()) {
+      const encrypted = safeStorage.encryptString(token);
+      fs.writeFileSync(localServerTokenPath(), encrypted);
+    }
+    return token;
+  }
+}
+
+function clearLocalServerToken() {
+  try {
+    fs.unlinkSync(localServerTokenPath());
+  } catch {
+    // already gone — fine
+  }
+}
+
+module.exports = { saveToken, loadToken, clearToken, getOrCreateLocalServerToken, clearLocalServerToken };

@@ -58,4 +58,114 @@ router.get('/permissions-matrix', (req, res) => {
   res.json({ roles: ROLES, modules: MODULES });
 });
 
+// ── leave approvals (admin) ──────────────────────────────────────────────
+router.get('/leave/pending', async (req, res) => {
+  try {
+    const { rows } = await safeQuery(
+      `SELECT lr.*, lt.name AS leave_type_name, e.full_name AS employee_name, e.employee_code, d.name AS department_name
+       FROM leave_requests lr
+       JOIN leave_types lt ON lt.id = lr.leave_type_id
+       JOIN employees e ON e.id = lr.employee_id
+       LEFT JOIN departments d ON d.id = e.department_id
+       WHERE lr.status = 'pending'
+       ORDER BY lr.start_date ASC`
+    );
+    res.json({ leaveRequests: rows });
+  } catch (err) {
+    console.error('[admin:leave:pending]', err);
+    res.status(500).json({ error: 'Failed to fetch pending leave requests' });
+  }
+});
+
+router.post('/leave/:leaveId/decision', async (req, res) => {
+  try {
+    const { decision } = req.body; // 'approved' | 'rejected'
+    if (!['approved', 'rejected'].includes(decision)) {
+      return res.status(400).json({ error: "decision must be 'approved' or 'rejected'" });
+    }
+
+    const { rows: [leaveRequest] } = await safeQuery(`SELECT employee_id, leave_type_id, num_days FROM leave_requests WHERE id = $1`, [req.params.id]);
+    if (!leaveRequest) return res.status(404).json({ error: 'Leave request not found' });
+
+    const { rows } = await safeQuery(
+      `UPDATE leave_requests SET status = $1, approved_by = $2, approved_at = NOW() WHERE id = $3 RETURNING *`,
+      [decision, req.staff.id, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Leave request not found' });
+
+    if (decision === 'approved') {
+      const { rows: [lt] } = await safeQuery(`SELECT name FROM leave_types WHERE id = $1`, [leaveRequest.leave_type_id]);
+      const col = /sick/i.test(lt?.name) ? 'leave_balance_sick' : /annual/i.test(lt?.name) ? 'leave_balance_annual' : null;
+      if (col) {
+        await safeQuery(`UPDATE employees SET ${col} = GREATEST(0, ${col} - $1) WHERE id = $2`, [leaveRequest.num_days, leaveRequest.employee_id]);
+      }
+    }
+    res.json({ leave: rows[0] });
+  } catch (err) {
+    console.error('[admin:leave:decision]', err);
+    res.status(500).json({ error: 'Failed to process leave decision' });
+  }
+});
+
+// ── delete leave request (admin/owner) ────────────────────────────────
+router.delete('/leave/:id', async (req, res) => {
+  try {
+    const { rows } = await safeQuery(`DELETE FROM leave_requests WHERE id = $1 RETURNING id`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Leave request not found' });
+    res.json({ deleted: true, message: 'Leave request deleted' });
+  } catch (err) {
+    console.error('[admin:leave:delete]', err);
+    res.status(500).json({ error: 'Failed to delete leave request' });
+  }
+});
+
+// ── expense claims approval (admin) ────────────────────────────────────
+router.get('/claims/pending', async (req, res) => {
+  try {
+    const { rows } = await safeQuery(
+      `SELECT ec.*, e.full_name AS employee_name, e.employee_code, d.name AS department_name
+       FROM expense_claims ec
+       JOIN employees e ON e.id = ec.employee_id
+       LEFT JOIN departments d ON d.id = e.department_id
+       WHERE ec.status = 'pending'
+       ORDER BY ec.created_at ASC`
+    );
+    res.json({ claims: rows });
+  } catch (err) {
+    console.error('[admin:claims:pending]', err);
+    res.status(500).json({ error: 'Failed to fetch pending claims' });
+  }
+});
+
+router.post('/claims/:claimId/decision', async (req, res) => {
+  try {
+    const { decision } = req.body; // 'approved' | 'rejected'
+    if (!['approved', 'rejected'].includes(decision)) {
+      return res.status(400).json({ error: "decision must be 'approved' or 'rejected'" });
+    }
+
+    const { rows } = await safeQuery(
+      `UPDATE expense_claims SET status = $1, decided_by = $2, decided_at = NOW() WHERE id = $3 AND status = 'pending' RETURNING *`,
+      [decision, req.staff.id, req.params.claimId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Claim not found or already processed' });
+    res.json({ claim: rows[0] });
+  } catch (err) {
+    console.error('[admin:claims:decision]', err);
+    res.status(500).json({ error: 'Failed to process claim decision' });
+  }
+});
+
+// ── delete expense claim (admin/owner) ────────────────────────────────
+router.delete('/claims/:id', async (req, res) => {
+  try {
+    const { rows } = await safeQuery(`DELETE FROM expense_claims WHERE id = $1 RETURNING id`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Expense claim not found' });
+    res.json({ deleted: true, message: 'Expense claim deleted' });
+  } catch (err) {
+    console.error('[admin:claims:delete]', err);
+    res.status(500).json({ error: 'Failed to delete expense claim' });
+  }
+});
+
 module.exports = router;

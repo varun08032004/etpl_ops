@@ -17,6 +17,7 @@ import GroupOutlinedIcon from '@mui/icons-material/GroupOutlined';
 import BadgeOutlinedIcon from '@mui/icons-material/BadgeOutlined';
 import PersonSearchOutlinedIcon from '@mui/icons-material/PersonSearchOutlined';
 import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined';
+import AssignmentOutlinedIcon from '@mui/icons-material/AssignmentOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined';
@@ -48,9 +49,11 @@ import PhoneCallbackOutlinedIcon from '@mui/icons-material/PhoneCallbackOutlined
 import MapOutlinedIcon from '@mui/icons-material/MapOutlined';
 import NewReleasesOutlinedIcon from '@mui/icons-material/NewReleasesOutlined';
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
+import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import PersonOutlinedIcon from '@mui/icons-material/PersonOutlined';
+import NoteOutlinedIcon from '@mui/icons-material/NoteOutlined';
 import MonitorHeartOutlinedIcon from '@mui/icons-material/MonitorHeartOutlined';
 import TimelineOutlinedIcon from '@mui/icons-material/TimelineOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
@@ -78,12 +81,18 @@ export const NAV_GROUPS = [
     items: [
       { to: '/', label: 'Dashboard', icon: DashboardOutlinedIcon, end: true },
       { to: '/analytics', label: 'Analytics', icon: InsightsOutlinedIcon },
-      // Lets privileged staff who are ALSO an employee (Founder included) open
-      // their own payslips/leave/assets without disturbing '/' staying on
-      // Dashboard as the shared home screen for this whole role set.
-      { to: '/my-profile', label: 'My Profile', icon: PersonOutlinedIcon },
-      { to: '/id-cards', label: 'My ID Card', icon: BadgeOutlinedIcon },
+    ],
+  },
+  {
+    label: 'Self Centre',
+    items: [
+      { to: '/my-profile', label: 'My Profile', icon: PersonOutlinedIcon, end: true },
+      { to: '/my-notes', label: 'My Notes', icon: NoteOutlinedIcon },
       { to: '/my-activity', label: 'My Activity', icon: TimelineOutlinedIcon },
+      { to: '/jira', label: 'Jira', icon: BugReportOutlinedIcon },
+      { to: '/workspaces', label: 'Workspaces', icon: WorkspacePremiumOutlinedIcon },
+      { to: '/id-cards', label: 'My ID Card', icon: BadgeOutlinedIcon },
+      { to: '/training/my-training', label: 'My Training', icon: SchoolOutlinedIcon },
     ],
   },
   {
@@ -121,6 +130,7 @@ export const NAV_GROUPS = [
       { to: '/finance', label: 'Finance', icon: PaidOutlinedIcon },
       { to: '/payroll', label: 'Payroll', icon: PaidOutlinedIcon },
       { to: '/expenses', label: 'Recurring Expenses', icon: EventRepeatOutlinedIcon },
+      { to: '/my-finance', label: 'My Finance', icon: AccountBalanceWalletOutlinedIcon },
       // Owner/admin/finance only at the route level (BankAccounts.jsx blocks
       // render for anyone else, and routes/bankAccounts.js gates every
       // endpoint server-side) — shown here in the same Finance nav group
@@ -131,6 +141,7 @@ export const NAV_GROUPS = [
   {
     label: 'Product',
     items: [
+      { to: '/products', label: 'Products & Hiring', icon: Inventory2OutlinedIcon },
       { to: '/product/roadmap', label: 'Roadmap', icon: MapOutlinedIcon },
       { to: '/product/releases', label: 'Releases', icon: NewReleasesOutlinedIcon },
       { to: '/product/feedback', label: 'Feedback & Bugs', icon: BugReportOutlinedIcon },
@@ -179,6 +190,7 @@ export const NAV_GROUPS = [
       { to: '/automation', label: 'Automation', icon: BoltOutlinedIcon },
       { to: '/ai-assistant', label: 'AI Assistant', icon: SmartToyOutlinedIcon },
       { to: '/esignatures', label: 'E-Signatures', icon: BorderColorOutlinedIcon },
+      { to: '/workspaces', label: 'Workspaces', icon: WorkspacePremiumOutlinedIcon },
     ],
   },
   {
@@ -227,12 +239,6 @@ export const ADMIN_NAV_GROUP = {
   ],
 };
 
-export const SELF_SERVICE_NAV = [
-  { to: '/', label: 'My Profile', icon: PersonOutlinedIcon, end: true },
-  { to: '/my-activity', label: 'My Activity', icon: TimelineOutlinedIcon },
-  { to: '/training/my-training', label: 'My Training', icon: SchoolOutlinedIcon },
-];
-
 // Groups open by default so nothing is hidden on first load.
 const ALL_GROUP_LABELS = [...NAV_GROUPS, ADMIN_NAV_GROUP].map((g) => g.label);
 const DEFAULT_OPEN_STATE = Object.fromEntries(ALL_GROUP_LABELS.map((label) => [label, true]));
@@ -273,12 +279,66 @@ export default function Layout() {
   const deptGrantedGroupLabels = new Set(
     (deptAccess?.effectiveRoles || []).flatMap((role) => ROLE_TO_NAV_GROUP_LABELS[role] || [])
   );
-  const deptGrantedNav = NAV_GROUPS
-    .filter((group) => deptGrantedGroupLabels.has(group.label))
-    .flatMap((group) => group.items)
-    // "My Profile" (self-service home) always comes first, dedupe just in case.
-    .filter((item) => item.to !== '/');
-  const selfServiceNav = [...SELF_SERVICE_NAV, ...deptGrantedNav];
+  const nonPrivilegedNavGroups = [
+    ...NAV_GROUPS.filter(g => g.label === 'Self Centre'),
+    ...NAV_GROUPS.filter(g => deptGrantedGroupLabels.has(g.label)),
+  ];
+
+  const renderNavGroups = (groups) => groups.map((group) => {
+    const isOpen = openGroups[group.label] ?? true;
+    return (
+      <Box key={group.label} sx={{ mb: 1 }}>
+        <Box
+          onClick={() => toggleGroup(group.label)}
+          sx={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            px: 1.5, pt: 1.5, pb: 0.5, cursor: 'pointer', userSelect: 'none',
+            '&:hover .group-label': { color: 'text.primary' },
+          }}
+        >
+          <Typography
+            className="group-label"
+            sx={{ fontSize: '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}
+          >
+            {group.label}
+          </Typography>
+          <ExpandMoreIcon
+            sx={{
+              fontSize: 16, color: 'text.secondary',
+              transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+              transition: 'transform 0.15s ease',
+            }}
+          />
+        </Box>
+        <Collapse in={isOpen} timeout={150}>
+          {group.items
+            .filter(({ roles }) => !roles || roles.includes(staff?.role))
+            .map(({ to, label, icon: Icon, end }) => (
+            <Box
+              key={to} component={NavLink} to={to} end={end}
+              sx={{
+                display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1,
+                borderRadius: 1.5, color: 'text.secondary', fontSize: '0.9375rem', fontWeight: 500,
+                position: 'relative',
+                '&.active': {
+                  color: 'text.primary', bgcolor: 'rgba(47,191,113,0.08)',
+                  '& .nav-icon': { color: 'primary.main' },
+                  '&::before': {
+                    content: '""', position: 'absolute', left: -6, top: '20%', bottom: '20%',
+                    width: 3, borderRadius: 3, bgcolor: 'primary.main',
+                  },
+                },
+                '&:hover': { color: 'text.primary', bgcolor: 'rgba(255,255,255,0.03)' },
+              }}
+            >
+              <Icon className="nav-icon" sx={{ fontSize: 21 }} />
+              {label}
+            </Box>
+          ))}
+        </Collapse>
+      </Box>
+    );
+  });
 
   useEffect(() => {
     try {
@@ -310,111 +370,7 @@ export default function Layout() {
         </Box>
 
         <Box sx={{ px: 1.5, display: 'flex', flexDirection: 'column', gap: 0.5, flex: 1, overflowY: 'auto' }}>
-          {isPrivileged ? (
-            <>
-              {navGroups.map((group) => {
-                const isOpen = openGroups[group.label] ?? true;
-                return (
-                  <Box key={group.label} sx={{ mb: 1 }}>
-                    <Box
-                      onClick={() => toggleGroup(group.label)}
-                      sx={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        px: 1.5, pt: 1.5, pb: 0.5, cursor: 'pointer', userSelect: 'none',
-                        '&:hover .group-label': { color: 'text.primary' },
-                      }}
-                    >
-                      <Typography
-                        className="group-label"
-                        sx={{ fontSize: '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}
-                      >
-                        {group.label}
-                      </Typography>
-                      <ExpandMoreIcon
-                        sx={{
-                          fontSize: 16, color: 'text.secondary',
-                          transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
-                          transition: 'transform 0.15s ease',
-                        }}
-                      />
-                    </Box>
-                    <Collapse in={isOpen} timeout={150}>
-                      {group.items
-                        .filter(({ roles }) => !roles || roles.includes(staff?.role))
-                        .map(({ to, label, icon: Icon, end }) => (
-                        <Box
-                          key={to} component={NavLink} to={to} end={end}
-                          sx={{
-                            display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1,
-                            borderRadius: 1.5, color: 'text.secondary', fontSize: '0.9375rem', fontWeight: 500,
-                            position: 'relative',
-                            '&.active': {
-                              color: 'text.primary', bgcolor: 'rgba(47,191,113,0.08)',
-                              '& .nav-icon': { color: 'primary.main' },
-                              '&::before': {
-                                content: '""', position: 'absolute', left: -6, top: '20%', bottom: '20%',
-                                width: 3, borderRadius: 3, bgcolor: 'primary.main',
-                              },
-                            },
-                            '&:hover': { color: 'text.primary', bgcolor: 'rgba(255,255,255,0.03)' },
-                          }}
-                        >
-                          <Icon className="nav-icon" sx={{ fontSize: 21 }} />
-                          {label}
-                        </Box>
-                      ))}
-                    </Collapse>
-                  </Box>
-                );
-              })}
-              {/* Self-service nav items for privileged users */}
-              {selfServiceNav.map(({ to, label, icon: Icon, end }) => (
-                <Box
-                  key={to} component={NavLink} to={to} end={end}
-                  sx={{
-                    display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1,
-                    borderRadius: 1.5, color: 'text.secondary', fontSize: '0.9375rem', fontWeight: 500,
-                    position: 'relative',
-                    '&.active': {
-                      color: 'text.primary', bgcolor: 'rgba(47,191,113,0.08)',
-                      '& .nav-icon': { color: 'primary.main' },
-                      '&::before': {
-                        content: '""', position: 'absolute', left: -6, top: '20%', bottom: '20%',
-                        width: 3, borderRadius: 3, bgcolor: 'primary.main',
-                      },
-                    },
-                    '&:hover': { color: 'text.primary', bgcolor: 'rgba(255,255,255,0.03)' },
-                  }}
-                >
-                  <Icon className="nav-icon" sx={{ fontSize: 21 }} />
-                  {label}
-                </Box>
-              ))}
-            </>
-          ) : (
-            selfServiceNav.map(({ to, label, icon: Icon, end }) => (
-              <Box
-                key={to} component={NavLink} to={to} end={end}
-                sx={{
-                  display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1,
-                  borderRadius: 1.5, color: 'text.secondary', fontSize: '0.9375rem', fontWeight: 500,
-                  position: 'relative',
-                  '&.active': {
-                    color: 'text.primary', bgcolor: 'rgba(47,191,113,0.08)',
-                    '& .nav-icon': { color: 'primary.main' },
-                    '&::before': {
-                      content: '""', position: 'absolute', left: -6, top: '20%', bottom: '20%',
-                      width: 3, borderRadius: 3, bgcolor: 'primary.main',
-                    },
-                  },
-                  '&:hover': { color: 'text.primary', bgcolor: 'rgba(255,255,255,0.03)' },
-                }}
-              >
-                <Icon className="nav-icon" sx={{ fontSize: 21 }} />
-                {label}
-              </Box>
-            ))
-          )}
+            {renderNavGroups(isPrivileged ? navGroups : nonPrivilegedNavGroups)}
         </Box>
 
         <Divider />

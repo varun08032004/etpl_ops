@@ -3,17 +3,18 @@
 // Bound to 127.0.0.1 only — never reachable from the network, only from
 // something running ON this machine. The token check on top of that stops
 // some OTHER localhost process from spoofing tab-update calls; it's a
-// shared secret baked into both this config.json and the extension's
-// options page at setup time, not a cryptographic identity — same trust
-// model as the agent's own company_code. Good enough for "only the
-// EtherTrack extension talks to this," not meant to survive a
-// sophisticated local attacker with access to the same machine.
+// per-install unique token stored securely via Electron's safeStorage (DPAPI).
+// This prevents token extraction from config.json and ensures each installation
+// has its own unique token that the browser extension must obtain at pairing time.
 
 const http = require('http');
 const config = require('../config.json');
+const store = require('./store');
 
 const PORT = config.localServerPort || 47823;
-const TOKEN = config.localServerToken;
+
+// Get per-install unique token (generated on first run, stored encrypted)
+const TOKEN = store.getOrCreateLocalServerToken();
 
 function startLocalServer(getTracker) {
   const server = http.createServer((req, res) => {
@@ -60,4 +61,9 @@ function startLocalServer(getTracker) {
   return server;
 }
 
-module.exports = { startLocalServer, PORT };
+// Expose token for extension pairing (called via IPC from options page)
+function getLocalServerToken() {
+  return TOKEN;
+}
+
+module.exports = { startLocalServer, PORT, getLocalServerToken };

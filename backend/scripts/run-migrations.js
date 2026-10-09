@@ -1,16 +1,9 @@
-#!/usr/bin/env node
 'use strict';
 
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const { Pool } = require('pg');
-require('dotenv').config();
-
-const pool = new Pool({
-  connectionString: process.env.INTERNAL_OPS_DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-  max: 1,
-});
+const { pool } = require('../db/pool');
 
 async function runMigration(filePath) {
   const sql = fs.readFileSync(filePath, 'utf8');
@@ -19,14 +12,10 @@ async function runMigration(filePath) {
     await client.query('BEGIN');
     await client.query(sql);
     await client.query('COMMIT');
-    console.log(`��� Migration applied: ${filePath}`);
+    console.log(`✅ Migration applied: ${path.basename(filePath)}`);
   } catch (err) {
     await client.query('ROLLBACK');
-    if (err.message.includes('already exists') || err.message.includes('duplicate_object')) {
-      console.log(`������  Already exists, skipping: ${filePath}`);
-      return;
-    }
-    console.error(`��� Migration failed: ${filePath}`);
+    console.error(`❌ Migration failed: ${path.basename(filePath)}`);
     console.error(err.message);
     throw err;
   } finally {
@@ -36,25 +25,23 @@ async function runMigration(filePath) {
 
 async function main() {
   const migrations = [
-    '../db/007_ai_access.sql',
-    '../db/008_ai_tools.sql',
-    '../db/009_missing_tables.sql',
+    '../db/060_jira_comprehensive.sql',
   ];
 
   for (const migration of migrations) {
     const fullPath = path.join(__dirname, migration);
-    if (!fs.existsSync(fullPath)) {
-      console.error(`��� File not found: ${fullPath}`);
-      process.exit(1);
+    if (fs.existsSync(fullPath)) {
+      await runMigration(fullPath);
+    } else {
+      console.log(`⚠️  Skipping missing: ${migration}`);
     }
-    await runMigration(fullPath);
   }
-  console.log('���� All migrations applied successfully');
+  
   await pool.end();
-  process.exit(0);
+  console.log('All migrations completed');
 }
 
 main().catch(err => {
-  console.error('Fatal:', err.message);
+  console.error('Migration error:', err);
   process.exit(1);
 });

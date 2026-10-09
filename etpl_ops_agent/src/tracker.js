@@ -1,50 +1,145 @@
 'use strict';
 
 const { powerMonitor } = require('electron');
+const os = require('os');
+const { exec } = require('child_process');
 
-const APP_POLL_MS = 3000;   // how often we sample the focused window
-const IDLE_POLL_MS = 5000;  // how often we check system idle time
-const EXTENSION_FRESHNESS_MS = 15000; // how long a browser-extension-reported domain is trusted before falling back to the title-guess
+const APP_POLL_MS = 1000;
+const IDLE_POLL_MS = 1000;
+const EXTENSION_FRESHNESS_MS = 5000;
+const WORK_MODE_CHECK_MS = 30000;
+const VM_CHECK_MS = 300000;
 
-// Common browser process names — used to flag which app segments we'd
-// ALSO want a website breakdown for, and to label the (best-effort) domain
-// guess. See extractDomainGuess() below for the important caveat.
-const BROWSER_PROCESSES = new Set(['chrome.exe', 'msedge.exe', 'firefox.exe', 'brave.exe', 'opera.exe']);
+const BROWSER_PROCESSES = new Set(['chrome.exe', 'msedge.exe', 'firefox.exe', 'brave.exe', 'opera.exe', 'msedgewebview2.exe']);
 
-// Window titles for browsers are usually "Page Title - Browser Name" and
-// do NOT reliably include the domain (e.g. Chrome shows the <title> tag,
-// not the URL). This is a best-effort fallback only — it catches cases
-// where a site puts its own domain in the title (many docs/admin tools do)
-// but will miss most consumer sites. Accurate domain-level tracking needs
-// a companion browser extension talking to this agent over native
-// messaging or a local port; that's flagged as a follow-up, not faked here.
+const MEETING_APPS = new Set([
+  'zoom.exe', 'zoom.us.exe', 'zoom.vdi.exe',
+  'teams.exe', 'ms-teams.exe', 'teamswebview2.exe',
+  'meet.exe', 'googlemeet.exe',
+  'webex.exe', 'cisco-webex.exe', 'webexhost.exe',
+  'slack.exe', 'discord.exe',
+  'skype.exe', 'lync.exe',
+  'gotomeeting.exe', 'g2m.exe',
+  'bluejeans.exe', 'whereby.exe', 'around.exe',
+  'jami.exe', 'ring.exe',
+  'signal.exe', 'telegram.exe', 'whatsapp.exe'
+]);
+
+let OFFICE_NETWORKS = [];
+let vmDetectionCache = { isVM: false, details: [], checkedAt: 0 };
+
 function extractDomainGuess(title) {
   if (!title) return null;
   const match = title.match(/([a-z0-9-]+\.)+[a-z]{2,}/i);
   return match ? match[0].toLowerCase() : null;
 }
 
+function isOfficeNetwork() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        const ip = iface.address;
+        for (const network of OFFICE_NETWORKS) {
+          if (ipInCidr(ip, network.cidr)) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function ipInCidr(ip, cidr) {
+  const [rangeIp, bits] = cidr.split('/');
+  const mask = ~((1 << (32 - parseInt(bits, 10))) - 1);
+  const ipNum = ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
+  const rangeNum = rangeIp.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
+  return (ipNum & mask) === (rangeNum & mask);
+}
+
+async function detectVM() {
+  const now = Date.now();
+  if (vmDetectionCache.checkedAt && (now - vmDetectionCache.checkedAt) < VM_CHECK_MS) {
+    return vmDetectionCache;
+  }
+
+  const details = [];
+  let isVM = false;
+
+  try {
+    const { stdout } = await execAsync('wmic cpu get Manufacturer,Name,Caption /value');
+    if (stdout.toLowerCase().includes('virtual') || stdout.toLowerCase().includes('vmware') || stdout.toLowerCase().includes('hyper-v')) {
+      isVM = true; details.push('cpu_info_virtual');
+    }
+  } catch (e) {}
+
+  try {
+    const { stdout } = await execAsync('wmic computersystem get Manufacturer,Model /value');
+    const out = stdout.toLowerCase();
+    const vmIndicators = ['vmware', 'virtualbox', 'qemu', 'xen', 'hyper-v', 'parallels', 'innotek', 'microsoft corporation'];
+    for (const indicator of vmIndicators) {
+      if (out.includes(indicator)) { isVM = true; details.push(`wmi_${indicator.replace(/[^a-z]/g, '_')}`); break; }
+    }
+  } catch (e) {}
+
+  try {
+    const { stdout } = await execAsync('systeminfo');
+    if (stdout.toLowerCase().includes('vmware') || stdout.toLowerCase().includes('virtual machine')) {
+      isVM = true; details.push('systeminfo_vm');
+    }
+  } catch (e) {}
+
+  try {
+    const { stdout } = await execAsync('reg query "HKLM\\HARDWARE\\ACPI\\DSDT\\VBOX__" 2>nul || reg query "HKLM\\HARDWARE\\ACPI\\DSDT\\VMWARE" 2>nul || reg query "HKLM\\HARDWARE\\ACPI\\DSDT\\QEMU" 2>nul');
+    if (stdout.trim()) { isVM = true; details.push('registry_acpi'); }
+  } catch (e) {}
+
+  try {
+    const interfaces = os.networkInterfaces();
+    const vmMacPrefixes = [
+      '00:05:69', '00:0c:29', '00:1c:14', '00:50:56',
+      '08:00:27',
+      '00:16:3e', '00:1a:4a',
+      '00:03:ff',
+      '00:1c:42',
+    ];
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name]) {
+        if (iface.mac) {
+          const prefix = iface.mac.substring(0, 8).toLowerCase();
+          if (vmMacPrefixes.includes(prefix)) { isVM = true; details.push(`mac_prefix_${prefix.replace(/:/g, '')}`); }
+        }
+      }
+    }
+  } catch (e) {}
+
+  vmDetectionCache = { isVM, details, checkedAt: now };
+  return vmDetectionCache;
+}
+
+function execAsync(cmd) {
+  return new Promise((resolve, reject) => {
+    exec(cmd, { timeout: 10000 }, (err, stdout, stderr) => {
+      if (err && err.code !== 1) return reject(err);
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
 class Tracker {
   constructor({ idleThresholdSeconds = 300, onUpdate, excludedApps = [] } = {}) {
     this.idleThresholdSeconds = idleThresholdSeconds;
     this.onUpdate = onUpdate || (() => {});
-    // The agent's own window(s) — 'Electron' in dev (`npm start`), the
-    // packaged exe name in production. Focusing the tray status popup
-    // shouldn't log itself as an "app the employee used".
-    this.excludedApps = new Set(excludedApps.map((a) => a.toLowerCase()));
+    this.excludedApps = new Set(excludedApps.map(a => a.toLowerCase()));
     this.running = false;
 
-    // Domain reported by the browser extension (real tab URL — accurate),
-    // as opposed to the title-guess fallback below (best-effort only).
-    // See reportBrowserTab(). Treated as stale after EXTENSION_FRESHNESS_MS
-    // so a browser that closes the extension, or an uninstalled extension,
-    // silently falls back to the title-guess rather than showing frozen
-    // last-known data forever.
     this.reportedDomain = null;
     this.reportedDomainAt = 0;
+    this.lastExtensionReportAt = 0;
+    this.extensionConnected = false;
 
-    this.currentSegment = null;   // { app_name, window_title, started_at: Date }
-    this.currentIdlePeriod = null; // { started_at: Date }
+    this.currentSegment = null;
+    this.currentIdlePeriod = null;
     this.isIdle = false;
 
     this.appSegments = [];
@@ -56,27 +151,69 @@ class Tracker {
     this.lastPollAt = null;
     this._appTimer = null;
     this._idleTimer = null;
+    this._workModeTimer = null;
+    this._vmTimer = null;
+    this.currentWorkMode = null;
+    this.currentVMStatus = false;
+    
+    this.lastKnownActiveApp = null;
+    this.lastKnownActiveTitle = null;
+    this.lastKnownDomain = null;
+    this.segmentStartTime = null;
+  }
+
+  setOfficeNetworks(networks) {
+    OFFICE_NETWORKS = networks || [];
   }
 
   start() {
     if (this.running) return;
     this.running = true;
     this.lastPollAt = Date.now();
+    this.segmentStartTime = Date.now();
+    
     this._appTimer = setInterval(() => this._pollActiveWindow(), APP_POLL_MS);
     this._idleTimer = setInterval(() => this._pollIdle(), IDLE_POLL_MS);
+    this._workModeTimer = setInterval(() => this._checkWorkMode(), WORK_MODE_CHECK_MS);
+    this._vmTimer = setInterval(() => this._checkVM(), VM_CHECK_MS);
+    
+    this._checkWorkMode();
+    this._checkVM();
+    this._pollActiveWindow();
+    this._pollIdle();
   }
 
   stop() {
     this.running = false;
     clearInterval(this._appTimer);
     clearInterval(this._idleTimer);
+    clearInterval(this._workModeTimer);
+    clearInterval(this._vmTimer);
     this._closeCurrentSegment();
     this._closeCurrentIdlePeriod();
   }
 
+  async _checkVM() {
+    const vmInfo = await detectVM();
+    if (this.currentVMStatus !== vmInfo.isVM) {
+      this.currentVMStatus = vmInfo.isVM;
+      this.onUpdate({ vm_detected: vmInfo.isVM, vm_details: vmInfo.details });
+    }
+  }
+
+  _checkWorkMode() {
+    const isOffice = isOfficeNetwork();
+    const newMode = isOffice ? 'office' : 'wfh';
+    if (this.currentWorkMode !== newMode) {
+      this.currentWorkMode = newMode;
+      this.onUpdate({ work_mode: newMode });
+    }
+  }
+
   async _pollActiveWindow() {
     if (!this.running) return;
-    const now = new Date();
+    
+    const now = Date.now();
     const elapsedSec = (now - this.lastPollAt) / 1000;
     this.lastPollAt = now;
 
@@ -91,7 +228,7 @@ class Tracker {
       const activeWin = (await import('active-win')).default;
       win = await activeWin();
     } catch (err) {
-      return; // e.g. no window focused, or permissions not yet granted — just skip this tick
+      return;
     }
     if (!win) return;
 
@@ -99,29 +236,37 @@ class Tracker {
     const windowTitle = win.title || '';
 
     if (this.excludedApps.has(appName.toLowerCase())) {
-      // Focused on our own tray/status window — close whatever real
-      // segment was open (the employee genuinely stopped using that app
-      // the moment they clicked the tray icon), but don't open a new one
-      // and don't push a live update for it. The last real app/site stays
-      // shown until they focus something else.
       this._closeCurrentSegment(now);
       return;
     }
 
-    if (!this.currentSegment || this.currentSegment.app_name !== appName || this.currentSegment.window_title !== windowTitle) {
+    const appChanged = !this.currentSegment || 
+      this.currentSegment.app_name !== appName || 
+      this.currentSegment.window_title !== windowTitle;
+
+    if (appChanged) {
       this._closeCurrentSegment(now);
-      this.currentSegment = { app_name: appName, window_title: windowTitle, started_at: now };
+      
+      const isMeetingApp = MEETING_APPS.has(appName.toLowerCase());
+      this.currentSegment = { 
+        app_name: appName, 
+        window_title: windowTitle, 
+        started_at: new Date(now),
+        is_meeting: isMeetingApp
+      };
+      this.segmentStartTime = now;
+      this.lastKnownActiveApp = appName;
+      this.lastKnownActiveTitle = windowTitle;
 
       if (BROWSER_PROCESSES.has(appName.toLowerCase())) {
-        // Prefer the real URL the browser extension just reported (see
-        // reportBrowserTab()) over the title-guess — it's actually
-        // accurate. Only fall back to guessing from the window title when
-        // the extension hasn't reported anything recently (not installed,
-        // disabled, or a non-Chromium browser it doesn't support yet).
         const extensionFresh = this.reportedDomain && (Date.now() - this.reportedDomainAt) < EXTENSION_FRESHNESS_MS;
         const domain = extensionFresh ? this.reportedDomain : extractDomainGuess(windowTitle);
-        if (domain) this.currentWebsiteSegment = { domain, started_at: now };
-        else this.currentWebsiteSegment = null;
+        if (domain) {
+          this.currentWebsiteSegment = { domain, started_at: new Date(now) };
+          this.lastKnownDomain = domain;
+        } else {
+          this.currentWebsiteSegment = null;
+        }
       } else {
         this._closeCurrentWebsiteSegment(now);
       }
@@ -134,38 +279,42 @@ class Tracker {
     });
   }
 
-  // Called by the local HTTP server (src/localServer.js) whenever the
-  // browser extension reports the newly-active tab's domain. This is
-  // event-driven (fires on the actual tab switch) rather than waiting for
-  // the next 3s poll, so segment boundaries line up with real tab
-  // switches instead of being rounded to the poll cadence.
   reportBrowserTab(domain) {
     if (!domain || !this.running) return;
     this.reportedDomain = domain;
     this.reportedDomainAt = Date.now();
+    this.lastExtensionReportAt = Date.now();
+    this.extensionConnected = true;
 
-    // Only actually act on it if we're currently focused on a browser —
-    // if the employee is in VS Code and a background browser tab changes,
-    // that's not something that should open a website segment right now.
     if (!this.currentSegment || !BROWSER_PROCESSES.has(this.currentSegment.app_name.toLowerCase())) return;
     if (this.currentWebsiteSegment?.domain === domain) return;
 
-    const now = new Date();
+    const now = Date.now();
     this._closeCurrentWebsiteSegment(now);
-    this.currentWebsiteSegment = { domain, started_at: now };
+    this.currentWebsiteSegment = { domain, started_at: new Date(now) };
+    this.lastKnownDomain = domain;
     this.onUpdate({ current_domain: domain });
+  }
+
+  checkExtensionConnection() {
+    if (!this.running) return true;
+    if (!this.lastExtensionReportAt) return false;
+    
+    const timeSinceLastReport = Date.now() - this.lastExtensionReportAt;
+    const EXTENSION_TIMEOUT_MS = 30000;
+    return timeSinceLastReport < EXTENSION_TIMEOUT_MS;
   }
 
   _pollIdle() {
     if (!this.running) return;
+    
     const idleSeconds = powerMonitor.getSystemIdleTime();
-    const now = new Date();
+    const now = Date.now();
     const shouldBeIdle = idleSeconds >= this.idleThresholdSeconds;
 
     if (shouldBeIdle && !this.isIdle) {
       this.isIdle = true;
-      // Idle actually started `idleThresholdSeconds` ago, not right now.
-      this.currentIdlePeriod = { started_at: new Date(now.getTime() - this.idleThresholdSeconds * 1000) };
+      this.currentIdlePeriod = { started_at: new Date(now - this.idleThresholdSeconds * 1000) };
       this._closeCurrentSegment(now);
     } else if (!shouldBeIdle && this.isIdle) {
       this.isIdle = false;
@@ -173,36 +322,44 @@ class Tracker {
     }
   }
 
-  _closeCurrentSegment(endedAt = new Date()) {
+  _closeCurrentSegment(endedAt = Date.now()) {
     if (!this.currentSegment) return;
     const durationSeconds = Math.max(0, Math.round((endedAt - this.currentSegment.started_at) / 1000));
     if (durationSeconds > 0) {
-      this.appSegments.push({ ...this.currentSegment, ended_at: endedAt, duration_seconds: durationSeconds });
+      this.appSegments.push({ 
+        ...this.currentSegment, 
+        ended_at: new Date(endedAt), 
+        duration_seconds: durationSeconds 
+      });
     }
     this.currentSegment = null;
     this._closeCurrentWebsiteSegment(endedAt);
   }
 
-  _closeCurrentWebsiteSegment(endedAt = new Date()) {
+  _closeCurrentWebsiteSegment(endedAt = Date.now()) {
     if (!this.currentWebsiteSegment) return;
     const durationSeconds = Math.max(0, Math.round((endedAt - this.currentWebsiteSegment.started_at) / 1000));
     if (durationSeconds > 0) {
-      this.websiteSegments.push({ ...this.currentWebsiteSegment, ended_at: endedAt, duration_seconds: durationSeconds });
+      this.websiteSegments.push({ 
+        ...this.currentWebsiteSegment, 
+        ended_at: new Date(endedAt), 
+        duration_seconds: durationSeconds 
+      });
     }
     this.currentWebsiteSegment = null;
   }
 
-  _closeCurrentIdlePeriod(endedAt = new Date()) {
+  _closeCurrentIdlePeriod(endedAt = Date.now()) {
     if (!this.currentIdlePeriod) return;
     const durationSeconds = Math.max(0, Math.round((endedAt - this.currentIdlePeriod.started_at) / 1000));
-    this.idlePeriods.push({ ...this.currentIdlePeriod, ended_at: endedAt, duration_seconds: durationSeconds });
+    this.idlePeriods.push({ 
+      ...this.currentIdlePeriod, 
+      ended_at: new Date(endedAt), 
+      duration_seconds: durationSeconds 
+    });
     this.currentIdlePeriod = null;
   }
 
-  // Called every heartbeat — hands over everything accumulated since the
-  // last call and resets the buffers. Any segment still open (e.g. still
-  // sitting in VS Code) is intentionally left open; it gets flushed on the
-  // NEXT heartbeat once it actually ends, so durations stay accurate.
   drainForHeartbeat() {
     const payload = {
       active_seconds_delta: Math.round(this.activeSecondsSinceHeartbeat),
@@ -210,15 +367,19 @@ class Tracker {
       app_segments: this.appSegments,
       website_segments: this.websiteSegments,
       idle_periods: this.idlePeriods,
-      current_app: this.currentSegment?.app_name || null,
-      current_window_title: this.currentSegment?.window_title || null,
-      current_domain: this.currentWebsiteSegment?.domain || null,
+      current_app: this.currentSegment?.app_name || this.lastKnownActiveApp || null,
+      current_window_title: this.currentSegment?.window_title || this.lastKnownActiveTitle || null,
+      current_domain: this.currentWebsiteSegment?.domain || this.lastKnownDomain || null,
+      work_mode: this.currentWorkMode,
+      vm_detected: this.currentVMStatus,
     };
+    
     this.activeSecondsSinceHeartbeat = 0;
     this.idleSecondsSinceHeartbeat = 0;
     this.appSegments = [];
     this.websiteSegments = [];
     this.idlePeriods = [];
+    
     return payload;
   }
 }

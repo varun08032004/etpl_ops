@@ -24,15 +24,12 @@ import {
   useMobile,
 } from '../components/MobileResponsive';
 
-// Default tier labels (will be overridden by API data)
+// Default tier labels (will be overridden by API data) — matches 056_final_org_structure.sql
 const DEFAULT_TIERS = [
-  { name: 'Managing Director / Executive Director', display_order: 0, color: '#7c3aed' },
-  { name: 'Director(s)', display_order: 10, color: '#6d28d9' },
-  { name: 'CEO', display_order: 20, color: '#5b21b6' },
-  { name: 'Department Head (HOD)', display_order: 30, color: '#3730a3' },
-  { name: 'Senior Management', display_order: 40, color: '#1e40af' },
-  { name: 'Management', display_order: 50, color: '#0f766e' },
-  { name: 'Employee', display_order: 60, color: '#166534' },
+  { name: 'Founder', display_order: 0, color: '#7c3aed' },
+  { name: 'Managing Director', display_order: 10, color: '#6d28d9' },
+  { name: 'Director(s)', display_order: 20, color: '#5b21b6' },
+  { name: 'CEO', display_order: 30, color: '#3730a3' },
 ];
 
 function TierRow({ title, people, color = 'primary.main', isMobile, canEdit, onEdit, onAssign, tierId }) {
@@ -105,7 +102,7 @@ function TeamRow({ team, canEdit, onEdit, onDelete, isMobile }) {
           </IconButton>
         </Box>
       </Box>
-      <Collapse in={expanded}>
+      <Collapse in={expanded} unmountOnExit>
         <Box sx={{ mt: 1, pl: isMobile ? 0.5 : 1 }}>
           {members?.map((m) => (
             <Box key={m.id} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.4, flexWrap: 'wrap', gap: 1 }}>
@@ -183,7 +180,7 @@ function DepartmentCard({ dept, teams, canEdit, onEditDept, onDeleteDept, onAddT
         </IconButton>
       </Box>
 
-      <Collapse in={expanded}>
+      <Collapse in={expanded} unmountOnExit>
         <Box sx={{ mt: isMobile ? 1 : 1.5, borderTop: '1px solid', borderColor: 'divider', pt: isMobile ? 1 : 1.5 }}>
           <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.75rem', color: 'text.secondary', mb: 0.5 }}>Employees in this department</Typography>
           {members?.map((m) => (
@@ -248,72 +245,88 @@ export default function OrgStructure() {
 
   // Employee assignment via code
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
-  const [assignForm, setAssignForm] = useState({ employee_code: '', tier_id: '' });
+  const [assignForm, setAssignForm] = useState({ employee_id: '', tier_id: '' });
   const [assignSaving, setAssignSaving] = useState(false);
   const [assignError, setAssignError] = useState('');
 
-  const load = () => {
-    client.get('/org-hierarchy-tiers').then(({ data }) => {
-      const sortedTiers = data.tiers.sort((a, b) => a.display_order - b.display_order);
+  const load = async () => {
+    try {
+      console.log('[Load] Starting...');
+      const [{ data: tiersData }, { data: deptsData }, { data: teamsData }, { data: empsData }, { data: desigsData }, { data: staffData }] = await Promise.all([
+        client.get('/org-hierarchy-tiers'),
+        client.get('/departments'),
+        client.get('/teams'),
+        client.get('/employees'),
+        client.get('/designations'),
+        client.get('/staff-accounts'),
+      ]);
+      
+      const sortedTiers = tiersData.tiers.sort((a, b) => a.display_order - b.display_order);
+      console.log('[Load] Tiers:', sortedTiers.map(t => ({ id: t.id, name: t.name, order: t.display_order })));
+      console.log('[Load] Employees:', empsData.employees.map(e => ({ id: e.id, code: e.employee_code, name: e.full_name, desig_id: e.designation_id })));
+      console.log('[Load] Designations:', desigsData.designations.map(d => ({ id: d.id, title: d.title, tier_id: d.tier_id })));
+      console.log('[Load] Staff:', staffData.staff.map(s => ({ id: s.id, role: s.role, employee_id: s.employee_id })));
+      
       setTiers(sortedTiers);
+      setDepartments(deptsData.departments);
+      setTeams(teamsData.teams);
+      setEmployees(empsData.employees);
+      setDesignations(desigsData.designations);
+      
+      // Build staffByTier immediately
       const byTier = {};
       sortedTiers.forEach(t => byTier[t.id] = []);
-      setStaffByTier(byTier);
-    }).catch(() => {});
-
-    client.get('/staff-accounts').then(({ data }) => {
-      // Will populate staffByTier after designations loaded
-    }).catch(() => {});
-
-    client.get('/departments').then(({ data }) => setDepartments(data.departments)).catch(() => {});
-    client.get('/teams').then(({ data }) => setTeams(data.teams)).catch(() => {});
-    client.get('/employees').then(({ data }) => setEmployees(data.employees)).catch(() => {});
-    client.get('/designations').then(({ data }) => setDesignations(data.designations)).catch(() => {});
-  };
-
-  useEffect(() => { load(); }, []);
-
-  // Populate staffByTier when staff and designations are loaded
-  useEffect(() => {
-    if (!tiers.length) return;
-    client.get('/staff-accounts').then(({ data }) => {
-      const byTier = {};
-      tiers.forEach(t => byTier[t.id] = []);
       
-      for (const s of data.staff) {
+      for (const s of staffData.staff) {
         if (!s.employee_id) continue;
-        const emp = employees.find(e => e.id === s.employee_id);
+        const emp = empsData.employees.find(e => e.id === s.employee_id);
         if (!emp) continue;
         
         let tierId = null;
+        let tierSource = 'none';
         if (emp.designation_id) {
-          const des = designations.find(d => d.id === emp.designation_id);
-          if (des?.tier_id) tierId = des.tier_id;
+          const des = desigsData.designations.find(d => d.id === emp.designation_id);
+          if (des?.tier_id) {
+            tierId = des.tier_id;
+            tierSource = 'designation';
+          }
         }
         
-        // Fallback: map by role
+        // Fallback: map by role (ONLY if no designation tier)
         if (!tierId) {
           if (s.role === 'owner') {
-            tierId = tiers.find(t => t.name.includes('Managing Director'))?.id;
+            tierId = sortedTiers.find(t => t.name === 'Founder')?.id;
+            tierSource = 'role:owner';
           } else if (s.role === 'admin') {
-            tierId = tiers.find(t => t.name === 'CEO')?.id;
+            tierId = sortedTiers.find(t => t.name === 'CEO')?.id;
+            tierSource = 'role:admin';
           } else if (s.role === 'hr') {
-            tierId = tiers.find(t => t.name === 'Department Head (HOD)')?.id;
+            tierId = sortedTiers.find(t => t.name.includes('HOD'))?.id;
+            tierSource = 'role:hr';
           }
         }
         
         // Default to Employee tier
         if (!tierId) {
-          tierId = tiers.find(t => t.name === 'Employee')?.id;
+          tierId = sortedTiers.find(t => t.name === 'Employee')?.id;
+          tierSource = 'default:employee';
         }
+        
+        console.log(`[Load] Staff mapping: ${s.email} (role=${s.role}) -> emp=${emp.employee_code} ${emp.full_name} -> desig=${emp.designation_id} -> tierId=${tierId} (${tierSource})`);
         
         if (tierId && byTier[tierId]) {
           byTier[tierId].push({ ...s, employee_name: emp.full_name });
         }
       }
       setStaffByTier(byTier);
-    }).catch(() => {});
-  }, [tiers, employees, designations]);
+      console.log('[Load] staffByTier:', Object.keys(byTier).map(k => ({ tier: k, count: byTier[k].length, people: byTier[k].map(p => p.employee_name) })));
+      console.log('[Load] State updated');
+    } catch (err) {
+      console.error('[Load] Failed:', err);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
 
   const teamsForDept = (deptId) => teams.filter((t) => t.department_id === deptId);
 
@@ -473,7 +486,7 @@ export default function OrgStructure() {
   };
 
   const openAssignDialog = (tierId) => {
-    setAssignForm({ employee_code: '', tier_id: tierId });
+    setAssignForm({ employee_id: '', tier_id: tierId });
     setAssignError('');
     setAssignDialogOpen(true);
   };
@@ -482,16 +495,18 @@ export default function OrgStructure() {
     setAssignSaving(true);
     setAssignError('');
     try {
-      const { employee_code, tier_id } = assignForm;
-      if (!employee_code || !tier_id) {
-        setAssignError('Employee code and tier are required');
+      const { employee_id, tier_id } = assignForm;
+      console.log('[Assign] Starting:', { employee_id, tier_id });
+      if (!employee_id || !tier_id) {
+        setAssignError('Employee and tier are required');
         return;
       }
-      // Find employee by code
-      const { data: empData } = await client.get('/employees', { params: { search: employee_code } });
-      const emp = empData.employees?.find(e => e.employee_code === employee_code.toUpperCase());
+      // Get employee details
+      const { data: empData } = await client.get(`/employees/${employee_id}`);
+      console.log('[Assign] Employee data:', empData);
+      const emp = empData.employee;
       if (!emp) {
-        setAssignError(`Employee with code ${employee_code} not found`);
+        setAssignError('Employee not found');
         return;
       }
       // Get designation or create one with tier
@@ -502,17 +517,22 @@ export default function OrgStructure() {
           title: `${emp.full_name} - Auto`,
           tier_id: tier_id,
         });
+        console.log('[Assign] Created designation:', desData);
         desId = desData.designation.id;
       } else {
         // Update existing designation with tier
-        await client.put(`/designations/${desId}`, { tier_id: tier_id });
+        const { data: desUpdateData } = await client.put(`/designations/${desId}`, { tier_id: tier_id });
+        console.log('[Assign] Updated designation:', desUpdateData);
       }
       // Update employee with designation
-      await client.put(`/employees/${emp.id}`, { designation_id: desId });
+      const { data: empUpdateData } = await client.put(`/employees/${emp.id}`, { designation_id: desId });
+      console.log('[Assign] Updated employee:', empUpdateData);
       setAssignDialogOpen(false);
-      load();
+      await load();
+      console.log('[Assign] Done, reloaded');
     } catch (err) {
-      setAssignError(err.response?.data?.error || 'Failed to assign employee');
+      console.error('[Assign] Error:', err);
+      setAssignError(err.response?.data?.error || err.message || 'Failed to assign employee');
     } finally {
       setAssignSaving(false);
     }
@@ -531,35 +551,110 @@ export default function OrgStructure() {
 
       {message && <Alert severity={message.severity} sx={{ mb: 3 }}>{message.text}</Alert>}
 
-      {/* Hierarchy Tiers — Editable org chart levels */}
-      <Box sx={{ mb: isMobile ? 2 : 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
-          <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            Organization Hierarchy
-          </Typography>
-          {canEdit && (
-            <MobileButton variant="outlined" size="small" startIcon={<AddIcon />} onClick={() => openTierDialog(null)}>
-              Add Tier
-            </MobileButton>
-          )}
+      {/* Custom Org Structure: MD → Directors → Founder/CEO → Departments */}
+      <Box sx={{ mb: isMobile ? 3 : 5 }}>
+        <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 2, textAlign: 'center' }}>
+          Organization Hierarchy
+        </Typography>
+
+        {/* Level 1: Managing Director (centered) */}
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: isMobile ? 2 : 3 }}>
+          {(() => {
+            const mdTier = tiers.find(t => t.name === 'Managing Director');
+            const mdPeople = mdTier ? (staffByTier[mdTier.id] || []) : [];
+            return mdPeople.map((p) => (
+              <MobilePaper key={p.id} sx={{ px: isMobile ? 2 : 3, py: isMobile ? 1.5 : 2, borderLeft: '4px solid', borderColor: mdTier?.color || '#6d28d9', minWidth: isMobile ? '90%' : 280, maxWidth: isMobile ? '100%' : 320, textAlign: 'center', boxShadow: 3 }}>
+                <Typography sx={{ fontSize: isMobile ? '0.6rem' : '0.65rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 0.5 }}>Managing Director</Typography>
+                <Typography sx={{ fontSize: isMobile ? '0.9rem' : '1.1rem', fontWeight: 600 }}>{p.employee_name}</Typography>
+                <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem', color: 'text.secondary' }}>{p.email}</Typography>
+              </MobilePaper>
+            ));
+          })()}
         </Box>
-        {tiers.map((tier) => (
-          <TierRow
-            key={tier.id}
-            title={tier.name}
-            people={staffByTier[tier.id] || []}
-            color={tier.color}
-            isMobile={isMobile}
-            canEdit={canEdit}
-            onEdit={() => openTierDialog(tier)}
-            onAssign={openAssignDialog}
-            tierId={tier.id}
-          />
-        ))}
-        {tiers.length === 0 && (
-          <Typography sx={{ textAlign: 'center', color: 'text.secondary', fontSize: isMobile ? '0.75rem' : '0.85rem' }}>
-            No hierarchy tiers configured.
-          </Typography>
+
+        {/* Connector line */}
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: isMobile ? 1 : 2 }}>
+          <Box sx={{ width: 2, height: isMobile ? 24 : 32, backgroundColor: 'divider' }} />
+        </Box>
+
+        {/* Level 2: Directors (3 cards horizontal) */}
+        <Box sx={{ display: 'flex', justifyContent: 'center', gap: isMobile ? 1.5 : 2, flexWrap: 'wrap', mb: isMobile ? 2 : 3 }}>
+          {(() => {
+            const dirTier = tiers.find(t => t.name === 'Director(s)');
+            const dirPeople = dirTier ? (staffByTier[dirTier.id] || []) : [];
+            return dirPeople.map((p) => (
+              <MobilePaper key={p.id} sx={{ px: isMobile ? 1.5 : 2, py: isMobile ? 1 : 1.5, borderLeft: '4px solid', borderColor: dirTier?.color || '#5b21b6', minWidth: isMobile ? '140px' : 180, maxWidth: isMobile ? '100%' : 220, textAlign: 'center', boxShadow: 2 }}>
+                <Typography sx={{ fontSize: isMobile ? '0.6rem' : '0.65rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 0.5 }}>Director</Typography>
+                <Typography sx={{ fontSize: isMobile ? '0.8rem' : '0.95rem', fontWeight: 600 }}>{p.employee_name}</Typography>
+                <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>{p.email}</Typography>
+              </MobilePaper>
+            ));
+          })()}
+        </Box>
+
+        {/* Connector line */}
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: isMobile ? 1 : 2 }}>
+          <Box sx={{ width: 2, height: isMobile ? 24 : 32, backgroundColor: 'divider' }} />
+        </Box>
+
+        {/* Level 3: Founder (centered) and CEO (if assigned) */}
+        <Box sx={{ display: 'flex', justifyContent: 'center', gap: isMobile ? 2 : 3, flexWrap: 'wrap', mb: isMobile ? 2 : 3 }}>
+          {/* Founder (also shows CEO if same person) */}
+          {(() => {
+            const founderTier = tiers.find(t => t.name === 'Founder');
+            const founderPeople = founderTier ? (staffByTier[founderTier.id] || []) : [];
+            return founderPeople.map((p) => {
+              // Check if this person is also CEO
+              const ceoTier = tiers.find(t => t.name === 'CEO');
+              const ceoPeople = ceoTier ? (staffByTier[ceoTier.id] || []) : [];
+              const isAlsoCEO = ceoPeople.some(cp => cp.id === p.id);
+              return (
+                <MobilePaper key={p.id} sx={{ px: isMobile ? 2 : 3, py: isMobile ? 1.5 : 2, borderLeft: '4px solid', borderColor: founderTier?.color || '#7c3aed', minWidth: isMobile ? '90%' : 280, maxWidth: isMobile ? '100%' : 320, textAlign: 'center', boxShadow: 3 }}>
+                  <Typography sx={{ fontSize: isMobile ? '0.6rem' : '0.65rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 0.5 }}>
+                    Founder{isAlsoCEO ? ' & CEO' : ''}
+                  </Typography>
+                  <Typography sx={{ fontSize: isMobile ? '0.9rem' : '1.1rem', fontWeight: 600 }}>{p.employee_name}</Typography>
+                  <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem', color: 'text.secondary' }}>{p.email}</Typography>
+                </MobilePaper>
+              );
+            });
+          })()}
+          {/* CEO (only if different person) */}
+          {(() => {
+            const ceoTier = tiers.find(t => t.name === 'CEO');
+            const ceoPeople = ceoTier ? (staffByTier[ceoTier.id] || []) : [];
+            const founderTier = tiers.find(t => t.name === 'Founder');
+            const founderPeople = founderTier ? (staffByTier[founderTier.id] || []) : [];
+            const founderIds = new Set(founderPeople.map(p => p.id));
+            return ceoPeople
+              .filter(p => !founderIds.has(p.id)) // Don't duplicate if same as Founder
+              .map((p) => (
+                <MobilePaper key={p.id} sx={{ px: isMobile ? 2 : 3, py: isMobile ? 1.5 : 2, borderLeft: '4px solid', borderColor: ceoTier?.color || '#3730a3', minWidth: isMobile ? '90%' : 280, maxWidth: isMobile ? '100%' : 320, textAlign: 'center', boxShadow: 2 }}>
+                  <Typography sx={{ fontSize: isMobile ? '0.6rem' : '0.65rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 0.5 }}>CEO</Typography>
+                  <Typography sx={{ fontSize: isMobile ? '0.9rem' : '1.1rem', fontWeight: 600 }}>{p.employee_name}</Typography>
+                  <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem', color: 'text.secondary' }}>{p.email}</Typography>
+                </MobilePaper>
+              ));
+          })()}
+        </Box>
+
+        {/* Add tier buttons for empty tiers (edit mode) */}
+        {canEdit && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, flexWrap: 'wrap', mt: 2 }}>
+            {tiers
+              .filter(t => ['Founder', 'Managing Director', 'Director(s)'].includes(t.name)) // CEO never shown - Varun is Founder & CEO
+              .map((tier) => {
+                const people = staffByTier[tier.id] || [];
+                if (people.length === 0) {
+                  return (
+                    <MobileButton key={tier.id} variant="outlined" size="small" startIcon={<GroupAddIcon />} onClick={() => openAssignDialog(tier.id)}>
+                      Add {tier.name}
+                    </MobileButton>
+                  );
+                }
+                return null;
+              })}
+          </Box>
         )}
       </Box>
 
@@ -714,10 +809,11 @@ export default function OrgStructure() {
           <MobileFormGrid sx={{ mb: 2 }}>
             <MobileTextField
               fullWidth
-              label="Employee Code"
-              value={assignForm.employee_code}
-              onChange={(e) => setAssignForm({ ...assignForm, employee_code: e.target.value.toUpperCase() })}
-              placeholder="e.g. ET-EMP-0002"
+              select
+              label="Employee"
+              value={assignForm.employee_id}
+              onChange={(e) => setAssignForm({ ...assignForm, employee_id: e.target.value })}
+              options={employees.filter(e => e.status !== 'exited').map(e => ({ value: e.id, label: `${e.employee_code} — ${e.full_name}` }))}
               required
             />
             <MobileTextField
@@ -734,7 +830,7 @@ export default function OrgStructure() {
         </DialogContent>
         <MobileActionButtons>
           <MobileButton onClick={() => setAssignDialogOpen(false)}>Cancel</MobileButton>
-          <MobileButton variant="contained" onClick={handleAssignEmployee} disabled={assignSaving || !assignForm.employee_code || !assignForm.tier_id}>
+          <MobileButton variant="contained" onClick={handleAssignEmployee} disabled={assignSaving || !assignForm.employee_id || !assignForm.tier_id}>
             {assignSaving ? 'Assigning…' : 'Assign'}
           </MobileButton>
         </MobileActionButtons>

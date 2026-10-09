@@ -1,0 +1,1 @@
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'id_photo';

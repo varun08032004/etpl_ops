@@ -66,9 +66,12 @@ const schemas = {
     return val;
   }),
   
-  // ISO date string
+// ISO date string
   isoDate: z.string().date(),
-  
+
+  // ISO datetime string (with time and timezone)
+  isoDateTime: z.string().datetime({ offset: true }),
+
   // Month (1-12)
   month: z.coerce.number().int().min(1).max(12),
   

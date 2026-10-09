@@ -3,7 +3,7 @@ import { ThemeProvider, CssBaseline } from '@mui/material';
 import { useMediaQuery } from '@mui/material';
 import theme from './theme';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import Layout from './components/Layout';
+import Layout, { PRIVILEGED_ROLES } from './components/Layout';
 import MobileLayout from './components/MobileLayout';
 import SecurityGuard from './components/SecurityGuard';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
@@ -15,6 +15,11 @@ import ResetPassword from './pages/ResetPassword';
 import SignDocument from './pages/SignDocument';
 import Dashboard from './pages/Dashboard';
 import MyProfile from './pages/MyProfile';
+import MyNotes from './pages/MyNotes';
+import Workspaces from './pages/Workspaces';
+import WorkspaceChat from './pages/WorkspaceChat';
+import Jira from './pages/Jira';
+import AgentStatusMonitoring from './pages/AgentStatusMonitoring';
 import { EmployeeList, EmployeeDetail } from './pages/Employees';
 import Invoices from './pages/Invoices';
 import Accounting from './pages/Accounting';
@@ -75,6 +80,7 @@ import ProductBetaUsers from './pages/ProductBetaUsers';
 import ProductSubscriptions from './pages/ProductSubscriptions';
 import ProductPricing from './pages/ProductPricing';
 import ProductCoupons from './pages/ProductCoupons';
+import Products from './pages/Products';
 import CorporateDeals from './pages/CorporateDeals';
 import Renewals from './pages/Renewals';
 import ChurnPrediction from './pages/ChurnPrediction';
@@ -106,11 +112,6 @@ import TrainingCarbonAcademy from './pages/TrainingCarbonAcademy';
 import TrainingProgrammeDetail from './pages/TrainingProgrammeDetail';
 import TrainingManagerDashboard from './pages/TrainingManagerDashboard';
 import TrainingCourseDetail from './pages/TrainingCourseDetail';
-
-// Widened to include legal_hod/compliance_hod/marketing_hod/sales_hod/
-// product_hod — matches Layout.jsx's PRIVILEGED_ROLES, so those roles get
-// Dashboard as their home screen too instead of the self-service MyProfile view.
-const PRIVILEGED_ROLES = ['owner', 'admin', 'hr', 'finance', 'legal_hod', 'compliance_hod', 'marketing_hod', 'sales_hod', 'product_hod', 'accounting_hod'];
 
 function ProtectedRoutes() {
   const { staff, loading } = useAuth();
@@ -152,6 +153,10 @@ export default function App() {
             <Route element={<ProtectedRoutes />}>
               <Route path="/" element={<Home />} />
               <Route path="/my-profile" element={<MyProfile />} />
+              <Route path="/my-notes" element={<MyNotes />} />
+              <Route path="/workspaces" element={<Workspaces />} />
+              <Route path="/workspaces/:workspaceId/chat" element={<WorkspaceChat />} />
+              <Route path="/jira" element={<Jira />} />
               <Route path="/security" element={<TwoFactorSettings />} />
               <Route path="/employees" element={<EmployeeList />} />
               <Route path="/employees/:id" element={<EmployeeDetail />} />
@@ -169,6 +174,7 @@ export default function App() {
               <Route path="/monitoring/settings" element={<MonitoringSettings />} />
               <Route path="/monitoring/devices" element={<MonitoringDevices />} />
               <Route path="/monitoring/screenshots" element={<MonitoringScreenshots />} />
+              <Route path="/agent-status" element={<AgentStatusMonitoring />} />
               <Route path="/my-activity" element={<MyActivity />} />
               <Route path="/recruitment" element={<Recruitment />} />
               <Route path="/performance" element={<Performance />} />
@@ -218,8 +224,9 @@ export default function App() {
               <Route path="/product/beta-users" element={<ProductBetaUsers />} />
               <Route path="/product/subscriptions" element={<ProductSubscriptions />} />
               <Route path="/product/pricing" element={<ProductPricing />} />
-              <Route path="/product/coupons" element={<ProductCoupons />} />
-              <Route path="/product/corporate-deals" element={<CorporateDeals />} />
+<Route path="/product/coupons" element={<ProductCoupons />} />
+<Route path="/product/corporate-deals" element={<CorporateDeals />} />
+<Route path="/products" element={<Products />} />
               <Route path="/renewals" element={<Renewals />} />
               <Route path="/churn-prediction" element={<ChurnPrediction />} />
               <Route path="/health-scores" element={<HealthScores />} />

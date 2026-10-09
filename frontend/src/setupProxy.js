@@ -22,13 +22,24 @@ module.exports = function(app) {
       },
       onProxyRes: (proxyRes, req, res) => {
         // Forward Set-Cookie headers from backend to frontend
-        const cookies = proxyRes.headers['set-cookie'];
-        console.log('[PROXY] <<< Response from backend:', req.path, 'status:', proxyRes.statusCode);
+        // Ensure cookies have Domain=localhost so they work across localhost ports
         if (proxyRes.headers['set-cookie']) {
           const cookies = proxyRes.headers['set-cookie'];
+          console.log('[PROXY] <<< Response from backend:', req.path, 'status:', proxyRes.statusCode);
           console.log('[PROXY] <<< Backend Set-Cookie count:', cookies.length);
-          cookies.forEach((c, i) => console.log(`[PROXY] <<< Set-Cookie[${i}]:`, c.substring(0, 200)));
-          res.setHeader('set-cookie', cookies);
+          
+          const rewrittenCookies = cookies.map(cookie => {
+            // If cookie doesn't have Domain attribute, add Domain=localhost
+            if (!/;\s*domain=/i.test(cookie)) {
+              const withDomain = cookie + '; Domain=localhost';
+              console.log('[PROXY] <<< Added Domain=localhost to cookie');
+              return withDomain;
+            }
+            return cookie;
+          });
+          
+          rewrittenCookies.forEach((c, i) => console.log(`[PROXY] <<< Set-Cookie[${i}]:`, c.substring(0, 200)));
+          res.setHeader('set-cookie', rewrittenCookies);
         } else {
           console.log('[PROXY] <<< No Set-Cookie from backend for:', req.path, 'status:', proxyRes.statusCode);
         }

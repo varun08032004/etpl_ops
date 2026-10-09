@@ -53,7 +53,7 @@ const updateEmployeeSchema = createEmployeeSchema.partial().extend({
   }).optional(),
   notes: z.string().max(2000).optional().nullable(),
   esic_applicable: schemas.boolean.optional(),
-  id_photo_url: z.string().url().optional().nullable(),
+  id_photo_url: z.string().optional().nullable(),
 }).strict();
 
 router.use(authenticate);
@@ -224,7 +224,7 @@ router.get('/', async (req, res) => {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const { rows } = await safeQuery(
       `SELECT e.id, e.employee_code, e.full_name, e.work_email, e.status, e.employment_type,
-              e.date_of_joining, e.department_id, e.team_id,
+              e.date_of_joining, e.department_id, e.team_id, e.designation_id,
               d.name AS department, des.title AS designation, t.name AS team
        FROM employees e
        LEFT JOIN departments d ON d.id = e.department_id
@@ -244,7 +244,15 @@ router.get('/', async (req, res) => {
 // ── get single employee (full detail — CTC visible to hr/finance/admin/self only) ──
 router.get('/:id', async (req, res) => {
   try {
-    const { rows } = await safeQuery(`SELECT * FROM employees WHERE id = $1`, [req.params.id]);
+    const { rows } = await safeQuery(
+      `SELECT e.*, d.name AS department, des.title AS designation, t.name AS team
+       FROM employees e
+       LEFT JOIN departments d ON d.id = e.department_id
+       LEFT JOIN designations des ON des.id = e.designation_id
+       LEFT JOIN teams t ON t.id = e.team_id
+       WHERE e.id = $1`,
+      [req.params.id]
+    );
     if (!rows.length) return res.status(404).json({ error: 'Employee not found' });
 
     const employee = rows[0];
@@ -559,14 +567,42 @@ router.post('/:id/leave', async (req, res) => {
     if (!leave_type_id || !start_date || !end_date) {
       return res.status(400).json({ error: 'leave_type_id, start_date, end_date are required' });
     }
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Reason is required for leave request' });
+    }
     const numDays = (new Date(end_date) - new Date(start_date)) / 86400000 + 1;
+    if (numDays <= 0 || numDays > 30) {
+      return res.status(400).json({ error: 'Invalid date range (1-30 days)' });
+    }
+
+    // Check leave balance for paid leave type
+    const { rows: [leaveType] } = await safeQuery(`SELECT name, is_paid FROM leave_types WHERE id = $1`, [leave_type_id]);
+    const { rows: [employee] } = await safeQuery(`SELECT leave_balance_annual, leave_balance_sick, date_of_joining FROM employees WHERE id = $1`, [req.params.id]);
+    
+    let balanceWarning = null;
+    if (leaveType && leaveType.is_paid) {
+      const joiningDate = new Date(employee.date_of_joining);
+      const now = new Date();
+      const monthsWorked = (now.getFullYear() - joiningDate.getFullYear()) * 12 + (now.getMonth() - joiningDate.getMonth());
+      const isProbationComplete = monthsWorked >= 8;
+      
+      if (!isProbationComplete) {
+        balanceWarning = 'Paid leaves are only available after completing 8 months of service (probation period).';
+      } else {
+        const availableBalance = employee.leave_balance_annual || 0;
+        if (numDays > availableBalance) {
+          const unpaidDays = numDays - availableBalance;
+          balanceWarning = `Only ${availableBalance} paid leave day(s) available. ${unpaidDays} day(s) will be unpaid.`;
+        }
+      }
+    }
 
     const { rows: [leave] } = await safeQuery(
-      `INSERT INTO leave_requests (employee_id, leave_type_id, start_date, end_date, num_days, reason)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [req.params.id, leave_type_id, start_date, end_date, numDays, reason || null]
+      `INSERT INTO leave_requests (employee_id, leave_type_id, start_date, end_date, num_days, reason, balance_warning)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [req.params.id, leave_type_id, start_date, end_date, numDays, reason.trim(), balanceWarning]
     );
-    res.status(201).json({ leave });
+    res.status(201).json({ leave, balanceWarning });
   } catch (err) {
     console.error('[employees:leave:create]', err);
     res.status(500).json({ error: 'Failed to submit leave request' });
@@ -655,6 +691,18 @@ router.post('/leave/:leaveId/decision', async (req, res) => {
   } catch (err) {
     console.error('[employees:leave:decision]', err);
     res.status(500).json({ error: 'Failed to process leave decision' });
+  }
+});
+
+// ── delete leave request (admin/owner) ────────────────────────────────
+router.delete('/leave/:id', requireRole('admin', 'owner'), async (req, res) => {
+  try {
+    const { rows } = await safeQuery(`DELETE FROM leave_requests WHERE id = $1 RETURNING id`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Leave request not found' });
+    res.json({ deleted: true, message: 'Leave request deleted' });
+  } catch (err) {
+    console.error('[employees:leave:delete]', err);
+    res.status(500).json({ error: 'Failed to delete leave request' });
   }
 });
 

@@ -239,17 +239,17 @@ export const MobileCardGrid = styled(Box)(({ theme }) => ({
 export const MobileFormGrid = styled(Box)(({ theme }) => ({
   display: 'grid',
   gridTemplateColumns: '1fr',
-  gap: theme.spacing(1.5),
+  gap: theme.spacing(2),
   width: '100%',
   maxWidth: '100%',
   boxSizing: 'border-box',
   [theme.breakpoints.up('sm')]: {
     gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: theme.spacing(2),
+    gap: theme.spacing(2.5),
   },
   [theme.breakpoints.up('md')]: {
-    gridTemplateColumns: 'repeat(3, 1fr)',
-    gap: theme.spacing(2),
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: theme.spacing(2.5),
   },
 }));
 
@@ -458,19 +458,23 @@ export function MobileSelectField({ label, value, onChange, options, placeholder
 
   return (
     <FormControl fullWidth={fullWidth} sx={{ minWidth: 0 }}>
-      <InputLabel sx={{ fontSize: isMobile ? '0.75rem' : '0.875rem' }}>{label}</InputLabel>
+      <InputLabel shrink sx={{ fontSize: isMobile ? '0.75rem' : '0.875rem' }}>{label}</InputLabel>
       <Select
         value={value}
         onChange={onChange}
         label={label}
         sx={{
           '& .MuiSelect-select': {
-            padding: theme.spacing(1, 1.5),
+            padding: theme.spacing(1.5, 1.5, 1, 1.5),
             fontSize: isMobile ? '0.875rem' : '0.875rem',
             minHeight: isMobile ? 44 : 'auto',
           },
           '& .MuiOutlinedInput-notchedOutline': {
             borderColor: theme.palette.divider,
+          },
+          '& .MuiInputLabel-shrink': {
+            transform: 'translate(14px, -9px) scale(0.75)',
+            fontSize: isMobile ? '0.75rem' : '0.875rem',
           },
         }}
         {...props}
@@ -490,6 +494,26 @@ export function MobileTextField({ label, type = 'text', value, onChange, placeho
   const isMobile = useMobile();
   const theme = useTheme();
 
+  const floatingLabelStyles = {
+    '& .MuiInputLabel-root': {
+      fontSize: isMobile ? '0.75rem' : '0.875rem',
+    },
+    '& .MuiInputLabel-shrink': {
+      transform: 'translate(14px, -9px) scale(0.75)',
+      fontSize: isMobile ? '0.75rem' : '0.875rem',
+    },
+    '& .MuiInputBase-input': {
+      padding: theme.spacing(1.5, 1.5, 1, 1.5),
+      fontSize: isMobile ? '0.875rem' : '0.875rem',
+      minHeight: isMobile ? 44 : 'auto',
+    },
+    '& .MuiOutlinedInput-root': {
+      '&:hover .MuiOutlinedInput-notchedOutline': {
+        borderColor: theme.palette.primary.main,
+      },
+    },
+  };
+
   if (select && options) {
     return (
       <TextField
@@ -500,21 +524,7 @@ export function MobileTextField({ label, type = 'text', value, onChange, placeho
         onChange={onChange}
         placeholder={placeholder}
         size="small"
-        sx={{
-          '& .MuiInputBase-input': {
-            padding: theme.spacing(1, 1.5),
-            fontSize: isMobile ? '0.875rem' : '0.875rem',
-            minHeight: isMobile ? 44 : 'auto',
-          },
-          '& .MuiInputLabel-root': {
-            fontSize: isMobile ? '0.75rem' : '0.875rem',
-          },
-          '& .MuiOutlinedInput-root': {
-            '&:hover .MuiOutlinedInput-notchedOutline': {
-              borderColor: theme.palette.primary.main,
-            },
-          },
-        }}
+        sx={floatingLabelStyles}
         InputLabelProps={{ shrink: true }}
         {...props}
       >
@@ -536,21 +546,7 @@ export function MobileTextField({ label, type = 'text', value, onChange, placeho
       multiline={multiline}
       rows={rows}
       size="small"
-      sx={{
-        '& .MuiInputBase-input': {
-          padding: theme.spacing(1, 1.5),
-          fontSize: isMobile ? '0.875rem' : '0.875rem',
-          minHeight: isMobile ? 44 : 'auto',
-        },
-        '& .MuiInputLabel-root': {
-          fontSize: isMobile ? '0.75rem' : '0.875rem',
-        },
-        '& .MuiOutlinedInput-root': {
-          '&:hover .MuiOutlinedInput-notchedOutline': {
-            borderColor: theme.palette.primary.main,
-          },
-        },
-      }}
+      sx={floatingLabelStyles}
       InputLabelProps={{ shrink: true }}
       {...props}
     />

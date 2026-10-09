@@ -27,9 +27,15 @@
     },
     "files": [
       "src/**/*",
-      "assets/**/*",
       "config.json",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
       "target": "nsis",
@@ -40,7 +46,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "runAfterFinish": true
+      "runAfterFinish": true,
+      "script": "build/installer.nsi"
     }
   }
 }

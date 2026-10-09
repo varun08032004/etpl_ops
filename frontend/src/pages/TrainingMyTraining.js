@@ -19,7 +19,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import client from '../api/client';
 import StatusChip from '../components/StatusChip';
-import { Money } from '../components/Money';
+import Money from '../components/Money';
 import {
   MobilePageHeader, MobilePaper, MobileButton, MobileTextField,
   MobileDialog, MobileActionButtons, MobileStack, MobileFormGrid,

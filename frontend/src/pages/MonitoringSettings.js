@@ -64,6 +64,16 @@ export default function MonitoringSettings() {
           {saving ? 'Saving…' : 'Save Changes'}
         </MobileButton>
       </MobilePageHeader>
+      {/* ⚠️ PROD ALERT: Office/WFH detection requires office_networks table configured with real CIDR */}
+      <Alert severity="info" sx={{ mt: 2, mb: 2 }} icon={<span style={{fontSize:18}}>⚠️</span>}>
+        <strong>Production Checklist:</strong> 
+        <ul style={{margin: '8px 0 0 20px', padding: 0}}>
+          <li>Configure <strong>office_networks</strong> table with actual office CIDR (run <code>set-pune-office-cidr.js</code> with actual office public IP)</li>
+          <li>Set <strong>enforce_office_network=true</strong> only after CIDR verified</li>
+          <li>Browser extension must be deployed for accurate website tracking</li>
+          <li>Agent version must be rebuilt after config changes (<code>npm run dist</code> in agent folder)</li>
+        </ul>
+      </Alert>
 
       {success && <Alert severity="success" sx={{ mb: 2 }}>Settings saved.</Alert>}
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}

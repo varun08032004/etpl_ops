@@ -1,0 +1,14 @@
+{
+  "name": "ethertrack-agent-watchdog",
+  "version": "1.0.0",
+  "description": "Watchdog service for EtherTrack Agent - runs as Windows Service",
+  "main": "watchdog.js",
+  "scripts": {
+    "start": "node watchdog.js",
+    "install-service": "node install-service.js",
+    "uninstall-service": "node uninstall-service.js"
+  },
+  "dependencies": {
+    "node-windows": "^1.0.0-beta.6"
+  }
+}

@@ -438,6 +438,18 @@ router.post('/expense-claims/:id/decide', async (req, res) => {
   }
 });
 
+// ── delete expense claim (finance/admin/owner) ────────────────────────────
+router.delete('/expense-claims/:id', requireRole('finance', 'admin', 'owner'), async (req, res) => {
+  try {
+    const { rows } = await safeQuery(`DELETE FROM expense_claims WHERE id = $1 RETURNING id`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Expense claim not found' });
+    res.json({ deleted: true, message: 'Expense claim deleted' });
+  } catch (err) {
+    console.error('[finance:expense-claims:delete]', err);
+    res.status(500).json({ error: 'Failed to delete expense claim' });
+  }
+});
+
 // ── budgets — department/category budgets per fiscal period ────────────────
 // Distinct from Expenses' category_budgets (subscription-tracking specific).
 // This is Finance's planning tool (SRS §8.7): set what a department/category

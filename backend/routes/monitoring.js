@@ -390,7 +390,7 @@ router.put('/settings', requireMonitoringAdmin, async (req, res) => {
 router.get('/score-summary', async (req, res) => {
   try {
     if (!(await canViewAllMonitoring(req.staff))) return res.status(403).json({ error: 'Insufficient permissions' });
-    const { employee_ids, from, to } = req.query;
+    const { employee_ids, from, to, include_attendance } = req.query;
     if (!employee_ids || !from || !to) return res.status(400).json({ error: 'employee_ids, from, and to are required' });
     const ids = employee_ids.split(',').filter(Boolean);
     if (ids.length === 0) return res.json({ scores: {} });
@@ -430,19 +430,31 @@ router.get('/score-summary', async (req, res) => {
       sitesByEmployee.get(row.employee_id).push(row);
     }
 
+    // Calculate monitoring scores
     const scores = {};
     for (const s of sessionRows) {
       const productivity = summarizeProductivity(rules, appsByEmployee.get(s.employee_id) || [], sitesByEmployee.get(s.employee_id) || []);
-      // Multiply the daily expectation by days actually tracked, so a
-      // 2-week cycle with 10 working days expects 10 days' worth of
-      // hours, not the full 14 calendar days.
       const expectedHoursForPeriod = (settings?.expected_daily_hours || 8) * Math.max(s.days_tracked, 1);
       const score = computeProductivityScore({
         totals: productivity.totals, activeSeconds: s.active_seconds, idleSeconds: s.idle_seconds,
         expectedDailyHours: expectedHoursForPeriod,
       });
-      scores[s.employee_id] = { ...score, daysTracked: s.days_tracked };
+      scores[s.employee_id] = { ...score, daysTracked: s.days_tracked, source: 'monitoring' };
     }
+
+    // Optionally include attendance scores
+    if (include_attendance === 'true') {
+      const { calculateBatchAttendanceScores } = require('../services/attendanceScore');
+      const attendanceScores = await calculateBatchAttendanceScores(ids, from, to);
+      for (const [id, attScore] of Object.entries(attendanceScores)) {
+        if (scores[id]) {
+          scores[id].attendance = attScore;
+        } else {
+          scores[id] = { ...attScore, source: 'attendance' };
+        }
+      }
+    }
+
     res.json({ scores });
   } catch (err) {
     console.error('[monitoring:score-summary]', err);
@@ -470,6 +482,40 @@ router.post('/devices/:id/revoke', requireMonitoringAdmin, async (req, res) => {
   } catch (err) {
     console.error('[monitoring:devices:revoke]', err);
     res.status(500).json({ error: 'Failed to revoke device' });
+  }
+});
+
+// Manual work_mode override for a session (HR can correct misclassified sessions)
+router.post('/sessions/:id/work-mode', requireMonitoringAdmin, async (req, res) => {
+  try {
+    const { work_mode, verified } = req.body;
+    if (!['office', 'wfh', 'hybrid'].includes(work_mode)) {
+      return res.status(400).json({ error: 'work_mode must be office, wfh, or hybrid' });
+    }
+
+    const { rows: [session] } = await safeQuery(
+      `UPDATE agent_sessions SET 
+         work_mode = $1, 
+         location_verified_at = $2, 
+         location_verified_by = $3
+       WHERE id = $4 RETURNING *`,
+      [work_mode, verified ? new Date() : null, verified ? req.staff.id : null, req.params.id]
+    );
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+
+    await logAction({ 
+      staffId: req.staff.id, 
+      action: 'monitoring.session.work_mode_override', 
+      entity: 'agent_sessions', 
+      entityId: req.params.id, 
+      newValue: { work_mode, verified }, 
+      ipAddress: req.ip 
+    });
+
+    res.json({ session });
+  } catch (err) {
+    console.error('[monitoring:session:work_mode]', err);
+    res.status(500).json({ error: 'Failed to update work mode' });
   }
 });
 

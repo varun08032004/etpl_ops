@@ -23,11 +23,11 @@ CREATE TYPE invoice_status      AS ENUM ('draft', 'sent', 'partially_paid', 'pai
 CREATE TYPE bill_status         AS ENUM ('draft', 'received', 'partially_paid', 'paid', 'overdue', 'void');
 CREATE TYPE payroll_run_status  AS ENUM ('draft', 'processing', 'paid', 'failed', 'cancelled');
 CREATE TYPE payroll_item_status AS ENUM ('pending', 'processing', 'paid', 'failed');
-CREATE TYPE attendance_status   AS ENUM ('present', 'absent', 'half_day', 'on_leave', 'holiday', 'weekend', 'wfh');
+CREATE TYPE attendance_status   AS ENUM ('present', 'absent', 'half_day', 'on_leave', 'holiday', 'weekend', 'wfh', 'late', 'early_leave');
 
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 -- STAFF ACCOUNTS (login for THIS internal tool — separate from platform users)
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE staff_accounts (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -57,7 +57,7 @@ CREATE INDEX idx_password_reset_tokens_expires ON password_reset_tokens(expires_
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- HR — DEPARTMENTS / DESIGNATIONS
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE departments (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -75,9 +75,9 @@ CREATE TABLE designations (
   created_at    TIMESTAMP DEFAULT NOW()
 );
 
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 -- HR — EMPLOYEES
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE employees (
   id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -123,7 +123,6 @@ CREATE TABLE employees (
   razorpay_fund_account_id  VARCHAR(100),
 
   -- Integrations
-  -- trackpilot_user_id        VARCHAR(100),             -- DEPRECATED: maps to TrackPilot's user for attendance sync
   agent_user_id              VARCHAR(100),               -- maps to EtherTrack Agent's user for attendance sync
 
   -- Leave balances (simple counters; ledger detail in leave_requests)
@@ -147,9 +146,9 @@ CREATE TABLE employee_documents (
   created_at    TIMESTAMP DEFAULT NOW()
 );
 
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 -- HR — LEAVE
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE leave_types (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -172,9 +171,35 @@ CREATE TABLE leave_requests (
   created_at        TIMESTAMP DEFAULT NOW()
 );
 
--- ══════════════════════════════════════════════════════════════════════════
--- HR — ATTENDANCE (synced from TrackPilot)
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
+-- HR — COMPANY WORKING HOURS CONFIGURATION
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE company_working_hours (
+  id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  day_of_week           INT NOT NULL,               -- 1=Mon ... 7=Sun
+  punch_in_time         TIME NOT NULL DEFAULT '09:30:00',
+  punch_out_time        TIME NOT NULL DEFAULT '19:00:00',
+  grace_period_minutes  INT DEFAULT 15,
+  is_working_day        BOOLEAN DEFAULT TRUE,
+  late_penalty_per_min  NUMERIC(5,2) DEFAULT 0.5,   -- performance score penalty per late minute
+  early_leave_penalty_per_min NUMERIC(5,2) DEFAULT 0.5,
+  UNIQUE(day_of_week)
+);
+
+-- Seed default working hours (Mon-Fri 9:30 AM - 7:00 PM)
+INSERT INTO company_working_hours (day_of_week, punch_in_time, punch_out_time, grace_period_minutes, is_working_day, late_penalty_per_min, early_leave_penalty_per_min) VALUES
+  (1, '09:30:00', '19:00:00', 15, true, 0.5, 0.5),
+  (2, '09:30:00', '19:00:00', 15, true, 0.5, 0.5),
+  (3, '09:30:00', '19:00:00', 15, true, 0.5, 0.5),
+  (4, '09:30:00', '19:00:00', 15, true, 0.5, 0.5),
+  (5, '09:30:00', '19:00:00', 15, true, 0.5, 0.5),
+  (6, '00:00:00', '00:00:00', 0, false, 0, 0),
+  (7, '00:00:00', '00:00:00', 0, false, 0, 0);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- HR — ATTENDANCE (synced from EtherTrack Agent + manual punch in/out)
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE attendance_records (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -183,17 +208,37 @@ CREATE TABLE attendance_records (
   status            attendance_status NOT NULL DEFAULT 'present',
   clock_in          TIMESTAMP,
   clock_out         TIMESTAMP,
-  active_seconds    INTEGER DEFAULT 0,             -- from EtherTrack Agent activity tracking
+  expected_punch_in TIMESTAMP,                      -- calculated from working hours config
+  expected_punch_out TIMESTAMP,                     -- calculated from working hours config
+  late_minutes      INT DEFAULT 0,                  -- minutes late (after grace period)
+  early_leave_minutes INT DEFAULT 0,                -- minutes left early
+  active_seconds    INTEGER DEFAULT 0,              -- from EtherTrack Agent activity tracking
   idle_seconds      INTEGER DEFAULT 0,
-  source            VARCHAR(50) DEFAULT 'agent',
+  source            VARCHAR(50) DEFAULT 'agent',    -- 'agent', 'manual', 'kiosk', 'mobile'
   raw_payload       JSONB,                          -- store original Agent payload for audit
   created_at        TIMESTAMP DEFAULT NOW(),
+  updated_at        TIMESTAMP DEFAULT NOW(),
   UNIQUE(employee_id, work_date)
 );
 
--- ══════════════════════════════════════════════════════════════════════════
+CREATE TABLE attendance_punch_log (
+  id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id       UUID NOT NULL REFERENCES employees(id),
+  work_date         DATE NOT NULL,
+  punch_type        VARCHAR(20) NOT NULL,           -- 'in', 'out'
+  punch_time        TIMESTAMP NOT NULL,
+  source            VARCHAR(50) DEFAULT 'manual',   -- 'manual', 'kiosk', 'mobile', 'agent'
+  device_info       JSONB,                          -- IP, user agent, location if available
+  created_at        TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_attendance_punch_log_emp_date ON attendance_punch_log(employee_id, work_date);
+CREATE INDEX idx_attendance_records_late ON attendance_records(late_minutes) WHERE late_minutes > 0;
+CREATE INDEX idx_attendance_records_early ON attendance_records(early_leave_minutes) WHERE early_leave_minutes > 0;
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- ACCOUNTING — CHART OF ACCOUNTS (double-entry core)
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE chart_of_accounts (
   id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -246,9 +291,9 @@ CREATE TABLE journal_lines (
   CHECK (NOT (debit > 0 AND credit > 0))                -- a line is either a debit or a credit, not both
 );
 
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 -- ACCOUNTING — PARTIES (customers / vendors for AR & AP)
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE parties (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -266,9 +311,9 @@ CREATE TABLE parties (
 
 ALTER TABLE journal_lines ADD CONSTRAINT fk_journal_lines_party FOREIGN KEY (party_id) REFERENCES parties(id);
 
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 -- ACCOUNTING — SALES INVOICES (AR) — GST-compliant
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE invoices (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -320,9 +365,9 @@ CREATE TABLE payments_received (
   created_at        TIMESTAMP DEFAULT NOW()
 );
 
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 -- ACCOUNTING — VENDOR BILLS / EXPENSES (AP)
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE expense_categories (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -366,9 +411,9 @@ CREATE TABLE payments_made (
   created_at      TIMESTAMP DEFAULT NOW()
 );
 
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 -- BANKING
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE bank_accounts (
   id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -398,9 +443,9 @@ CREATE TABLE bank_transactions (
   created_at        TIMESTAMP DEFAULT NOW()
 );
 
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 -- PAYROLL (drives Razorpay Payouts)
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE payroll_runs (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -443,9 +488,9 @@ CREATE TABLE payroll_items (
   UNIQUE(payroll_run_id, employee_id)
 );
 
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 -- AUDIT LOG
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE audit_log (
   id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -459,9 +504,9 @@ CREATE TABLE audit_log (
   created_at  TIMESTAMP DEFAULT NOW()
 );
 
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 -- INDEXES
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE INDEX idx_employees_dept          ON employees(department_id);
 CREATE INDEX idx_employees_status        ON employees(status);
@@ -477,9 +522,9 @@ CREATE INDEX idx_bank_txns_account       ON bank_transactions(bank_account_id);
 CREATE INDEX idx_payroll_items_run       ON payroll_items(payroll_run_id);
 CREATE INDEX idx_payroll_items_employee  ON payroll_items(employee_id);
 
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 -- IDEMPOTENCY KEYS (for webhook deduplication)
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE idempotency_keys (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -502,10 +547,10 @@ CREATE TRIGGER trg_staff_updated_at       BEFORE UPDATE ON staff_accounts FOR EA
 CREATE TRIGGER trg_invoices_updated_at    BEFORE UPDATE ON invoices    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 CREATE TRIGGER trg_bills_updated_at       BEFORE UPDATE ON bills       FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 -- TRIGGER — enforce that every journal entry balances (sum debit = sum credit)
 -- Runs after any insert/update/delete on journal_lines for a given entry.
--- ══════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE OR REPLACE FUNCTION check_journal_entry_balanced() RETURNS TRIGGER AS $$
 DECLARE

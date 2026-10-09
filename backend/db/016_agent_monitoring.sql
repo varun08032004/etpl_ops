@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS monitoring_settings (
   consent_notice            TEXT,                    -- consent notice shown in agent
   restrict_incognito        BOOLEAN DEFAULT FALSE,   -- block tracking in incognito/private
   expected_daily_hours      NUMERIC(4,2) DEFAULT 8.0,
+  company_timezone          VARCHAR(50) DEFAULT 'Asia/Kolkata',  -- Company timezone for work date calculation
   created_at                TIMESTAMP DEFAULT NOW(),
   updated_at                TIMESTAMP DEFAULT NOW()
 );

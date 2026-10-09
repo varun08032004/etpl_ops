@@ -31,7 +31,8 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'blob:'],
-      connectSrc: ["'self'"],
+      // Allow API calls from Electron app (file:// or electron:// origin) and local dev
+      connectSrc: ["'self'", 'http://127.0.0.1:5001', 'http://localhost:5001', 'https://etpl-ops.onrender.com'],
       frameSrc: ["'none'"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
@@ -260,6 +261,20 @@ app.get('/ready', async (req, res) => {
 const v1 = express.Router();
 
 v1.use('/employees', require('./routes/employees'));
+v1.use('/notes', require('./routes/notes'));
+v1.use('/tasks', require('./routes/tasks'));
+v1.use('/jira-projects', require('./routes/jiraProjects'));
+v1.use('/jira-issues', require('./routes/jiraIssues'));
+v1.use('/workspaces', require('./routes/workspaces'));
+v1.use('/chat', require('./routes/chat'));
+v1.use('/custom-fields', require('./routes/customFields'));
+v1.use('/workflows', require('./routes/workflows'));
+v1.use('/automation', require('./routes/automation'));
+v1.use('/dashboards', require('./routes/dashboards'));
+v1.use('/slas', require('./routes/slas'));
+v1.use('/releases', require('./routes/releases'));
+v1.use('/roadmaps', require('./routes/roadmaps'));
+v1.use('/okrs', require('./routes/okrs'));
 v1.use('/parties', require('./routes/parties'));
 v1.use('/staff-accounts', require('./routes/staff-accounts'));
 v1.use('/approvals', require('./routes/approvals'));
@@ -285,6 +300,7 @@ v1.use('/expenses', require('./routes/expenses'));
 v1.use('/settings', require('./routes/settings'));
 v1.use('/esignatures', require('./routes/esignatures'));
 v1.use('/admin', require('./routes/admin'));
+v1.use('/admin/settings', require('./routes/adminSettings'));
 v1.use('/compliance', require('./routes/compliance'));
 v1.use('/one-time-registrations', require('./routes/oneTimeRegistrations'));
 v1.use('/certifications', require('./routes/certifications'));
@@ -301,6 +317,7 @@ v1.use('/payroll', require('./routes/payroll'));
 v1.use('/attendance', require('./routes/attendance'));
 v1.use('/agent', require('./routes/agent'));
 v1.use('/monitoring', require('./routes/monitoring'));
+v1.use('/asset-agent', require('./routes/assetAgent'));
 v1.use('/marketing/social-accounts', require('./routes/marketingSocial'));
 v1.use('/marketing/campaigns', require('./routes/marketingCampaigns'));
 v1.use('/marketing/content-calendar', require('./routes/marketingContent'));
@@ -316,6 +333,8 @@ v1.use('/marketing/coupon-performance', require('./routes/marketingCouponPerform
 v1.use('/marketing/blog', require('./routes/marketingBlog'));
 v1.use('/partnerships/firms', require('./routes/partnershipFirms'));
 v1.use('/partnerships/activities', require('./routes/partnershipActivities'));
+v1.use('/products', require('./routes/products'));
+v1.use('/product-departments', require('./routes/productDepartments'));
 v1.use('/product/features', require('./routes/productFeatures'));
 v1.use('/product/releases', require('./routes/productReleases'));
 v1.use('/product/feedback', require('./routes/productFeedback'));
@@ -343,6 +362,20 @@ app.use('/api/v1', v1);
 // Legacy /api/* paths — DEPRECATED but kept for backward compatibility
 // ──────────────────────────────────────────────────────────────────────────
 app.use('/api/employees', require('./routes/employees'));
+app.use('/api/notes', require('./routes/notes'));
+app.use('/api/tasks', require('./routes/tasks'));
+app.use('/api/jira-projects', require('./routes/jiraProjects'));
+app.use('/api/jira-issues', require('./routes/jiraIssues'));
+app.use('/api/workspaces', require('./routes/workspaces'));
+app.use('/api/chat', require('./routes/chat'));
+app.use('/api/custom-fields', require('./routes/customFields'));
+app.use('/api/workflows', require('./routes/workflows'));
+app.use('/api/automation', require('./routes/automation'));
+app.use('/api/dashboards', require('./routes/dashboards'));
+app.use('/api/slas', require('./routes/slas'));
+app.use('/api/releases', require('./routes/releases'));
+app.use('/api/roadmaps', require('./routes/roadmaps'));
+app.use('/api/okrs', require('./routes/okrs'));
 app.use('/api/parties', require('./routes/parties'));
 app.use('/api/staff-accounts', require('./routes/staff-accounts'));
 app.use('/api/approvals', require('./routes/approvals'));
@@ -384,6 +417,7 @@ app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/agent', require('./routes/agent'));
 app.use('/api/monitoring', require('./routes/monitoring'));
+app.use('/api/asset-agent', require('./routes/assetAgent'));
 app.use('/api/marketing/social-accounts', require('./routes/marketingSocial'));
 app.use('/api/marketing/campaigns', require('./routes/marketingCampaigns'));
 app.use('/api/marketing/content-calendar', require('./routes/marketingContent'));
@@ -399,6 +433,8 @@ app.use('/api/marketing/coupon-performance', require('./routes/marketingCouponPe
 app.use('/api/marketing/blog', require('./routes/marketingBlog'));
 app.use('/api/partnerships/firms', require('./routes/partnershipFirms'));
 app.use('/api/partnerships/activities', require('./routes/partnershipActivities'));
+app.use('/api/products', require('./routes/products'));
+app.use('/api/product-departments', require('./routes/productDepartments'));
 app.use('/api/product/features', require('./routes/productFeatures'));
 app.use('/api/product/releases', require('./routes/productReleases'));
 app.use('/api/product/feedback', require('./routes/productFeedback'));
@@ -423,7 +459,11 @@ app.use('/api/training', require('./routes/training'));
 app.use(errorHandler);
 
 const PORT = process.env.PORT || process.env.INTERNAL_OPS_PORT || 5050;
-const server = app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', (err) => {
+  if (err) {
+    console.error('[internal-ops] Failed to listen on port', PORT, err);
+    process.exit(1);
+  }
   console.log(`[internal-ops] listening on 0.0.0.0:${PORT}`);
   // Required here, AFTER the server starts listening, so a scheduler failing
   // to initialize doesn't prevent the API from coming up at all — each one
@@ -440,6 +480,15 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   require('./services/healthScore'); // daily 05:00 — customer health scoring (cron inside)
   require('./services/analyticsScheduler'); // daily 05:30 — pre-compute analytics snapshots
   require('./services/slackBot'); // Slack bot for /mrr, /pipeline, /renewals, /approve-invoice
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[internal-ops] Port ${PORT} already in use`);
+  } else {
+    console.error('[internal-ops] Server error:', err);
+  }
+  process.exit(1);
 });
 
 // Graceful shutdown

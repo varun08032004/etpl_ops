@@ -80,6 +80,12 @@ export default function MonitoringLive() {
           </MobileButton>
         </Box>
       </MobilePageHeader>
+      {/* ⚠️ PROD ALERT: Office/WFH detection requires office_networks table configured with real CIDR */}
+      <Alert severity="info" sx={{ mt: 2, mb: 2 }} icon={<span style={{fontSize:18}}>⚠️</span>}>
+        <strong>Production Checklist:</strong> Office/WFH detection requires <code>office_networks</code> table configured with actual office CIDR. 
+        Browser extension must be deployed for accurate website tracking. 
+        Agent must be installed and running on employee machines.
+      </Alert>
 
       <MobileCardGrid sx={{ mb: 3 }}>
         <MobilePaper>

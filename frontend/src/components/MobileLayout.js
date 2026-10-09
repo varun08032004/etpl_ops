@@ -32,7 +32,6 @@ import {
   NAV_GROUPS,
   ADMIN_NAV_GROUP,
   ROLE_TO_NAV_GROUP_LABELS,
-  SELF_SERVICE_NAV,
 } from './Layout';
 import { MobileButton, MobileAvatar } from './MobileResponsive';
 
@@ -82,7 +81,10 @@ function MobileLayout() {
     }),
   })).filter((group) => group.items.length > 0);
 
-  const selfServiceNav = [...SELF_SERVICE_NAV, ...filteredNavGroups.flatMap((g) => g.items).filter((item) => item.to !== '/')];
+  const nonPrivilegedNavGroups = [
+    ...NAV_GROUPS.filter(g => g.label === 'Self Centre'),
+    ...NAV_GROUPS.filter(g => deptGrantedGroupLabels.has(g.label)),
+  ];
 
   const handleSearch = (e) => {
     setSearchQuery(e.target.value);
@@ -279,9 +281,49 @@ function MobileLayout() {
                   );
                 })
               ) : (
-                selfServiceNav.map((item) => {
-                  const isActive = location.pathname === item.to || (item.end !== false && location.pathname.startsWith(item.to + '/'));
-                  return renderNavItem(item, isActive);
+                nonPrivilegedNavGroups.map((group) => {
+                  const isOpen = openGroups[group.label] ?? true;
+                  return (
+                    <Box key={group.label}>
+                      <Divider sx={{ my: 0.5 }} />
+                      <Box
+                        onClick={() => toggleGroup(group.label)}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          px: 2,
+                          py: 1,
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          minHeight: 44,
+                          '&:hover': { bgcolor: 'action.hover' },
+                        }}
+                      >
+                        <Typography
+                          sx={{ fontSize: '0.7rem', fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em' }}
+                        >
+                          {group.label}
+                        </Typography>
+                        <ExpandMoreIcon
+                          sx={{
+                            fontSize: 20,
+                            color: 'text.secondary',
+                            transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+                            transition: 'transform 0.2s ease',
+                          }}
+                        />
+                      </Box>
+                      <Collapse in={isOpen} timeout={200} unmountOnExit>
+                        <Box sx={{ px: 1 }}>
+                          {group.items.map((item) => {
+                            const isActive = location.pathname === item.to || (item.end !== false && location.pathname.startsWith(item.to + '/'));
+                            return renderNavItem(item, isActive);
+                          })}
+                        </Box>
+                      </Collapse>
+                    </Box>
+                  );
                 })
               )}
             </List>

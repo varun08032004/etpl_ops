@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Alert, Chip, LinearProgress,
+  Alert, Chip, LinearProgress, Grid,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -65,6 +65,12 @@ function CycleList({ onOpenCycle }) {
         <Typography variant={isMobile ? 'h6' : 'h5'}>Performance</Typography>
         {canManage && <MobileButton variant="contained" size="small" startIcon={<AddIcon />} onClick={() => setOpen(true)}>New review cycle</MobileButton>}
       </MobilePageHeader>
+      {/* ⚠️ PROD ALERT: Monitoring scores auto-populate on cycle activate — verify office CIDR configured in backend */}
+      <Alert severity="info" sx={{ mt: 2, mb: 2 }} icon={<span style={{fontSize:18}}>⚠️</span>}>
+        <strong>Production Checklist:</strong> Monitoring scores auto-populate on cycle activate. 
+        Ensure <code>PUNE_OFFICE_CIDR</code> is configured in backend env and <code>office_networks</code> table has actual office IP range. 
+        Browser extension must be deployed for accurate website tracking.
+      </Alert>
 
       <MobilePaper>
         <ResponsiveTableContainer>
@@ -129,7 +135,7 @@ function CycleDetail({ cycle, onBack }) {
     if (!reviews.length) return;
     const employeeIds = reviews.map((r) => r.employee_id).join(',');
     client.get('/monitoring/score-summary', {
-      params: { employee_ids: employeeIds, from: cycle.start_date?.slice(0, 10), to: cycle.end_date?.slice(0, 10) },
+      params: { employee_ids: employeeIds, from: cycle.start_date?.slice(0, 10), to: cycle.end_date?.slice(0, 10), include_attendance: 'true' },
     })
       .then(({ data }) => setScores(data.scores || {}))
       .catch(() => setScores({}));
@@ -188,24 +194,42 @@ function CycleDetail({ cycle, onBack }) {
         <ResponsiveTableContainer>
           <Table>
             <TableHead>
-              <TableRow><TableCell>Employee</TableCell><TableCell align="right">Self rating</TableCell><TableCell align="right">Manager rating</TableCell><TableCell align="right">Final</TableCell><TableCell align="right">Monitoring score</TableCell><TableCell>Status</TableCell></TableRow>
+              <TableRow>
+                <TableCell>Employee</TableCell>
+                <TableCell align="right">Self rating</TableCell>
+                <TableCell align="right">Manager rating</TableCell>
+                <TableCell align="right">Final</TableCell>
+                <TableCell align="right">Monitoring</TableCell>
+                <TableCell align="right">Attendance</TableCell>
+                <TableCell>Status</TableCell>
+              </TableRow>
             </TableHead>
             <TableBody>
-              {reviews.map((r) => (
-                <TableRow key={r.id} hover sx={{ cursor: 'pointer' }} onClick={() => openReview(r)}>
-                  <TableCell>{r.full_name}</TableCell>
-                  <TableCell align="right" className="figure">{r.self_rating ?? '—'}</TableCell>
-                  <TableCell align="right" className="figure">{r.manager_rating ?? '—'}</TableCell>
-                  <TableCell align="right" className="figure">{r.final_rating ?? '—'}</TableCell>
-                  <TableCell align="right">
-                    {scores[r.employee_id]
-                      ? <Chip size="small" label={scores[r.employee_id].score} color={scores[r.employee_id].score >= 85 ? 'success' : scores[r.employee_id].score >= 70 ? 'primary' : scores[r.employee_id].score >= 50 ? 'warning' : 'error'} />
-                      : <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>—</Typography>}
-                  </TableCell>
-                  <TableCell><Chip size="small" label={r.status.replace('_', ' ')} color={STATUS_COLOR[r.status]} /></TableCell>
-                </TableRow>
-              ))}
-              {!reviews.length && <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No reviews initialized — activate the cycle first.</TableCell></TableRow>}
+              {reviews.map((r) => {
+                const s = scores[r.employee_id];
+                const monScore = s?.score ?? null;
+                const attScore = s?.attendance?.score ?? null;
+                return (
+                  <TableRow key={r.id} hover sx={{ cursor: 'pointer' }} onClick={() => openReview(r)}>
+                    <TableCell>{r.full_name}</TableCell>
+                    <TableCell align="right" className="figure">{r.self_rating ?? '—'}</TableCell>
+                    <TableCell align="right" className="figure">{r.manager_rating ?? '—'}</TableCell>
+                    <TableCell align="right" className="figure">{r.final_rating ?? '—'}</TableCell>
+                    <TableCell align="right">
+                      {monScore !== null
+                        ? <Chip size="small" label={monScore} color={monScore >= 85 ? 'success' : monScore >= 70 ? 'primary' : monScore >= 50 ? 'warning' : 'error'} />
+                        : <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>—</Typography>}
+                    </TableCell>
+                    <TableCell align="right">
+                      {attScore !== null
+                        ? <Chip size="small" label={attScore} color={attScore >= 85 ? 'success' : attScore >= 70 ? 'primary' : attScore >= 50 ? 'warning' : 'error'} />
+                        : <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', color: 'text.secondary' }}>—</Typography>}
+                    </TableCell>
+                    <TableCell><Chip size="small" label={r.status.replace('_', ' ')} color={STATUS_COLOR[r.status]} /></TableCell>
+                  </TableRow>
+                );
+              })}
+              {!reviews.length && <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No reviews initialized — activate the cycle first.</TableCell></TableRow>}
             </TableBody>
           </Table>
         </ResponsiveTableContainer>
@@ -239,6 +263,65 @@ function CycleDetail({ cycle, onBack }) {
               <MobileTextField size="small" type="number" label="Weight %" value={newGoal.weight_percent} onChange={(e) => setNewGoal({ ...newGoal, weight_percent: e.target.value })} />
               <MobileButton onClick={addGoal} disabled={!newGoal.title}>Add</MobileButton>
             </MobileFormGrid>
+          )}
+
+          {/* Attendance Score Breakdown */}
+          {selected && scores[selected.employee_id]?.attendance && (
+            <Paper sx={{ mt: 3, p: 2, variant: 'outlined' }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>Attendance Score Breakdown</Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="caption" color="text.secondary">Score</Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {scores[selected.employee_id].attendance.score}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="caption" color="text.secondary">Working Days</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{scores[selected.employee_id].attendance.breakdown.totalWorkingDays}</Typography>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="caption" color="text.secondary">Present</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500, color: 'success.main' }}>{scores[selected.employee_id].attendance.breakdown.daysPresent}</Typography>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="caption" color="text.secondary">Late</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500, color: 'warning.main' }}>{scores[selected.employee_id].attendance.breakdown.daysLate}</Typography>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="caption" color="text.secondary">Early Leave</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500, color: 'warning.main' }}>{scores[selected.employee_id].attendance.breakdown.daysEarlyLeave}</Typography>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="caption" color="text.secondary">Absent</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500, color: 'error.main' }}>{scores[selected.employee_id].attendance.breakdown.daysAbsent}</Typography>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="caption" color="text.secondary">On Leave</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500, color: 'info.main' }}>{scores[selected.employee_id].attendance.breakdown.daysOnLeave}</Typography>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="caption" color="text.secondary">Total Late</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{scores[selected.employee_id].attendance.breakdown.totalLateMinutes} min</Typography>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="caption" color="text.secondary">Total Early Leave</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{scores[selected.employee_id].attendance.breakdown.totalEarlyLeaveMinutes} min</Typography>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="caption" color="text.secondary">Late Penalty</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{scores[selected.employee_id].attendance.breakdown.latePenalty}</Typography>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="caption" color="text.secondary">Early Leave Penalty</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{scores[selected.employee_id].attendance.breakdown.earlyLeavePenalty}</Typography>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="caption" color="text.secondary">Attendance Rate</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{scores[selected.employee_id].attendance.breakdown.attendanceRate}%</Typography>
+                </Grid>
+              </Grid>
+            </Paper>
           )}
 
           <Typography sx={{ fontSize: isMobile ? '0.7rem' : '0.8rem', color: 'text.secondary', mb: 1, mt: 2 }}>Self-assessment</Typography>

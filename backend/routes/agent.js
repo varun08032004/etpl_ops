@@ -13,9 +13,10 @@ const multer = require('multer');
 const bcrypt = require('bcrypt');
 const router = express.Router();
 const { safeQuery, withTransaction } = require('../db/pool');
-const { signAgentToken, authenticateAgent } = require('../middleware/agentAuth');
+const { signAgentToken, authenticateAgent, authenticateAgentHeartbeat, generateHwId } = require('../middleware/agentAuth');
 const storage = require('../services/storage');
 const { verifyTotp, decryptSecret, hashBackupCode } = require('../services/twoFactor');
+const { logAgentAction, AUDIT_ACTIONS } = require('../services/agentAudit');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } }); // 8MB/screenshot
 
@@ -26,13 +27,14 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 *
 // cron job in this small a deployment.
 const STALE_SESSION_MINUTES = 10;
 
+// Enhanced stale session detection with anomaly logging
 async function closeStaleSessions(employeeId) {
   const { rows } = await safeQuery(
     `UPDATE agent_sessions
      SET status = 'closed', clock_out = last_heartbeat_at, end_reason = 'timeout'
      WHERE employee_id = $1 AND status = 'open'
        AND last_heartbeat_at < NOW() - ($2 || ' minutes')::interval
-     RETURNING id, work_date`,
+     RETURNING id, work_date, employee_id, device_id, last_heartbeat_at, heartbeat_seq`,
     [employeeId, STALE_SESSION_MINUTES]
   );
   for (const row of rows) {
@@ -41,15 +43,58 @@ async function closeStaleSessions(employeeId) {
        WHERE employee_id = $2 AND work_date = $3`,
       [row.id, employeeId, row.work_date]
     );
+    
+    // Log timeout anomaly
+    await safeQuery(
+      `INSERT INTO heartbeat_anomaly_log (session_id, employee_id, device_id, anomaly_type, severity, details, ip)
+       VALUES ($1, $2, $3, 'timeout', 'warning', $4, $5)`,
+      [row.id, row.employee_id, row.device_id, { 
+        lastHeartbeatAt: row.last_heartbeat_at, 
+        staleMinutes: STALE_SESSION_MINUTES,
+        heartbeatSeq: row.heartbeat_seq 
+      }, 'system']
+    );
+  }
+  return rows;
+}
+
+// Close ALL stale sessions across all employees (for cron job)
+async function closeAllStaleSessions() {
+  const { rows } = await safeQuery(
+    `UPDATE agent_sessions
+     SET status = 'closed', clock_out = last_heartbeat_at, end_reason = 'timeout'
+     WHERE status = 'open'
+       AND last_heartbeat_at < NOW() - ($1 || ' minutes')::interval
+     RETURNING id, employee_id, work_date, device_id, last_heartbeat_at, heartbeat_seq`,
+    [STALE_SESSION_MINUTES]
+  );
+  for (const row of rows) {
+    await safeQuery(
+      `UPDATE attendance_records SET clock_out = last_heartbeat_at
+       WHERE employee_id = $1 AND work_date = $2`,
+      [row.employee_id, row.work_date]
+    );
+    
+    // Log timeout anomaly
+    await safeQuery(
+      `INSERT INTO heartbeat_anomaly_log (session_id, employee_id, device_id, anomaly_type, severity, details, ip)
+       VALUES ($1, $2, $3, 'timeout', 'warning', $4, $5)`,
+      [row.id, row.employee_id, row.device_id, { 
+        lastHeartbeatAt: row.last_heartbeat_at, 
+        staleMinutes: STALE_SESSION_MINUTES,
+        heartbeatSeq: row.heartbeat_seq 
+      }, 'system']
+    );
   }
   return rows;
 }
 
 // ── login — agent's own auth, reuses staff_accounts credentials ────────────
-// Body: { email, password, company_code, device_name, os, agent_version, totp_token, backup_code }
+// Body: { email, password, company_code, device_name, os, agent_version, totp_token, backup_code,
+//         hw_id_components: { cpuId, motherboardSerial, diskSerial, macAddresses } }
 router.post('/login', async (req, res) => {
   try {
-    const { email, password, company_code, device_name, os, agent_version, totp_token, backup_code } = req.body;
+    const { email, password, company_code, device_name, os, agent_version, totp_token, backup_code, hw_id_components } = req.body;
     if (!email || !password || !device_name) {
       return res.status(400).json({ error: 'email, password, and device_name are required' });
     }
@@ -95,26 +140,128 @@ router.post('/login', async (req, res) => {
       }
     }
 
+    const clientIp = req.ip || req.connection?.remoteAddress || 'unknown';
+    let hwId = null;
+    let isFirstEnrollment = false;
+
+    if (hw_id_components) {
+      hwId = generateHwId(hw_id_components);
+    }
+
     const { rows: [device] } = await safeQuery(
-      `INSERT INTO agent_devices (employee_id, device_name, os, agent_version, status, last_seen_at)
-       VALUES ($1,$2,$3,$4,'active',NOW())
+      `INSERT INTO agent_devices (employee_id, device_name, os, agent_version, status, last_seen_at, hw_id, hw_id_components, enrolled_at, fingerprint_verified_at, last_known_ip)
+       VALUES ($1,$2,$3,$4,'active',NOW(),$5,$6,NOW(),NOW(),$7)
        ON CONFLICT (employee_id, device_name) DO UPDATE SET
          os = EXCLUDED.os, agent_version = EXCLUDED.agent_version,
-         status = 'active', last_seen_at = NOW()
-       RETURNING id, status`,
-      [staff.employee_id, device_name, os || null, agent_version || null]
+         status = 'active', last_seen_at = NOW(),
+         hw_id = CASE 
+           WHEN agent_devices.hw_id IS NULL THEN EXCLUDED.hw_id
+           WHEN agent_devices.hw_id != EXCLUDED.hw_id THEN agent_devices.hw_id  -- Keep original, log mismatch
+           ELSE agent_devices.hw_id
+         END,
+         hw_id_components = CASE 
+           WHEN agent_devices.hw_id IS NULL THEN EXCLUDED.hw_id_components
+           ELSE agent_devices.hw_id_components
+         END,
+         last_known_ip = EXCLUDED.last_known_ip
+       RETURNING id, status, hw_id`,
+      [staff.employee_id, device_name, os || null, agent_version || null, hwId, hw_id_components ? JSON.stringify(hw_id_components) : null, clientIp]
     );
+
     if (device.status !== 'active') return res.status(403).json({ error: 'This device has been revoked' });
 
+    // Check if this is a new enrollment (no previous HWID)
+    if (!device.hw_id && hwId) {
+      isFirstEnrollment = true;
+      await safeQuery(
+        `UPDATE agent_devices SET hw_id = $1, hw_id_components = $2, enrolled_at = NOW(), fingerprint_verified_at = NOW() WHERE id = $3`,
+        [hwId, hw_id_components ? JSON.stringify(hw_id_components) : null, device.id]
+      );
+      await safeQuery(
+        `INSERT INTO device_enrollment_log (device_id, employee_id, action, hw_id, ip, metadata)
+         VALUES ($1, $2, 'enrolled', $3, $4, $5)`,
+        [device.id, staff.employee_id, hwId, clientIp, { os, agent_version, isFirstEnrollment: true }]
+      );
+    } else if (device.hw_id && hwId && device.hw_id !== hwId) {
+      // HWID changed - log mismatch
+      await safeQuery(
+        `INSERT INTO device_enrollment_log (device_id, employee_id, action, hw_id, ip, metadata)
+         VALUES ($1, $2, 'hw_id_changed', $3, $4, $5)`,
+        [device.id, staff.employee_id, hwId, clientIp, { previousHwId: device.hw_id }]
+      );
+    }
+
     const token = signAgentToken({ staffId: staff.id, employeeId: staff.employee_id, deviceId: device.id });
-    res.json({ token, employee_id: staff.employee_id, device_id: device.id });
+    
+    // Audit log: successful login
+    await logAgentAction({
+      action: AUDIT_ACTIONS['agent.login.success'],
+      employeeId: staff.employee_id,
+      deviceId: device.id,
+      ip: clientIp,
+      details: { 
+        isFirstEnrollment, 
+        os, 
+        agentVersion: agent_version,
+        hasHwId: !!hwId,
+        twoFactorUsed: staff.two_fa_enabled 
+      },
+      severity: 'info',
+      userAgent: req.get('user-agent'),
+    });
+    
+    res.json({ token, employee_id: staff.employee_id, device_id: device.id, first_enrollment: isFirstEnrollment });
   } catch (err) {
     console.error('[agent:login]', err);
+    
+    // Audit log: failed login
+    await logAgentAction({
+      action: AUDIT_ACTIONS['agent.login.failed'],
+      employeeId: staff?.employee_id || null,
+      ip: req.ip || req.connection?.remoteAddress || 'unknown',
+      details: { error: err.message, email: email?.toLowerCase() },
+      severity: 'warning',
+      userAgent: req.get('user-agent'),
+    });
+    
     res.status(500).json({ error: 'Login failed' });
   }
 });
 
-router.use(authenticateAgent);
+// Apply standard auth to all routes except heartbeat (which needs sequence validation)
+router.use((req, res, next) => {
+  if (req.path === '/session/heartbeat') {
+    return authenticateAgentHeartbeat(req, res, next);
+  }
+  return authenticateAgent(req, res, next);
+});
+
+// Get company timezone for work date calculation
+let cachedTimezone = null;
+let timezoneCachedAt = 0;
+const TIMEZONE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function getCompanyTimezone() {
+  const now = Date.now();
+  if (cachedTimezone && (now - timezoneCachedAt) < TIMEZONE_CACHE_TTL_MS) {
+    return cachedTimezone;
+  }
+  const { rows: [settings] } = await safeQuery(`SELECT company_timezone FROM monitoring_settings WHERE id = 1`);
+  cachedTimezone = settings?.company_timezone || 'Asia/Kolkata';
+  timezoneCachedAt = now;
+  return cachedTimezone;
+}
+
+// Get current work date in company timezone
+async function getCurrentWorkDate() {
+  const timezone = await getCompanyTimezone();
+  // Use PostgreSQL to get current date in company timezone
+  const { rows: [result] } = await safeQuery(
+    `SELECT (NOW() AT TIME ZONE $1)::date AS work_date`,
+    [timezone]
+  );
+  return result.work_date;
+}
 
 // Today's cumulative worked/idle time ACROSS all of today's sessions (not
 // just the currently-open one) — this is what "continue from where you
@@ -138,16 +285,23 @@ router.get('/me', async (req, res) => {
       [req.agent.employeeId]
     );
     const { rows: [settings] } = await safeQuery(`SELECT * FROM monitoring_settings WHERE id = 1`);
+    
+    // Fetch office networks for work mode detection
+    const { rows: officeNetworks } = await safeQuery(
+      `SELECT id, name, cidr FROM office_networks WHERE id = ANY($1)`,
+      [settings.allowed_office_network_ids || []]
+    );
+    
     const openSession = await closeStaleSessions(req.agent.employeeId)
       .then(() => safeQuery(
-        `SELECT id, clock_in, work_date, active_seconds, idle_seconds FROM agent_sessions WHERE employee_id = $1 AND status = 'open' ORDER BY clock_in DESC LIMIT 1`,
+        `SELECT id, clock_in, work_date, active_seconds, idle_seconds, heartbeat_seq FROM agent_sessions WHERE employee_id = $1 AND status = 'open' ORDER BY clock_in DESC LIMIT 1`,
         [req.agent.employeeId]
       ))
       .then(({ rows }) => rows[0] || null);
 
     const todayTotals = openSession ? await getTodayTotals(req.agent.employeeId, openSession.work_date) : null;
 
-    res.json({ employee, settings, open_session: openSession, today_totals: todayTotals });
+    res.json({ employee, settings, office_networks: officeNetworks, open_session: openSession, today_totals: todayTotals });
   } catch (err) {
     console.error('[agent:me]', err);
     res.status(500).json({ error: 'Failed to load agent config' });
@@ -160,7 +314,7 @@ router.post('/session/start', async (req, res) => {
     await closeStaleSessions(req.agent.employeeId);
 
     const { rows: [existing] } = await safeQuery(
-      `SELECT id, clock_in, work_date, active_seconds, idle_seconds FROM agent_sessions WHERE employee_id = $1 AND status = 'open' ORDER BY clock_in DESC LIMIT 1`,
+      `SELECT id, clock_in, work_date, active_seconds, idle_seconds, heartbeat_seq FROM agent_sessions WHERE employee_id = $1 AND status = 'open' ORDER BY clock_in DESC LIMIT 1`,
       [req.agent.employeeId]
     );
     if (existing) {
@@ -168,16 +322,17 @@ router.post('/session/start', async (req, res) => {
       return res.json({
         session_id: existing.id, clock_in: existing.clock_in, resumed: true,
         active_seconds: existing.active_seconds, idle_seconds: existing.idle_seconds, today_totals: todayTotals,
+        next_heartbeat_seq: (existing.heartbeat_seq || 0) + 1
       });
     }
 
     const now = new Date();
-    const workDate = now.toISOString().slice(0, 10);
+    const workDate = await getCurrentWorkDate();
 
     const result = await withTransaction(async (client) => {
       const { rows: [session] } = await client.query(
-        `INSERT INTO agent_sessions (employee_id, device_id, work_date, clock_in, last_heartbeat_at, status)
-         VALUES ($1,$2,$3,$4,$4,'open') RETURNING id, clock_in`,
+        `INSERT INTO agent_sessions (employee_id, device_id, work_date, clock_in, last_heartbeat_at, last_heartbeat_received_at, status, heartbeat_seq)
+         VALUES ($1,$2,$3,$4,$4,$4,'open',0) RETURNING id, clock_in`,
         [req.agent.employeeId, req.agent.deviceId, workDate, now]
       );
       await client.query(
@@ -194,7 +349,7 @@ router.post('/session/start', async (req, res) => {
     // Session 2), today_totals still carries that forward — this is the
     // number the tray should actually display, not result's own 0.
     const todayTotals = await getTodayTotals(req.agent.employeeId, workDate);
-    res.json({ session_id: result.id, clock_in: result.clock_in, resumed: false, active_seconds: 0, idle_seconds: 0, today_totals: todayTotals });
+    res.json({ session_id: result.id, clock_in: result.clock_in, resumed: false, active_seconds: 0, idle_seconds: 0, today_totals: todayTotals, next_heartbeat_seq: 1 });
   } catch (err) {
     console.error('[agent:session:start]', err);
     res.status(500).json({ error: 'Failed to start session' });
@@ -204,6 +359,8 @@ router.post('/session/start', async (req, res) => {
 // ── periodic sync (default: every 30s) ──────────────────────────────────
 // Body: {
 //   session_id,
+//   heartbeat_seq,              // monotonically increasing sequence (required)
+//   work_mode,                  // 'office' | 'wfh' | 'hybrid' (optional, from client)
 //   current_app, current_window_title, current_domain,   // for the live dashboard
 //   active_seconds_delta, idle_seconds_delta,             // since last heartbeat
 //   app_segments: [{ app_name, window_title, started_at, ended_at, duration_seconds }],
@@ -213,17 +370,33 @@ router.post('/session/start', async (req, res) => {
 router.post('/session/heartbeat', async (req, res) => {
   try {
     const {
-      session_id, current_app, current_window_title, current_domain,
+      session_id, heartbeat_seq,
+      work_mode,
+      current_app, current_window_title, current_domain,
       active_seconds_delta = 0, idle_seconds_delta = 0,
       app_segments = [], website_segments = [], idle_periods = [],
     } = req.body;
     if (!session_id) return res.status(400).json({ error: 'session_id is required' });
+    if (typeof heartbeat_seq !== 'number') return res.status(400).json({ error: 'heartbeat_seq is required' });
+
+    // req.agent.sessionId and req.agent.heartbeatSeq are set by authenticateAgentHeartbeat
+    // and already validated - but double-check session ownership
+    if (req.agent.sessionId !== session_id) {
+      return res.status(403).json({ error: 'Session ID mismatch' });
+    }
 
     const { rows: [session] } = await safeQuery(
       `SELECT id, work_date FROM agent_sessions WHERE id = $1 AND employee_id = $2 AND status = 'open'`,
       [session_id, req.agent.employeeId]
     );
     if (!session) return res.status(404).json({ error: 'No open session with that id — call /session/start again' });
+
+    // Auto-detect work_mode from server-side IP if not provided by client
+    let finalWorkMode = work_mode;
+    if (!finalWorkMode) {
+      const { rows: [device] } = await safeQuery(`SELECT is_office_network FROM agent_devices WHERE id = $1`, [req.agent.deviceId]);
+      finalWorkMode = device?.is_office_network ? 'office' : 'wfh';
+    }
 
     await withTransaction(async (client) => {
       for (const seg of app_segments.slice(0, 500)) {
@@ -248,12 +421,15 @@ router.post('/session/heartbeat', async (req, res) => {
         );
       }
 
+      // Update session with new sequence number, server receipt timestamp, and work_mode
       await client.query(
         `UPDATE agent_sessions SET
            active_seconds = active_seconds + $2, idle_seconds = idle_seconds + $3,
-           last_heartbeat_at = NOW(), current_app = $4, current_window_title = $5, current_domain = $6
+           last_heartbeat_at = NOW(), last_heartbeat_received_at = NOW(),
+           heartbeat_seq = $7, current_app = $4, current_window_title = $5, current_domain = $6,
+           work_mode = $8
          WHERE id = $1`,
-        [session_id, active_seconds_delta, idle_seconds_delta, current_app || null, current_window_title || null, current_domain || null]
+        [session_id, active_seconds_delta, idle_seconds_delta, current_app || null, current_window_title || null, current_domain || null, heartbeat_seq, finalWorkMode]
       );
       await client.query(
         `UPDATE attendance_records SET
@@ -264,15 +440,19 @@ router.post('/session/heartbeat', async (req, res) => {
       await client.query(`UPDATE agent_devices SET last_seen_at = NOW() WHERE id = $1`, [req.agent.deviceId]);
     });
 
-    // Return the authoritative post-update totals — the agent seeds its
-    // display from these rather than trusting its own running count, which
-    // is what was causing the dashboard/tray numbers to drift apart.
+    // Return the authoritative post-update totals + next expected sequence
     const { rows: [updated] } = await safeQuery(
-      `SELECT active_seconds, idle_seconds FROM agent_sessions WHERE id = $1`,
+      `SELECT active_seconds, idle_seconds, heartbeat_seq FROM agent_sessions WHERE id = $1`,
       [session_id]
     );
     const todayTotals = await getTodayTotals(req.agent.employeeId, session.work_date);
-    res.json({ ok: true, active_seconds: updated.active_seconds, idle_seconds: updated.idle_seconds, today_totals: todayTotals });
+    res.json({ 
+      ok: true, 
+      active_seconds: updated.active_seconds, 
+      idle_seconds: updated.idle_seconds, 
+      today_totals: todayTotals,
+      next_heartbeat_seq: updated.heartbeat_seq + 1
+    });
   } catch (err) {
     console.error('[agent:session:heartbeat]', err);
     res.status(500).json({ error: 'Heartbeat failed' });
@@ -341,10 +521,10 @@ router.post('/session/force-logout', async (req, res) => {
 // ── screenshot upload (optional feature) ───────────────────────────────
 router.post('/screenshot', upload.single('image'), async (req, res) => {
   try {
-    const { rows: [settings] } = await safeQuery(`SELECT screenshots_enabled FROM monitoring_settings WHERE id = 1`);
+    const { rows: [settings] } = await safeQuery(`SELECT * FROM monitoring_settings WHERE id = 1`);
     if (!settings?.screenshots_enabled) return res.status(403).json({ error: 'Screenshots are disabled company-wide' });
 
-    const { session_id, captured_at } = req.body;
+    const { session_id, captured_at, monitor_index = 0, monitor_name = 'Primary', hash } = req.body;
     if (!session_id || !req.file) return res.status(400).json({ error: 'session_id and image file are required' });
 
     const { rows: [session] } = await safeQuery(
@@ -353,13 +533,28 @@ router.post('/screenshot', upload.single('image'), async (req, res) => {
     );
     if (!session) return res.status(404).json({ error: 'No such session' });
 
+    // Verify hash if provided and verification is enabled
+    if (hash && settings.screenshot_hash_verification) {
+      const crypto = require('crypto');
+      const computedHash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+      if (computedHash !== hash) {
+        // Log hash mismatch anomaly
+        await safeQuery(
+          `INSERT INTO heartbeat_anomaly_log (session_id, employee_id, device_id, anomaly_type, severity, details, ip)
+           VALUES ($1, $2, $3, 'screenshot_hash_mismatch', 'critical', $4, $5)`,
+          [session_id, req.agent.employeeId, req.agent.deviceId, { expected: hash, computed: computedHash }, req.ip]
+        );
+        return res.status(400).json({ error: 'Screenshot hash verification failed' });
+      }
+    }
+
     const ext = (req.file.mimetype || '').includes('png') ? 'png' : 'jpg';
-    const storagePath = `${req.agent.employeeId}/${session_id}/${crypto.randomUUID()}.${ext}`;
+    const storagePath = `${req.agent.employeeId}/${session_id}/${crypto.randomUUID()}_monitor${monitor_index}.${ext}`;
     await storage.uploadFile(storagePath, req.file.buffer, req.file.mimetype, storage.SCREENSHOTS_BUCKET);
 
     await safeQuery(
-      `INSERT INTO screenshots (session_id, employee_id, captured_at, storage_path) VALUES ($1,$2,$3,$4)`,
-      [session_id, req.agent.employeeId, captured_at || new Date(), storagePath]
+      `INSERT INTO screenshots (session_id, employee_id, captured_at, storage_path, monitor_index, monitor_name, hash, watermark_applied) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [session_id, req.agent.employeeId, captured_at || new Date(), storagePath, monitor_index, monitor_name, hash, settings.screenshot_watermark_enabled]
     );
     res.json({ ok: true });
   } catch (err) {

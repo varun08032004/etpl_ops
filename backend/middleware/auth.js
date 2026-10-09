@@ -19,24 +19,28 @@ const ACCESS_COOKIE_MAX_AGE = 30 * 60 * 1000; // 30 minutes
 
 function accessCookieOptions(maxAge) {
   const isProd = process.env.NODE_ENV === 'production';
+  const cookieDomain = process.env.INTERNAL_OPS_COOKIE_DOMAIN || undefined;
   const options = {
     httpOnly: true,
     secure: isProd,
     sameSite: isProd ? 'none' : 'lax',
     path: '/',
     ...(maxAge ? { maxAge } : {}),
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
   };
   return options;
 }
 
 function refreshCookieOptions(maxAge) {
   const isProd = process.env.NODE_ENV === 'production';
+  const cookieDomain = process.env.INTERNAL_OPS_COOKIE_DOMAIN || undefined;
   const options = {
     httpOnly: true,
     secure: isProd,
     sameSite: isProd ? 'none' : 'lax',
     path: '/',
     ...(maxAge ? { maxAge } : {}),
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
   };
   return options;
 }

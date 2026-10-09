@@ -7,9 +7,65 @@ const { safeQuery } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const storage = require('../services/storage');
 
-router.use(authenticate);
-
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } }); // 20MB cap
+
+// Only these types may be fetched without logging in (ID-card photos).
+// Do NOT add 'id_proof' here: that is where scanned government IDs
+// (Aadhaar, PAN, passport...) are stored and they must stay private.
+const PUBLIC_DOC_TYPES = ['id_photo', 'photo'];
+
+// ── PUBLIC: serve ID photo directly (no auth) ─────────────────────────────────
+// Streams the actual image bytes. Use this URL in <img> tags / ID cards.
+router.get('/:id/file', async (req, res) => {
+  try {
+    const { rows: [doc] } = await safeQuery(`SELECT * FROM documents WHERE id = $1`, [req.params.id]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+    if (!PUBLIC_DOC_TYPES.includes(doc.doc_type)) {
+      return res.status(403).json({ error: 'Authentication required' });
+    }
+
+    const { buffer, contentType } = await storage.downloadFile(doc.storage_path);
+
+    res.setHeader('Content-Type', doc.mime_type || contentType || 'application/octet-stream');
+    // filename* avoids a crash (ERR_INVALID_CHAR) when the original name has non-ASCII characters
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(doc.file_name || 'file')}`);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(buffer);
+  } catch (err) {
+    if (storage.isNotFoundError(err)) {
+      return res.status(404).json({ error: 'File is missing from storage. Please re-upload it.' });
+    }
+    console.error('[documents:file]', err);
+    res.status(500).json({ error: err.message || 'Failed to serve file' });
+  }
+});
+
+// ── PUBLIC: download link for ID photos (no auth) ─────────────────────────────
+// Returns JSON { url, fileName } with a short-lived signed link. This is NOT
+// an image URL; for <img> tags use /:id/file above.
+router.get('/:id/download', async (req, res) => {
+  try {
+    const { rows: [doc] } = await safeQuery(`SELECT * FROM documents WHERE id = $1`, [req.params.id]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+    if (!PUBLIC_DOC_TYPES.includes(doc.doc_type)) {
+      return res.status(403).json({ error: 'Authentication required' });
+    }
+
+    const url = await storage.getSignedUrl(doc.storage_path, 300); // 5-minute link
+    res.json({ url, fileName: doc.file_name });
+  } catch (err) {
+    if (storage.isNotFoundError(err)) {
+      return res.status(404).json({ error: 'File is missing from storage. Please re-upload it.' });
+    }
+    console.error('[documents:download]', err);
+    res.status(500).json({ error: err.message || 'Failed to generate download link' });
+  }
+});
+
+// ── All other routes require authentication ──────────────────────────────────
+router.use(authenticate);
 
 function safeFileName(name) {
   return name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
@@ -176,62 +232,21 @@ router.get('/:id/history', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch version history' });
   }
 });
- 
-// ── get a time-limited download link (returns JSON with signed URL) ──────────
-router.get('/:id/download', async (req, res) => {
-  try {
-    const { rows: [doc] } = await safeQuery(`SELECT * FROM documents WHERE id = $1`, [req.params.id]);
-    if (!doc) return res.status(404).json({ error: 'Document not found' });
- 
-    const privileged = ['owner', 'admin', 'hr', 'finance'].includes(req.staff.role);
-    if (doc.entity_type === 'employee' && doc.entity_id && !privileged && doc.entity_id !== req.staff.employee_id) {
-      return res.status(403).json({ error: "You can only download your own documents" });
-    }
- 
-    const url = await storage.getSignedUrl(doc.storage_path, 300); // 5-minute link
-    res.json({ url, fileName: doc.file_name });
-  } catch (err) {
-    console.error('[documents:download]', err);
-    res.status(500).json({ error: err.message || 'Failed to generate download link' });
-  }
-});
- 
-// ── serve file directly (for <img src>, preview, etc.) ───────────────────────
-router.get('/:id/file', async (req, res) => {
-  try {
-    const { rows: [doc] } = await safeQuery(`SELECT * FROM documents WHERE id = $1`, [req.params.id]);
-    if (!doc) return res.status(404).json({ error: 'Document not found' });
- 
-    const privileged = ['owner', 'admin', 'hr', 'finance'].includes(req.staff.role);
-    if (doc.entity_type === 'employee' && doc.entity_id && !privileged && doc.entity_id !== req.staff.employee_id) {
-      return res.status(403).json({ error: "You can only access your own documents" });
-    }
- 
-    const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
-    const BUCKET = 'Documents';
- 
-    const resStorage = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${doc.storage_path}`, {
-      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
-    });
-    if (!resStorage.ok) {
-      const text = await resStorage.text();
-      throw new Error(`Supabase Storage fetch failed (${resStorage.status}): ${text}`);
-    }
- 
-    res.setHeader('Content-Type', doc.mime_type || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${doc.file_name}"`);
-    resStorage.body.pipe(res);
-  } catch (err) {
-    console.error('[documents:file]', err);
-    res.status(500).json({ error: err.message || 'Failed to serve file' });
-  }
-});
 
-// ── delete (only latest version, and only admin/hr/finance) ────────────────
-router.delete('/:id', requireRole('hr'), async (req, res) => {
+// ── delete (owner, admin/hr) ────────────────
+router.delete('/:id', async (req, res) => {
   try {
     const { rows: [doc] } = await safeQuery(`SELECT * FROM documents WHERE id = $1`, [req.params.id]);
     if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+    // Check if user is owner (uploaded_by or entity_id matches their employee_id)
+    const isOwner = doc.uploaded_by === req.staff.id || 
+                    (doc.entity_type === 'employee' && doc.entity_id === req.staff.employee_id);
+    const isHR = ['hr', 'admin', 'owner'].includes(req.staff.role);
+
+    if (!isOwner && !isHR) {
+      return res.status(403).json({ error: 'Only document owner or HR can delete' });
+    }
 
     await storage.deleteFile(doc.storage_path).catch((err) => console.warn('[documents:delete] storage cleanup failed, continuing:', err.message));
     await safeQuery(`DELETE FROM documents WHERE id = $1`, [req.params.id]);

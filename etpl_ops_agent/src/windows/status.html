@@ -16,6 +16,7 @@
   }
   .badge.online { background: #16351f; color: #4ade80; }
   .badge.offline { background: #2a2d33; color: #9aa1ac; }
+  .badge.punched-in { background: #1e3a5f; color: #60a5fa; }
   .clock-in { font-size: 11px; color: #6d7480; margin-top: 3px; }
 
   .stats { display: flex; gap: 10px; margin: 18px 0; }
@@ -28,13 +29,28 @@
   .current .app { font-size: 13px; font-weight: 600; }
   .current .site { font-size: 11.5px; color: #9aa1ac; margin-top: 2px; }
 
+  .punch-status { 
+    background: #1b1f26; border-radius: 8px; padding: 12px; margin-bottom: 18px; 
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  }
+  .punch-status .label { font-size: 10px; color: #9aa1ac; }
+  .punch-status .time { font-size: 14px; font-weight: 600; }
+  .punch-status .punch-in { color: #4ade80; }
+  .punch-status .punch-out { color: #f87171; }
+  .punch-status .late { color: #fbbf24; }
+  .punch-status .early { color: #f87171; }
+  .punch-status .separator { color: #4a5058; }
+
   button {
-    width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600;
+    width: 100%; padding: 12px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600;
     cursor: pointer; margin-top: 8px;
   }
-  .start { background: #4c8dff; color: white; }
-  .stop { background: #ff5b5b; color: white; }
-  .signout { background: transparent; color: #6d7480; font-weight: 400; font-size: 11.5px; }
+  .punch-in-btn { background: #22c55e; color: white; }
+  .punch-out-btn { background: #ef4444; color: white; }
+  .punch-btn:disabled { background: #3d4450; cursor: not-allowed; }
+  .undo-btn { background: #f59e0b; color: white; }
+  .signout { background: transparent; color: #6d7480; font-weight: 400; font-size: 11.5px; margin-top: 4px; }
+  .hidden { display: none; }
 </style>
 </head>
 <body>
@@ -55,9 +71,39 @@
     <div class="site" id="currentSite"></div>
   </div>
 
-  <button class="start" id="startBtn">Start Work</button>
-  <button class="stop" id="stopBtn" style="display:none;">Stop Work</button>
+  <!-- Punch In/Out Status -->
+  <div class="punch-status" id="punchStatus" style="display: none;">
+    <div class="label">TODAY</div>
+    <div class="time punch-in" id="punchInTime">—</div>
+    <span class="separator">|</span>
+    <div class="time punch-out" id="punchOutTime">—</div>
+    <span id="lateBadge" class="late hidden">⚠ Late</span>
+    <span id="earlyBadge" class="early hidden">⚠ Early Leave</span>
+  </div>
+
+  <!-- Working Hours Info -->
+  <div class="current" id="workingHoursInfo" style="display: none; margin-bottom: 18px;">
+    <div class="label">WORK HOURS</div>
+    <div class="app" id="workingHours">—</div>
+    <div class="site" id="nextPunchOut"></div>
+  </div>
+
+  <!-- Punch In/Out Controls (MAIN ACTIONS) -->
+  <div id="punchControls">
+    <button class="punch-btn punch-in-btn" id="punchInBtn">Punch In</button>
+    <button class="punch-btn punch-out-btn hidden" id="punchOutBtn">Punch Out</button>
+    <button class="punch-btn undo-btn hidden" id="undoPunchInBtn">Undo Punch In</button>
+    <button class="punch-btn undo-btn hidden" id="undoPunchOutBtn">Undo Punch Out</button>
+  </div>
+
   <button class="signout" id="signOutBtn">Sign out of this device</button>
+
+  <div class="current" id="pairingSection" style="display:none; margin-top: 18px;">
+    <div class="label">BROWSER EXTENSION PAIRING TOKEN</div>
+    <div class="app" style="font-family: monospace; font-size: 11px; word-break: break-all;" id="pairingToken"></div>
+    <div class="label" style="margin-top: 8px; font-size: 9px;">Copy this token into the EtherTrack Browser Extension options page</div>
+    <button class="start" id="copyTokenBtn" style="margin-top: 8px; padding: 6px; font-size: 11px;">Copy Token</button>
+  </div>
 
   <script src="status.js"></script>
 </body>

@@ -131,6 +131,52 @@ a { color: inherit; text-decoration: none; }
   }
 }
 
+/* Global fix for floating label clipping across all forms */
+.MuiFormControl-root,
+.MuiTextField-root {
+  overflow: visible !important;
+}
+
+.MuiInputLabel-shrink {
+  transform: translate(14px, -9px) scale(0.75) !important;
+  transform-origin: top left !important;
+}
+
+.MuiInputLabel-root {
+  pointer-events: none;
+}
+
+.MuiOutlinedInput-input {
+  padding-top: 16.5px !important;
+  padding-bottom: 8.5px !important;
+}
+
+.MuiOutlinedInput-input.MuiInputBase-inputSizeSmall {
+  padding-top: 14.5px !important;
+  padding-bottom: 6.5px !important;
+}
+
+.MuiInputLabel-shrink ~ .MuiOutlinedInput-root .MuiOutlinedInput-input {
+  padding-top: 16.5px !important;
+  padding-bottom: 8.5px !important;
+}
+
+.MuiInputLabel-shrink ~ .MuiOutlinedInput-root .MuiOutlinedInput-input.MuiInputBase-inputSizeSmall {
+  padding-top: 14.5px !important;
+  padding-bottom: 6.5px !important;
+}
+
+/* Ensure dialogs/modals don't clip floating labels */
+.MuiDialog-paper,
+.MuiDrawer-paper,
+.MuiPopover-paper {
+  overflow: visible !important;
+}
+
+.MuiDialogContent-root {
+  overflow: visible !important;
+}
+
 @media (max-width: 599px) {
   .MuiTableCell-root {
     padding: 8px 12px !important;
