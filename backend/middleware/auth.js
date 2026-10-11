@@ -205,10 +205,39 @@ function requireDepartmentHead(...departmentNames) {
   };
 }
 
+function requireMFA(req, res, next) {
+  // In production, this would check for MFA verification header
+  // For now, we'll just check if the user has MFA enabled and require the header
+  if (!req.staff) return res.status(401).json({ error: 'Not authenticated' });
+  
+  const mfaHeader = req.headers['x-mfa-verified'] || req.headers['x-mfa-token'];
+  
+  // For development, allow bypass with a header
+  if (process.env.NODE_ENV === 'development') {
+    if (!mfaHeader) {
+      console.warn('[MFA] Development mode: MFA header not provided, allowing request');
+    }
+    return next();
+  }
+  
+  if (!mfaHeader) {
+    return res.status(403).json({ 
+      error: 'MFA verification required', 
+      code: 'MFA_REQUIRED',
+      message: 'Please provide MFA verification header (x-mfa-verified or x-mfa-token)' 
+    });
+  }
+  
+  // TODO: Verify MFA token with your MFA service
+  // For now, we'll accept any non-empty header in dev
+  next();
+}
+
 module.exports = {
   authenticate,
   requireRole,
   requireDepartmentHead,
+  requireMFA,
   signAccessToken,
   signRefreshToken,
   storeRefreshToken,

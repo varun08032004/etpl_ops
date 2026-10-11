@@ -23,6 +23,17 @@ async function generateHwIdComponents() {
   return { cpuId, motherboardSerial, diskSerial, macAddresses };
 }
 
+// Generate device fingerprint for attendance tracking
+async function generateDeviceFingerprint() {
+  const components = await generateHwIdComponents();
+  const crypto = require('crypto');
+  const fingerprint = crypto
+    .createHash('sha256')
+    .update(JSON.stringify(components))
+    .digest('hex');
+  return fingerprint;
+}
+
 function getCpuId() {
   try {
     // On Windows, use wmic to get CPU ID
@@ -219,11 +230,13 @@ function uploadScreenshot(token, { sessionId, capturedAt, buffer, mimeType, moni
 }
 
 async function punchIn(token, { source = 'agent', device_info = {} } = {}) {
-  return request('/attendance/punch-in', { method: 'POST', token, body: { source, device_info } });
+  const fingerprint = await generateDeviceFingerprint();
+  return request('/attendance/punch-in', { method: 'POST', token, body: { source, device_info, device_fingerprint: fingerprint } });
 }
 
 async function punchOut(token, { source = 'agent', device_info = {} } = {}) {
-  return request('/attendance/punch-out', { method: 'POST', token, body: { source, device_info } });
+  const fingerprint = await generateDeviceFingerprint();
+  return request('/attendance/punch-out', { method: 'POST', token, body: { source, device_info, device_fingerprint: fingerprint } });
 }
 
 async function getTodayAttendance(token) {
@@ -238,4 +251,4 @@ async function undoPunchOut(token) {
   return request('/attendance/punch-out/undo', { method: 'POST', token });
 }
 
-module.exports = { login, getMe, sessionStart, heartbeat, sessionStop, forceLogout, uploadScreenshot, BASE_URL, generateHwIdComponents, flushRequestQueue, punchIn, punchOut, getTodayAttendance, undoPunchIn, undoPunchOut };
+module.exports = { login, getMe, sessionStart, heartbeat, sessionStop, forceLogout, uploadScreenshot, BASE_URL, generateHwIdComponents, generateDeviceFingerprint, flushRequestQueue, punchIn, punchOut, getTodayAttendance, undoPunchIn, undoPunchOut };

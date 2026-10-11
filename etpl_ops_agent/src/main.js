@@ -690,6 +690,32 @@ ipcMain.handle('attendance:undo-punch-out', async () => {
   }
 });
 
+// ── Dialog handlers (for renderer with contextIsolation) ────────────────────
+ipcMain.handle('dialog:confirm', async (_, message) => {
+  const { dialog } = require('electron');
+  const { response } = await dialog.showMessageBox(statusWindow || mainWindow, {
+    type: 'question',
+    buttons: ['Cancel', 'OK'],
+    defaultId: 1,
+    cancelId: 0,
+    message,
+    noLink: true,
+  });
+  return response === 1;
+});
+
+ipcMain.handle('dialog:alert', async (_, message) => {
+  const { dialog } = require('electron');
+  await dialog.showMessageBox(statusWindow || mainWindow, {
+    type: 'info',
+    buttons: ['OK'],
+    defaultId: 0,
+    message,
+    noLink: true,
+  });
+  return { ok: true };
+});
+
 // Expose local server token for browser extension pairing
 // This is called by the extension's options page to get the unique per-install token
 ipcMain.handle('local-server:get-token', async () => {

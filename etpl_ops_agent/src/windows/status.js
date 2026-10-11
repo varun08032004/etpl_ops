@@ -169,10 +169,10 @@ punchInBtn.addEventListener('click', async () => {
       punchOutTimeEl.dataset.punchOutAt = '';
       render(true, false, res.record.late_minutes || 0, 0, null, res.record.status);
     } else {
-      alert(res.error || 'Punch in failed');
+      await window.agent.alert(res.error || 'Punch in failed');
     }
   } catch (err) {
-    alert(err.message || 'Could not punch in.');
+    await window.agent.alert(err.message || 'Could not punch in.');
   } finally {
     punchInBtn.disabled = false;
   }
@@ -187,10 +187,10 @@ punchOutBtn.addEventListener('click', async () => {
       punchOutTimeEl.dataset.punchOutAt = res.record.clock_out;
       render(true, true, res.record.late_minutes || 0, res.record.early_leave_minutes || 0, null, res.record.status);
     } else {
-      alert(res.error || 'Punch out failed');
+      await window.agent.alert(res.error || 'Punch out failed');
     }
   } catch (err) {
-    alert(err.message || 'Could not punch out.');
+    await window.agent.alert(err.message || 'Could not punch out.');
   } finally {
     punchOutBtn.disabled = false;
   }
@@ -198,7 +198,7 @@ punchOutBtn.addEventListener('click', async () => {
 
 // Undo Punch In
 undoPunchInBtn.addEventListener('click', async () => {
-  if (!confirm('Undo punch in? This will remove your punch-in record for today.')) return;
+  if (!(await window.agent.confirm('Undo punch in? This will remove your punch-in record for today.'))) return;
   undoPunchInBtn.disabled = true;
   try {
     const res = await window.agent.undoPunchIn();
@@ -207,10 +207,10 @@ undoPunchInBtn.addEventListener('click', async () => {
       punchOutTimeEl.dataset.punchOutAt = '';
       render(false, false, 0, 0, null, 'pending');
     } else {
-      alert(res.error || 'Undo punch in failed');
+      await window.agent.alert(res.error || 'Undo punch in failed');
     }
   } catch (err) {
-    alert(err.message || 'Could not undo punch in.');
+    await window.agent.alert(err.message || 'Could not undo punch in.');
   } finally {
     undoPunchInBtn.disabled = false;
   }
@@ -218,7 +218,7 @@ undoPunchInBtn.addEventListener('click', async () => {
 
 // Undo Punch Out
 undoPunchOutBtn.addEventListener('click', async () => {
-  if (!confirm('Undo punch out? This will revert to punched-in state.')) return;
+  if (!(await window.agent.confirm('Undo punch out? This will revert to punched-in state.'))) return;
   undoPunchOutBtn.disabled = true;
   try {
     const res = await window.agent.undoPunchOut();
@@ -226,17 +226,17 @@ undoPunchOutBtn.addEventListener('click', async () => {
       punchOutTimeEl.dataset.punchOutAt = '';
       render(true, false, res.record.late_minutes || 0, 0, null, res.record.status);
     } else {
-      alert(res.error || 'Undo punch out failed');
+      await window.agent.alert(res.error || 'Undo punch out failed');
     }
   } catch (err) {
-    alert(err.message || 'Could not undo punch out.');
+    await window.agent.alert(err.message || 'Could not undo punch out.');
   } finally {
     undoPunchOutBtn.disabled = false;
   }
 });
 
 signOutBtn.addEventListener('click', async () => {
-  if (!confirm('Sign out of EtherTrack Agent on this device? This will stop any active session.')) return;
+  if (!(await window.agent.confirm('Sign out of EtherTrack Agent on this device? This will stop any active session.'))) return;
   await window.agent.logout();
   window.close();
 });

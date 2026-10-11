@@ -1,23 +1,14 @@
 'use strict';
-// routes/bankAccounts.js — bank accounts portfolio.
-//
-// Access: owner/admin (bypass via requireRole()) + finance role only.
-// This is deliberately tighter than most finance-adjacent screens — an
-// aggregate view of ALL company cash positions across every account is
-// more sensitive than any single transaction, so it's gated at the route
-// level, not just hidden in the UI.
-//
-// MULTI-ACCOUNT: each account now carries its OWN API credentials
-// (api_client_id/api_client_secret/api_base_url), so 3 accounts on the same
-// provider sync independently instead of sharing one global config. See
-// services/bankFeeds/bankReconciliationEngine.js for where these get used.
 
 const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
-const { safeQuery } = require('../db/pool');
-const { authenticate, requireRole } = require('../middleware/auth');
-const { syncBankAccount, autoMatch } = require('../services/bankFeeds/bankReconciliationEngine');
+const { safeQuery, withTransaction } = require('../db/pool');
+const { authenticate, requireRole, requireMFA } = require('../middleware/auth');
+const { logAction } = require('../services/auditLog');
+const { BankCredentialsService } = require('../services/bankCredentialsService');
+
+const bankCredentialsService = new BankCredentialsService();
 
 router.use(authenticate);
 router.use(requireRole('finance')); // every route in this file — owner/admin bypass, plus 'finance' role
@@ -37,7 +28,7 @@ router.use((req, res, next) => {
   next();
 });
 
-const VALID_PROVIDERS = ['axis', 'manual']; // extend as you add real bank adapters
+const VALID_PROVIDERS = ['axis', 'manual'];
 
 function isNonNegativeNumber(value) {
   const n = Number(value);
@@ -53,7 +44,8 @@ router.get('/', async (req, res) => {
     const { rows: accounts } = await safeQuery(
       `SELECT id, account_name, bank_name, provider, current_balance, balance_as_of, balance_source,
               RIGHT(account_number, 4) AS account_number_last4,
-              (api_client_id IS NOT NULL AND api_client_secret IS NOT NULL AND api_base_url IS NOT NULL) AS api_configured
+              (api_client_id IS NOT NULL AND api_client_secret IS NOT NULL AND api_base_url IS NOT NULL) AS api_configured,
+              (api_client_id_enc IS NOT NULL AND api_client_secret_enc IS NOT NULL AND api_base_url_enc IS NOT NULL) AS fully_encrypted
        FROM bank_accounts ORDER BY bank_name, account_name`
     );
 
@@ -85,7 +77,7 @@ router.post('/', async (req, res) => {
     const { rows: [account] } = await safeQuery(
       `INSERT INTO bank_accounts (account_name, bank_name, account_number, ifsc_code, provider, ledger_account_id,
          balance_source, api_client_id, api_client_secret, api_base_url)
-       VALUES ($1,$2,$3,$4,$5,$6,'manual',$7,$8,$9) RETURNING id, account_name, bank_name, provider`,
+      VALUES ($1,$2,$3,$4,$5,$6,'manual',$7,$8,$9) RETURNING id, account_name, bank_name, provider`,
       [account_name, bank_name, account_number, ifsc_code || null, resolvedProvider, ledger_account_id || null,
        api_client_id || null, api_client_secret || null, api_base_url || null]
     );
@@ -97,10 +89,8 @@ router.post('/', async (req, res) => {
 });
 
 // ── update an account's own API credentials ─────────────────────────────────
-// Separate from the general balance-update route since this is more
-// sensitive — changing which credentials a sync uses deserves its own
-// explicit action, not a side effect of some other edit.
-router.put('/:id/credentials', async (req, res) => {
+// Requires MFA step-up for production
+router.put('/:id/credentials', requireMFA, async (req, res) => {
   try {
     const { api_client_id, api_client_secret, api_base_url } = req.body;
     if (!api_client_id || !api_client_secret || !api_base_url) {
@@ -112,6 +102,12 @@ router.put('/:id/credentials', async (req, res) => {
       [api_client_id, api_client_secret, api_base_url, req.params.id]
     );
     if (!updated) return res.status(404).json({ error: 'Bank account not found' });
+    
+    // Encrypt credentials after saving
+    const { BankCredentialsService } = require('../services/bankCredentialsService');
+    const bankCredentialsService = new BankCredentialsService();
+    await bankCredentialsService.encryptCredentials(req.params.id, api_client_id, api_client_secret);
+    
     res.json({ account: updated, credentialsSet: true });
   } catch (err) {
     console.error('[bank-accounts:update-credentials]', err);
@@ -119,11 +115,11 @@ router.put('/:id/credentials', async (req, res) => {
   }
 });
 
-// ── manual balance update — the FIN-03 fallback while API sync isn't live ──
+// ── manual balance update ──
 router.put('/:id/balance', async (req, res) => {
   try {
     const { balance } = req.body;
-    if (!isNonNegativeNumber(balance)) return res.status(400).json({ error: 'balance must be a number ≥ 0' });
+    if (!isNonNegativeNumber(balance)) return res.status(400).json({ error: 'balance must be a number >= 0' });
 
     const { rows: [updated] } = await safeQuery(
       `UPDATE bank_accounts SET current_balance = $1, balance_as_of = NOW(), balance_source = 'manual' WHERE id = $2 RETURNING *`,
@@ -137,15 +133,42 @@ router.put('/:id/balance', async (req, res) => {
   }
 });
 
-// ── trigger a live sync via the account's configured adapter ────────────────
+// ── trigger a live sync via the account's configured adapter ──
 router.post('/:id/sync', async (req, res) => {
   try {
+    const { syncBankAccount, autoMatch } = require('../services/bankFeeds/bankReconciliationEngine');
     const result = await syncBankAccount(req.params.id);
     const matchResult = await autoMatch(req.params.id);
     res.json({ ...result, ...matchResult });
   } catch (err) {
     console.error('[bank-accounts:sync]', err);
     res.status(502).json({ error: err.message || 'Failed to sync bank account' });
+  }
+});
+
+// Note: /decrypt endpoint removed — plaintext credentials must not be returned via HTTP.
+// Internal operations (bank feed sync, payroll disbursement) should call
+// BankCredentialsService.getDecryptedCredentials() directly with proper authorization.
+
+// ── get masked credentials for UI ──
+router.get('/:id/masked', async (req, res) => {
+  try {
+    const masked = await bankCredentialsService.getMaskedCredentials(req.params.id);
+    res.json({ credentials: masked });
+  } catch (err) {
+    console.error('[bank-accounts:masked]', err);
+    res.status(500).json({ error: 'Failed to fetch masked credentials' });
+  }
+});
+
+// ── verify all credentials are encrypted ──
+router.get('/verify-encrypted', async (req, res) => {
+  try {
+    const result = await bankCredentialsService.verifyAllEncrypted();
+    res.json({ verification: result });
+  } catch (err) {
+    console.error('[bank-accounts:verify-encrypted]', err);
+    res.status(500).json({ error: 'Failed to verify encryption status' });
   }
 });
 

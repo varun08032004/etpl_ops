@@ -5,6 +5,6 @@ const pool = new Pool({
 });
 pool.query("DELETE FROM attendance_punch_log WHERE employee_id = $1 AND work_date = CURRENT_DATE", ['a88fb6f4-e807-40b6-8142-357400df75b9'])
   .then(() => pool.query("DELETE FROM attendance_records WHERE employee_id = $1 AND work_date = CURRENT_DATE", ['a88fb6f4-e807-40b6-8142-357400df75b9']))
-  .then(r => console.log('Deleted:', r.rowCount, 'records - ready for fresh start'))
+  .then(r => console.log('Cleared:', r.rowCount, 'records'))
   .catch(e => console.error('Error:', e.message))
   .finally(() => pool.end());

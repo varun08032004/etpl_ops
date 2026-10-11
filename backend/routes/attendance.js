@@ -5,8 +5,19 @@ const router = express.Router();
 const { safeQuery, withTransaction } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { withIdempotency } = require('../middleware/idempotency');
+const os = require('os');
 
 router.use(authenticate);
+
+// Helper to get client IP
+function getLocalIP(req) {
+  return req.ip || 
+    req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+    req.headers['x-real-ip'] ||
+    req.connection?.remoteAddress ||
+    req.socket?.remoteAddress ||
+    'unknown';
+}
 
 // ── Helper: get current date in IST (company timezone) ───────────────────────────
 function getISTDate() {
@@ -22,6 +33,63 @@ function getISTDayOfWeek() {
   const istOffset = 5.5 * 60 * 60 * 1000;
   const istTime = new Date(now.getTime() + istOffset);
   return istTime.getDay() === 0 ? 7 : istTime.getDay(); // 1=Mon, 7=Sun
+}
+
+// ── Helper: verify device binding ────────────────────────────────────────────────
+async function verifyDeviceBinding(employeeId, deviceFingerprint) {
+  if (!deviceFingerprint) {
+    return { allowed: false, reason: 'Device fingerprint required' };
+  }
+  
+  const { rows: [binding] } = await safeQuery(
+    `SELECT id, status, registered_at FROM employee_device_bindings 
+     WHERE employee_id = $1 AND device_fingerprint = $2`,
+    [employeeId, deviceFingerprint]
+  );
+  
+  if (!binding) {
+    return { allowed: false, reason: 'Device not registered for this employee' };
+  }
+  
+  if (binding.status !== 'active') {
+    return { allowed: false, reason: `Device is ${binding.status}. Contact admin for approval.` };
+  }
+  
+  return { allowed: true, bindingId: binding.id };
+}
+
+// Helper to extract device fingerprint from request
+function extractDeviceFingerprint(req) {
+  // Check device_info from request body
+  const deviceInfo = req.body.device_info || {};
+  return deviceInfo.fingerprint || deviceInfo.device_fingerprint || null;
+}
+
+async function registerDevice(employeeId, deviceFingerprint, deviceName, deviceIp) {
+  const { rows: [binding] } = await safeQuery(
+    `INSERT INTO employee_device_bindings (employee_id, device_fingerprint, device_name, device_ip, status)
+     VALUES ($1, $2, $3, $4, 'active')
+     ON CONFLICT (employee_id, device_fingerprint) DO UPDATE SET
+       device_name = EXCLUDED.device_name,
+       device_ip = EXCLUDED.device_ip,
+       status = 'active',
+       revoked_at = NULL,
+       revoked_by = NULL,
+       revoked_reason = NULL
+     RETURNING id`,
+    [employeeId, deviceFingerprint, deviceName || 'Unknown Device', deviceIp]
+  );
+  return binding?.id;
+}
+
+async function createDeviceChangeRequest(employeeId, newFingerprint, deviceName, deviceIp, reason) {
+  const { rows: [request] } = await safeQuery(
+    `INSERT INTO device_change_requests (employee_id, new_device_fingerprint, new_device_name, new_device_ip, reason)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id`,
+    [employeeId, newFingerprint, deviceName || 'Unknown Device', deviceIp, reason || 'Device change requested']
+  );
+  return request?.id;
 }
 
 // ── Helper: get working hours config for a date ────────────────────────────────
@@ -78,7 +146,7 @@ function determineStatus(clockIn, clockOut, expectedIn, expectedOut, lateMinutes
 // Only source='agent' allowed. Creates pending record, attendance finalized on punch-out.
 router.post('/punch-in', async (req, res) => {
   try {
-    const { source = 'agent', device_info } = req.body;
+    const { source = 'agent', device_info, device_fingerprint: deviceFingerprintIn } = req.body;
     
     // Only allow agent source
     if (source !== 'agent') {
@@ -90,6 +158,42 @@ router.post('/punch-in', async (req, res) => {
     }
     const targetEmployeeId = req.staff.employee_id;
     
+    // Verify device binding
+    const punchInFingerprint = deviceFingerprintIn || extractDeviceFingerprint(req);
+    const deviceCheck = await verifyDeviceBinding(targetEmployeeId, punchInFingerprint);
+    if (!deviceCheck.allowed) {
+      // Check if there's a pending device change request
+      const { rows: [pendingRequest] } = await safeQuery(
+        `SELECT id FROM device_change_requests 
+         WHERE employee_id = $1 AND status = 'pending' AND new_device_fingerprint = $2`,
+        [targetEmployeeId, punchInFingerprint]
+      );
+      
+      if (pendingRequest) {
+        return res.status(403).json({ 
+          error: 'Device change requested but not yet approved',
+          device_change_pending: true,
+          request_id: pendingRequest.id
+        });
+      }
+      
+      // Auto-register new device with pending status if no binding exists
+      if (punchInFingerprint) {
+        await createDeviceChangeRequest(targetEmployeeId, punchInFingerprint, 
+          device_info?.device_name || 'Unknown Device', 
+          getLocalIP(req),
+          'Auto-requested from punch-in attempt'
+        );
+      }
+      
+      return res.status(403).json({ 
+        error: deviceCheck.reason || 'Device not authorized for this employee',
+        code: 'DEVICE_NOT_AUTHORIZED',
+        device_fingerprint: punchInFingerprint
+      });
+    }
+    
+    const now = new Date();
     const workDate = getISTDate();
     const dayOfWeek = getISTDayOfWeek();
     
@@ -120,10 +224,17 @@ router.post('/punch-in', async (req, res) => {
     const lateMinutes = calculateLateEarlyMinutes(now, null, expectedPunchIn, expectedPunchOut, config.grace_period_minutes).lateMinutes;
     const status = 'pending'; // Will be finalized on punch-out
     
+    // Register device if not already registered
+    if (punchInFingerprint) {
+      await registerDevice(targetEmployeeId, punchInFingerprint, 
+        device_info?.device_name || 'Unknown Device', 
+        getLocalIP(req));
+    }
+    
     // Insert pending attendance record (not finalized until punch-out)
     const { rows: [record] } = await safeQuery(
-      `INSERT INTO attendance_records (employee_id, work_date, status, clock_in, expected_punch_in, expected_punch_out, late_minutes, source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      `INSERT INTO attendance_records (employee_id, work_date, status, clock_in, expected_punch_in, expected_punch_out, late_minutes, source, device_fingerprint)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        ON CONFLICT (employee_id, work_date) DO UPDATE SET
          clock_in = EXCLUDED.clock_in,
          expected_punch_in = EXCLUDED.expected_punch_in,
@@ -131,16 +242,17 @@ router.post('/punch-in', async (req, res) => {
          late_minutes = EXCLUDED.late_minutes,
          status = EXCLUDED.status,
          source = EXCLUDED.source,
+         device_fingerprint = EXCLUDED.device_fingerprint,
          updated_at = NOW()
        RETURNING *`,
-      [targetEmployeeId, workDate, status, now, expectedPunchIn, expectedPunchOut, lateMinutes, 'agent']
+      [targetEmployeeId, workDate, status, now, expectedPunchIn, expectedPunchOut, lateMinutes, 'agent', punchInFingerprint]
     );
     
     // Log punch event
     await safeQuery(
-      `INSERT INTO attendance_punch_log (employee_id, work_date, punch_type, punch_time, source, device_info)
-       VALUES ($1,$2,'in',$3,$4,$5)`,
-      [targetEmployeeId, workDate, now, 'agent', device_info ? JSON.stringify(device_info) : null]
+      `INSERT INTO attendance_punch_log (employee_id, work_date, punch_type, punch_time, source, device_info, device_fingerprint)
+       VALUES ($1,$2,'in',$3,$4,$5,$6)`,
+      [targetEmployeeId, workDate, now, 'agent', device_info ? JSON.stringify(device_info) : null, punchInFingerprint]
     );
     
     res.json({ record, message: 'Punched in successfully via Agent' });
@@ -150,11 +262,9 @@ router.post('/punch-in', async (req, res) => {
   }
 });
 
-// ── PUNCH OUT (Agent Only) ─────────────────────────────────────────────────────
-// Only source='agent' allowed. Finalizes attendance record (requires both in/out).
 router.post('/punch-out', async (req, res) => {
   try {
-    const { source = 'agent', device_info } = req.body;
+    const { source = 'agent', device_info, device_fingerprint: deviceFingerprintIn } = req.body;
     
     // Only allow agent source
     if (source !== 'agent') {
@@ -166,6 +276,18 @@ router.post('/punch-out', async (req, res) => {
     }
     const targetEmployeeId = req.staff.employee_id;
     
+    // Verify device binding
+    const punchOutFingerprint = deviceFingerprintIn || extractDeviceFingerprint(req);
+    const deviceCheck = await verifyDeviceBinding(targetEmployeeId, punchOutFingerprint);
+    if (!deviceCheck.allowed) {
+      return res.status(403).json({ 
+        error: deviceCheck.reason || 'Device not authorized for this employee',
+        code: 'DEVICE_NOT_AUTHORIZED',
+        device_fingerprint: punchOutFingerprint
+      });
+    }
+    
+    const now = new Date();
     const workDate = getISTDate();
     const dayOfWeek = getISTDayOfWeek();
     
@@ -175,7 +297,7 @@ router.post('/punch-out', async (req, res) => {
       [targetEmployeeId, workDate]
     );
     
-    if (!existing) {
+if (!existing) {
       return res.status(400).json({ error: 'No punch-in record found for today. Please punch in first via Agent.' });
     }
     
@@ -183,22 +305,28 @@ router.post('/punch-out', async (req, res) => {
       return res.status(400).json({ error: 'Already punched out today', record: existing });
     }
     
-    // Strict expected times (9:30 AM - 7:00 PM)
-    const expectedPunchIn = existing.expected_punch_in || (() => { const d = new Date(now); d.setHours(9,30,0,0); return d; })();
-    const expectedPunchOut = existing.expected_punch_out || (() => { const d = new Date(now); d.setHours(19,0,0,0); return d; })();
-    
-    // Get working hours config for grace period
+    // Get working hours config
     const config = await getWorkingHoursConfig(dayOfWeek);
     
-    // Calculate late/early minutes
+    // Verify device matches the one used for punch-in
+    if (existing.device_fingerprint && punchOutFingerprint && existing.device_fingerprint !== punchOutFingerprint) {
+      return res.status(403).json({ 
+        error: 'Punch out must be from the same device used for punch-in',
+        code: 'DEVICE_MISMATCH',
+        punch_in_device: existing.device_fingerprint,
+        current_device: fingerprint
+      });
+    }
+    
+    // Calculate early leave minutes
     const { lateMinutes: existingLate, earlyLeaveMinutes } = calculateLateEarlyMinutes(
-      existing.clock_in, now, expectedPunchIn, expectedPunchOut, config.grace_period_minutes
+      existing.clock_in, now, existing.expected_punch_in, existing.expected_punch_out, config.grace_period_minutes
     );
     
     // Finalize status now that we have both in and out
-    const finalStatus = determineStatus(existing.clock_in, now, expectedPunchIn, expectedPunchOut, existingLate, earlyLeaveMinutes, config.is_working_day);
+    // Finalize status now that we have both in and out
+    const finalStatus = determineStatus(existing.clock_in, now, existing.expected_punch_in, existing.expected_punch_out, existingLate, earlyLeaveMinutes, config.is_working_day);
     
-    // Update attendance record - FINALIZE it
     const { rows: [record] } = await safeQuery(
       `UPDATE attendance_records SET
          clock_out = $1,
@@ -213,9 +341,9 @@ router.post('/punch-out', async (req, res) => {
     
     // Log punch event
     await safeQuery(
-      `INSERT INTO attendance_punch_log (employee_id, work_date, punch_type, punch_time, source, device_info)
-       VALUES ($1,$2,'out',$3,$4,$5)`,
-      [targetEmployeeId, workDate, now, 'agent', device_info ? JSON.stringify(device_info) : null]
+      `INSERT INTO attendance_punch_log (employee_id, work_date, punch_type, punch_time, source, device_info, device_fingerprint)
+       VALUES ($1,$2,'out',$3,$4,$5,$6)`,
+      [targetEmployeeId, workDate, now, 'agent', device_info ? JSON.stringify(device_info) : null, punchOutFingerprint]
     );
     
     res.json({ record, message: 'Punched out successfully via Agent. Attendance finalized.' });
@@ -881,6 +1009,227 @@ router.post('/score/batch', requireRole('admin', 'hr'), async (req, res) => {
   } catch (err) {
     console.error('[attendance:score:batch]', err);
     res.status(500).json({ error: 'Failed to calculate batch attendance scores' });
+  }
+});
+
+// ── DEVICE MANAGEMENT (Admin/HR) ────────────────────────────────────────────────
+
+// List all device bindings for an employee
+router.get('/devices/:employeeId', requireRole('admin', 'hr'), async (req, res) => {
+  try {
+    const { rows } = await safeQuery(
+      `SELECT d.*, s.email as approved_by_email 
+       FROM employee_device_bindings d
+       LEFT JOIN staff_accounts s ON s.id = d.approved_by
+       WHERE d.employee_id = $1
+       ORDER BY d.registered_at DESC`,
+      [req.params.employeeId]
+    );
+    res.json({ devices: rows });
+  } catch (err) {
+    console.error('[attendance:devices:list]', err);
+    res.status(500).json({ error: 'Failed to fetch device bindings' });
+  }
+});
+
+// Get all device bindings (admin/hr)
+router.get('/devices', requireRole('admin', 'hr'), async (req, res) => {
+  try {
+    const { status, employee_id } = req.query;
+    const conditions = [];
+    const params = [];
+    if (status) { params.push(status); conditions.push(`d.status = $${params.length}`); }
+    if (employee_id) { params.push(employee_id); conditions.push(`d.employee_id = $${params.length}`); }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const { rows } = await safeQuery(
+      `SELECT d.*, e.full_name as employee_name, e.employee_code, s.email as approved_by_email
+       FROM employee_device_bindings d
+       JOIN employees e ON e.id = d.employee_id
+       LEFT JOIN staff_accounts s ON s.id = d.approved_by
+       ${where}
+       ORDER BY d.registered_at DESC`,
+      params
+    );
+    res.json({ devices: rows });
+  } catch (err) {
+    console.error('[attendance:devices:list]', err);
+    res.status(500).json({ error: 'Failed to fetch device bindings' });
+  }
+});
+
+// Update device status (approve/revoke) - Admin/HR only
+router.put('/devices/:deviceId', requireRole('admin', 'hr'), async (req, res) => {
+  try {
+    const { status, revoked_reason } = req.body;
+    if (!['active', 'revoked'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be active or revoked' });
+    }
+    
+    const updateFields = ['status = $1', 'updated_at = NOW()'];
+    const params = [status];
+    if (status === 'revoked') {
+      params.push(req.staff.id, new Date());
+      params.push(revoked_reason || 'Revoked by admin');
+      updateFields.push(`revoked_by = $${params.length - 1}`, `revoked_at = $${params.length - 0}`, `revoked_reason = $${params.length + 1}`);
+    } else {
+      params.push(req.staff.id, new Date());
+      params.push(`Approved by admin`);
+      updateFields.push(`approved_by = $${params.length - 1}`, `approved_at = $${params.length - 0}`, `revoked_at = NULL`, `revoked_by = NULL`, `revoked_reason = NULL`);
+    }
+    params.push(req.params.deviceId);
+    
+    const { rows: [device] } = await safeQuery(
+      `UPDATE employee_device_bindings SET ${updateFields.join(', ')} WHERE id = $${params.length} RETURNING *`,
+      params
+    );
+    
+    if (!device) return res.status(404).json({ error: 'Device binding not found' });
+    
+    // If activating, revoke other active devices for same employee (one active device per employee)
+    if (status === 'active') {
+      await safeQuery(
+        `UPDATE employee_device_bindings SET status = 'revoked', revoked_at = NOW(), revoked_by = $1, revoked_reason = 'Auto-revoked: new device activated' 
+         WHERE employee_id = (SELECT employee_id FROM employee_device_bindings WHERE id = $2) AND id != $2 AND status = 'active'`,
+        [req.staff.id, req.params.deviceId]
+      );
+    }
+    
+    res.json({ device, message: `Device ${status}` });
+  } catch (err) {
+    console.error('[attendance:device:update]', err);
+    res.status(500).json({ error: 'Failed to update device status' });
+  }
+});
+
+// Device change requests - list pending
+router.get('/device-requests', requireRole('admin', 'hr'), async (req, res) => {
+  try {
+    const { status } = req.query;
+    const conditions = [];
+    const params = [];
+    if (status) { params.push(status); conditions.push(`status = $${params.length}`); }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const { rows } = await safeQuery(
+      `SELECT r.*, e.full_name as employee_name, e.employee_code, s.email as reviewed_by_email
+       FROM device_change_requests r
+       JOIN employees e ON e.id = r.employee_id
+       LEFT JOIN staff_accounts s ON s.id = r.reviewed_by
+       ${where}
+       ORDER BY r.requested_at DESC`,
+      params
+    );
+    res.json({ requests: rows });
+  } catch (err) {
+    console.error('[attendance:device-requests:list]', err);
+    res.status(500).json({ error: 'Failed to fetch device change requests' });
+  }
+});
+
+// Approve/Reject device change request
+router.put('/device-requests/:requestId', requireRole('admin', 'hr'), async (req, res) => {
+  try {
+    const { action, notes } = req.body; // action: 'approve' or 'reject'
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ error: 'Action must be approve or reject' });
+    }
+    
+    const { rows: [request] } = await safeQuery(
+      `SELECT * FROM device_change_requests WHERE id = $1`,
+      [req.params.requestId]
+    );
+    if (!request) return res.status(404).json({ error: 'Request not found' });
+    if (request.status !== 'pending') {
+      return res.status(400).json({ error: 'Request already processed' });
+    }
+    
+    const newStatus = action === 'approve' ? 'approved' : 'rejected';
+    
+    if (action === 'approve') {
+      // Register the new device as active
+      await registerDevice(request.employee_id, request.new_device_fingerprint, 
+        request.new_device_name, request.new_device_ip);
+      
+      // Revoke old device if exists
+      if (request.old_device_fingerprint) {
+        await safeQuery(
+          `UPDATE employee_device_bindings SET status = 'revoked', revoked_at = NOW(), revoked_by = $1, revoked_reason = 'Replaced by new device' 
+           WHERE employee_id = $2 AND device_fingerprint = $3`,
+          [req.staff.id, request.employee_id, request.old_device_fingerprint]
+        );
+      }
+    }
+    
+    const { rows: [updated] } = await safeQuery(
+      `UPDATE device_change_requests SET 
+         status = $1, reviewed_by = $2, reviewed_at = NOW(), review_notes = $3 
+       WHERE id = $4 RETURNING *`,
+      [newStatus, req.staff.id, notes || null, req.params.requestId]
+    );
+    
+    res.json({ request: updated, message: `Device change request ${action}d` });
+  } catch (err) {
+    console.error('[attendance:device-request:update]', err);
+    res.status(500).json({ error: 'Failed to process device change request' });
+  }
+});
+
+// Employee self-service: request device change
+router.post('/device-change-request', async (req, res) => {
+  try {
+    if (!req.staff.employee_id) {
+      return res.status(400).json({ error: 'No linked employee record' });
+    }
+    const { new_device_fingerprint, new_device_name, reason } = req.body;
+    if (!new_device_fingerprint) {
+      return res.status(400).json({ error: 'Device fingerprint required' });
+    }
+    
+    const requestId = await createDeviceChangeRequest(
+      req.staff.employee_id, 
+      new_device_fingerprint, 
+      new_device_name || 'Unknown Device',
+      getLocalIP(req),
+      reason || 'Device change requested by employee'
+    );
+    
+    res.json({ request_id: requestId, message: 'Device change request submitted for admin approval' });
+  } catch (err) {
+    console.error('[attendance:device-change-request]', err);
+    res.status(500).json({ error: 'Failed to submit device change request' });
+  }
+});
+
+// Get my device bindings (employee self-service)
+router.get('/my-devices', async (req, res) => {
+  try {
+    if (!req.staff.employee_id) {
+      return res.status(400).json({ error: 'No linked employee record' });
+    }
+    const { rows } = await safeQuery(
+      `SELECT * FROM employee_device_bindings WHERE employee_id = $1 ORDER BY registered_at DESC`,
+      [req.staff.employee_id]
+    );
+    res.json({ devices: rows });
+  } catch (err) {
+    console.error('[attendance:my-devices]', err);
+    res.status(500).json({ error: 'Failed to fetch my devices' });
+  }
+});
+
+// Get my pending device change requests
+router.get('/my-device-requests', async (req, res) => {
+  try {
+    if (!req.staff.employee_id) {
+      return res.status(400).json({ error: 'No linked employee record' });
+    }
+    const { rows } = await safeQuery(
+      `SELECT * FROM device_change_requests WHERE employee_id = $1 ORDER BY requested_at DESC`,
+      [req.staff.employee_id]
+    );
+    res.json({ requests: rows });
+  } catch (err) {
+    console.error('[attendance:my-device-requests]', err);
+    res.status(500).json({ error: 'Failed to fetch device change requests' });
   }
 });
 

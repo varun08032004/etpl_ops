@@ -410,6 +410,7 @@ app.use('/api/finance', require('./routes/finance'));
 app.use('/api/finance/bills', require('./routes/bills'));
 app.use('/api/purchase-requests', require('./routes/purchaseRequests'));
 app.use('/api/bank-accounts', require('./routes/bankAccounts'));
+app.use('/api/bank-statements', require('./routes/bankStatementImport'));
 app.use('/api/accounting', require('./routes/accounting'));
 app.use('/api/platform-sync', require('./routes/platform-sync'));
 app.use('/api/invoices', require('./routes/invoices'));
