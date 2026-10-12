@@ -80,6 +80,7 @@ const allowedOrigins = (process.env.INTERNAL_OPS_ALLOWED_ORIGIN || 'http://local
 const productionDomains = [
   'https://ops.ethertrack.in',
   'https://app.ethertrack.in',
+  'https://ethertrack.in',
 ];
 
 // Also allow Vercel preview deployments (*.vercel.app) and Railway deployments (*.railway.app)
