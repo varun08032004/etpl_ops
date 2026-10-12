@@ -495,13 +495,13 @@ async function setCouponActive(code, active, { validUntil, maxRedemptions } = {}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Pricing — WRITE path, own token/namespace (PLATFORM_SYNC_PRICING_WRITE_TOKEN
-// against /api/ops-integration-pricing/*). Starter/Growth only — Corporate
-// pricing is always per-deal via Corporate Deals, never a flat rate here.
+// against /api/ops-integration-pricing/*). All tiers annual.
+// Each tier has: annual_price_paise (base), buyer_fee_bps, seller_fee_bps
 
-async function updatePlanPrice(plan, cycle, priceINR, platformFeeBps = 0, updatedBy = null) {
+async function updatePlanPrice(plan, cycle, priceINR, buyerFeeBps = 0, sellerFeeBps = 0, updatedBy = null) {
   const data = await platformScopedCall(
     'ops-integration-pricing', 'PLATFORM_SYNC_PRICING_WRITE_TOKEN',
-    `/${plan}/${cycle}`, 'PATCH', { priceINR, platformFeeBps, updatedBy }
+    `/${plan}/${cycle}`, 'PATCH', { priceINR, buyerFeeBps, sellerFeeBps, updatedBy }
   );
   return data;
 }
