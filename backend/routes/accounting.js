@@ -117,18 +117,6 @@ router.get('/expense-categories', async (req, res) => {
   }
 });
 
-router.get('/accounts', async (req, res) => {
-  try {
-    const { rows } = await safeQuery(
-      `SELECT id, code, name, account_type, parent_id, is_group, is_active FROM chart_of_accounts ORDER BY code`
-    );
-    res.json({ accounts: rows });
-  } catch (err) {
-    console.error('[accounting:accounts]', err);
-    res.status(500).json({ error: 'Failed to fetch chart of accounts' });
-  }
-});
-
 router.post('/accounts', requireRole('finance', 'accounting_hod'), async (req, res) => {
   try {
     const { code, name, account_type, parent_id, is_group, description } = req.body;
@@ -144,6 +132,160 @@ router.post('/accounts', requireRole('finance', 'accounting_hod'), async (req, r
   } catch (err) {
     console.error('[accounting:accounts:create]', err);
     res.status(500).json({ error: 'Failed to create account (code may already exist)' });
+  }
+});
+
+router.get('/accounts/:id', async (req, res) => {
+  try {
+    const { rows: [account] } = await safeQuery(
+      `SELECT id, code, name, account_type, parent_id, is_group, is_system, is_active, description, created_at
+       FROM chart_of_accounts WHERE id = $1`,
+      [req.params.id]
+    );
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    res.json({ account });
+  } catch (err) {
+    console.error('[accounting:accounts:get]', err);
+    res.status(500).json({ error: 'Failed to fetch account' });
+  }
+});
+
+router.patch('/accounts/:id', requireRole('finance', 'accounting_hod'), async (req, res) => {
+  try {
+    const { name, account_type, parent_id, is_group, is_active, description } = req.body;
+    if (!name && !account_type && parent_id === undefined && is_group === undefined && is_active === undefined && !description) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    // Check if account exists and is not a system account being modified
+    const { rows: [existing] } = await safeQuery(
+      `SELECT is_system FROM chart_of_accounts WHERE id = $1`,
+      [req.params.id]
+    );
+    if (!existing) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    if (existing.is_system) {
+      return res.status(400).json({ error: 'Cannot modify system accounts' });
+    }
+
+    const updates = [];
+    const params = [];
+    let paramIdx = 1;
+
+    if (name !== undefined) { updates.push(`name = $${paramIdx++}`); params.push(name); }
+    if (account_type !== undefined) { updates.push(`account_type = $${paramIdx++}`); params.push(account_type); }
+    if (parent_id !== undefined) { updates.push(`parent_id = $${paramIdx++}`); params.push(parent_id); }
+    if (is_group !== undefined) { updates.push(`is_group = $${paramIdx++}`); params.push(is_group); }
+    if (is_active !== undefined) { updates.push(`is_active = $${paramIdx++}`); params.push(is_active); }
+    if (description !== undefined) { updates.push(`description = $${paramIdx++}`); params.push(description); }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    params.push(req.params.id);
+    const { rows: [account] } = await safeQuery(
+      `UPDATE chart_of_accounts SET ${updates.join(', ')} WHERE id = $${paramIdx} RETURNING *`,
+      params
+    );
+    res.json({ account });
+  } catch (err) {
+    console.error('[accounting:accounts:update]', err);
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Account code already exists' });
+    }
+    res.status(500).json({ error: 'Failed to update account' });
+  }
+});
+
+router.delete('/accounts/:id', requireRole('finance', 'accounting_hod'), async (req, res) => {
+  try {
+    const { rows: [existing] } = await safeQuery(
+      `SELECT is_system, is_active FROM chart_of_accounts WHERE id = $1`,
+      [req.params.id]
+    );
+    if (!existing) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    if (existing.is_system) {
+      return res.status(400).json({ error: 'Cannot deactivate system accounts' });
+    }
+    if (!existing.is_active) {
+      return res.status(400).json({ error: 'Account is already inactive' });
+    }
+
+    // Check if account is referenced by any posted journal lines
+    const { rows: [refCheck] } = await safeQuery(
+      `SELECT 1 FROM journal_lines jl
+       JOIN journal_entries je ON je.id = jl.journal_entry_id
+       WHERE jl.account_id = $1 AND je.is_posted = true
+       LIMIT 1`,
+      [req.params.id]
+    );
+    if (refCheck) {
+      return res.status(400).json({ error: 'Cannot deactivate account: it has posted journal entries. Consider keeping it active for historical reporting.' });
+    }
+
+    // Soft delete: set is_active = false
+    const { rows: [account] } = await safeQuery(
+      `UPDATE chart_of_accounts SET is_active = false WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+
+    await logAction({
+      staffId: req.staff.id,
+      action: 'chart_of_accounts.deactivated',
+      entity: 'chart_of_accounts',
+      entityId: req.params.id,
+      newValue: { code: account.code, name: account.name }
+    });
+
+    res.json({ account, message: 'Account deactivated successfully' });
+  } catch (err) {
+    console.error('[accounting:accounts:deactivate]', err);
+    res.status(500).json({ error: 'Failed to deactivate account' });
+  }
+});
+
+// Add query parameters for filtering/sorting accounts list
+router.get('/accounts', async (req, res) => {
+  try {
+    const { account_type, is_group, is_active, is_system, search, parent_id, limit = '100', offset = '0' } = req.query;
+    const conditions = [];
+    const params = [];
+    let paramIdx = 1;
+
+    if (account_type) { conditions.push(`account_type = $${paramIdx++}`); params.push(account_type); }
+    if (is_group !== undefined) { conditions.push(`is_group = $${paramIdx++}`); params.push(is_group === 'true'); }
+    if (is_active !== undefined) { conditions.push(`is_active = $${paramIdx++}`); params.push(is_active === 'true'); }
+    if (is_system !== undefined) { conditions.push(`is_system = $${paramIdx++}`); params.push(is_system === 'true'); }
+    if (parent_id) { conditions.push(`parent_id = $${paramIdx++}`); params.push(parent_id); }
+    if (search) {
+      conditions.push(`(code ILIKE $${paramIdx} OR name ILIKE $${paramIdx})`);
+      params.push(`%${search}%`);
+      paramIdx++;
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limitVal = Math.min(parseInt(limit, 10) || 100, 500);
+    const offsetVal = parseInt(offset, 10) || 0;
+    params.push(limitVal, offsetVal);
+
+    const { rows } = await safeQuery(
+      `SELECT id, code, name, account_type, parent_id, is_group, is_system, is_active, description, created_at
+       FROM chart_of_accounts
+       ${where}
+       ORDER BY code
+       LIMIT $${paramIdx++} OFFSET $${paramIdx}`,
+      params
+    );
+    res.json({ accounts: rows });
+  } catch (err) {
+    console.error('[accounting:accounts]', err);
+    res.status(500).json({ error: 'Failed to fetch chart of accounts' });
   }
 });
 

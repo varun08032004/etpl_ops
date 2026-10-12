@@ -69,14 +69,15 @@ router.post('/jobs', requireRole('hr'), async (req, res) => {
     const { rows: [job] } = await safeQuery(
       `INSERT INTO job_postings (title, department_id, team_id, employment_type, description, location,
          experience_min_years, experience_max_years, salary_range_min, salary_range_max, openings_count,
-         external_links, posted_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+         external_links, posted_by, pdf_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [
         b.title.trim(), b.department_id || null, b.team_id || null, b.employment_type || 'full_time',
         b.description || null, b.location || null,
         b.experience_min_years || null, b.experience_max_years || null,
         b.salary_range_min || null, b.salary_range_max || null, b.openings_count || 1,
         b.external_links ? JSON.stringify(b.external_links) : null, req.staff.id,
+        b.pdf_url || null,
       ]
     );
     res.status(201).json({ job });
@@ -91,7 +92,7 @@ router.put('/jobs/:id', requireRole('hr'), async (req, res) => {
     const allowed = [
       'title', 'department_id', 'team_id', 'employment_type', 'description', 'location',
       'experience_min_years', 'experience_max_years', 'salary_range_min', 'salary_range_max',
-      'openings_count', 'status', 'external_links',
+      'openings_count', 'status', 'external_links', 'pdf_url',
     ];
     const sets = [];
     const params = [];
@@ -344,5 +345,116 @@ router.put('/interviews/:id', requireRole('hr'), async (req, res) => {
     res.status(500).json({ error: 'Failed to update interview' });
   }
 });
+ 
+// ─── Public endpoint handlers (no auth) ──────────────────────────────────────
+// These are used by /api/public/jobs* via routes/public.js
+ 
+async function getPublicJobs(req, res) {
+  try {
+    const { department, type, limit = 20 } = req.query;
+    const params = [];
+    const where = [`j.status = 'published'`];
 
-module.exports = router;
+    if (department) { params.push(department); where.push(`j.department_id = $${params.length}`); }
+    if (type) { params.push(type); where.push(`j.employment_type = $${params.length}`); }
+
+    const whereSql = `WHERE ${where.join(' AND ')}`;
+    params.push(limit);
+
+    const { rows } = await safeQuery(
+      `SELECT j.id, j.title, d.name as department, j.location, j.employment_type as type, j.experience_required, 
+              j.experience_min_years as experience_min, j.experience_max_years as experience_max,
+              j.salary_range_min as salary_min, j.salary_range_max as salary_max,
+              j.description, j.pdf_url, j.created_at as posted_at, j.openings_count
+       FROM job_postings j
+       LEFT JOIN departments d ON d.id = j.department_id
+       ${whereSql}
+       ORDER BY j.created_at DESC LIMIT $${params.length}`,
+      params
+    );
+
+    // Convert numeric fields
+    const jobs = rows.map(r => ({
+      ...r,
+      experience_min: r.experience_min ? parseFloat(r.experience_min) : null,
+      experience_max: r.experience_max ? parseFloat(r.experience_max) : null,
+      salary_min: r.salary_min ? parseFloat(r.salary_min) : null,
+      salary_max: r.salary_max ? parseFloat(r.salary_max) : null,
+    }));
+
+    res.json({ jobs, timestamp: new Date().toISOString() });
+  } catch (err) {
+    console.error('[public:jobs]', err);
+    res.status(500).json({ error: 'Failed to fetch jobs' });
+  }
+}
+
+async function getPublicJob(req, res) {
+  try {
+    const { rows } = await safeQuery(
+      `SELECT j.id, j.title, d.name as department, j.location, j.employment_type as type, j.experience_required, 
+              j.experience_min_years as experience_min, j.experience_max_years as experience_max,
+              j.salary_range_min as salary_min, j.salary_range_max as salary_max,
+              j.description, j.pdf_url, j.created_at as posted_at, j.openings_count
+       FROM job_postings j
+       LEFT JOIN departments d ON d.id = j.department_id
+       WHERE j.id = $1 AND j.status = 'published'`,
+      [req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Job not found' });
+    const job = {
+      ...rows[0],
+      experience_min: rows[0].experience_min ? parseFloat(rows[0].experience_min) : null,
+      experience_max: rows[0].experience_max ? parseFloat(rows[0].experience_max) : null,
+      salary_min: rows[0].salary_min ? parseFloat(rows[0].salary_min) : null,
+      salary_max: rows[0].salary_max ? parseFloat(rows[0].salary_max) : null,
+    };
+    res.json({ job });
+  } catch (err) {
+    console.error('[public:job:get]', err);
+    res.status(500).json({ error: 'Failed to fetch job' });
+  }
+}
+ 
+// POST /api/public/jobs/:id/apply — submit application (public)
+async function applyPublic(req, res) {
+  const parsed = applySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+ 
+  const { job_id, full_name, email, phone, linkedin, portfolio, resume_url, cover_letter, answers } = parsed.data;
+ 
+  try {
+    // Verify job exists and is published
+    const { rows: jobRows } = await safeQuery(
+      `SELECT id FROM job_postings WHERE id = $1 AND status = 'published'`,
+      [job_id]
+    );
+    if (!jobRows[0]) return res.status(404).json({ error: 'Job not found or not accepting applications' });
+ 
+    // Check for duplicate application
+    const { rows: existing } = await safeQuery(
+      `SELECT id FROM job_applications WHERE job_id = $1 AND email = $2`,
+      [job_id, email]
+    );
+    if (existing[0]) return res.status(409).json({ error: 'Application already exists for this email' });
+ 
+    const { rows } = await safeQuery(
+      `INSERT INTO job_applications
+        (job_id, full_name, email, phone, linkedin, portfolio, resume_url, cover_letter, answers, status, applied_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'applied',NOW())
+       RETURNING *`,
+      [job_id, full_name, email, phone || null, linkedin || null, portfolio || null, resume_url || null, cover_letter || null, answers || {}]
+    );
+    res.status(201).json({ application: rows[0] });
+  } catch (err) {
+    console.error('[public:jobs:apply]', err);
+    res.status(500).json({ error: 'Failed to submit application' });
+  }
+}
+ 
+module.exports = {
+  router,
+  getPublicJobs,
+  getPublicJob,
+  applyPublic,
+};

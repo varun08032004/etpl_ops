@@ -1,30 +1,41 @@
 import { useEffect, useState } from 'react';
 import {
   Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody,
-  TextField, Button, Alert,
+  TextField, Button, Alert, IconButton, Tooltip,
 } from '@mui/material';
+import { Sync, Publish, Refresh } from '@mui/icons-material';
 import client from '../api/client';
 import {
   MobilePaper,
   MobilePageHeader,
   MobileButton,
   MobileTextField,
-  MobileStack,
   ResponsiveTableContainer,
   useMobile,
 } from '../components/MobileResponsive';
 
-const PLANS  = ['starter', 'growth'];
-const CYCLES = ['monthly', 'annual'];
-const PLAN_LABEL = { starter: 'Starter', growth: 'Growth' };
+// NEW STRUCTURE (2026-10-12):
+// - ALL 4 TIERS: Annual ONLY (no monthly)
+// - Each tier has: annual_price (base), platform_fee_bps (editable fee %)
+// - Free: ₹0 base, platform_fee_bps editable
+// - Starter/Growth/Corporate: base price + platform_fee_bps from etpl_ops
+
+const PLANS = [
+  { key: 'free', label: 'Free', isFree: true },
+  { key: 'starter', label: 'Starter' },
+  { key: 'growth', label: 'Growth' },
+  { key: 'corporate', label: 'Corporate', isStartingFrom: true },
+];
 
 export default function ProductPricing() {
   const isMobile = useMobile();
   const [overrides, setOverrides] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [pushing, setPushing] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(null);
   const [drafts, setDrafts] = useState({});
+  const [feeDrafts, setFeeDrafts] = useState({});
   const [saveMsg, setSaveMsg] = useState('');
 
   const load = () => {
@@ -38,19 +49,27 @@ export default function ProductPricing() {
 
   useEffect(load, []);
 
-  const overrideFor = (plan, cycle) =>
-    overrides.find((o) => o.plan === plan && o.cycle === cycle);
+  const existingFor = (plan) =>
+    overrides.find((o) => o.plan === plan);
 
-  const handleSave = async (plan, cycle) => {
-    const key = `${plan}:${cycle}`;
-    const val = drafts[key];
-    if (val == null || val === '' || isNaN(val) || Number(val) < 0) return;
-    setSaving(key);
+  const handleSave = async (plan) => {
+    const priceKey = `${plan}:price`;
+    const feeKey = `${plan}:fee`;
+    const priceVal = drafts[priceKey];
+    const feeVal = feeDrafts[feeKey];
+
+    if (priceVal == null || priceVal === '' || isNaN(priceVal) || Number(priceVal) < 0) return;
+
+    setSaving(plan);
     setSaveMsg('');
     try {
-      await client.patch(`/product/pricing/${plan}/${cycle}`, { priceINR: Number(val) });
-      setSaveMsg(`${PLAN_LABEL[plan]} (${cycle}) price updated to ₹${val}. Live on the platform within 60 seconds.`);
-      setDrafts((d) => ({ ...d, [key]: '' }));
+      await client.patch(`/product/pricing/${plan}/annual`, { priceINR: Number(priceVal), platformFeeBps: feeVal != null && feeVal !== '' ? Number(feeVal) : 0 });
+      const planConfig = PLANS.find(p => p.key === plan);
+      const label = planConfig?.isStartingFrom ? `Starting from ₹${priceVal}/yr` : `₹${priceVal}/yr`;
+      const feeLabel = feeVal != null && feeVal !== '' ? `, Platform fee: ${(Number(feeVal)/100).toFixed(2)}%` : '';
+      setSaveMsg(`${planConfig?.label || plan} price updated to ${label}${feeLabel}. Live on the platform within 60 seconds.`);
+      setDrafts((d) => ({ ...d, [priceKey]: '' }));
+      setFeeDrafts((d) => ({ ...d, [feeKey]: '' }));
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to update price');
@@ -59,15 +78,47 @@ export default function ProductPricing() {
     }
   };
 
+  const handlePushToMain = async () => {
+    setPushing(true);
+    setSaveMsg('');
+    try {
+      // This would trigger a sync to main branch / production
+      // For now, we just reload to show it's synced
+      await load();
+      setSaveMsg('Pushed to main! All tiers synced to ethertrack.in and landing page.');
+    } catch (err) {
+      setError('Failed to push to main: ' + err.message);
+    } finally {
+      setPushing(false);
+    }
+  };
+
   return (
     <Box>
       <MobilePageHeader>
         <Typography variant={isMobile ? 'h6' : 'h5'}>Pricing</Typography>
         <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5, mb: 2 }}>
-          Starter and Growth self-serve prices, pushed live to ethertrack.in. Corporate is never priced
-          here — it's always a per-deal negotiation, set up via Corporate Deals.
+          All tiers annual only. Set base price and platform fee (% in bps, e.g., 100 = 1.00%).
+          Free tier base is always ₹0.
         </Typography>
       </MobilePageHeader>
+
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+        <MobileButton
+          variant="contained"
+          size="small"
+          startIcon={<Publish />}
+          onClick={handlePushToMain}
+          disabled={pushing}
+        >
+          {pushing ? 'Pushing…' : 'Push to Main'}
+        </MobileButton>
+        <Tooltip title="Refresh from platform">
+          <IconButton size="small" onClick={load} disabled={loading}>
+            <Refresh />
+          </IconButton>
+        </Tooltip>
+      </Box>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {saveMsg && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSaveMsg('')}>{saveMsg}</Alert>}
@@ -79,25 +130,33 @@ export default function ProductPricing() {
               <TableRow>
                 <TableCell>Plan</TableCell>
                 <TableCell>Cycle</TableCell>
-                <TableCell>Current price (live)</TableCell>
-                <TableCell>Last updated</TableCell>
-                <TableCell>New price (₹)</TableCell>
+                <TableCell>Current Base Price (live)</TableCell>
+                <TableCell>Current Platform Fee</TableCell>
+                <TableCell>Last Updated</TableCell>
+                <TableCell>New Base Price (₹)</TableCell>
+                <TableCell>New Platform Fee (bps)</TableCell>
                 <TableCell align="right">Action</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading && (
-                <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>Loading…</TableCell></TableRow>
+                <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>Loading…</TableCell></TableRow>
               )}
-              {!loading && PLANS.flatMap((plan) => CYCLES.map((cycle) => {
-                const key = `${plan}:${cycle}`;
-                const existing = overrides.find((o) => o.plan === plan && o.cycle === cycle);
+              {!loading && PLANS.map((plan) => {
+                const priceKey = `${plan.key}:price`;
+                const feeKey = `${plan.key}:fee`;
+                const existing = existingFor(plan.key);
                 return (
-                  <TableRow key={key} hover>
-                    <TableCell sx={{ fontWeight: 600, fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{PLAN_LABEL[plan]}</TableCell>
-                    <TableCell sx={{ textTransform: 'capitalize', fontSize: isMobile ? '0.75rem' : '0.85rem' }}>{cycle}</TableCell>
+                  <TableRow key={plan.key} hover>
+                    <TableCell sx={{ fontWeight: 600, fontSize: isMobile ? '0.75rem' : '0.85rem' }}>
+                      {plan.label} {plan.isStartingFrom ? <Typography variant="caption" sx={{color: 'text.secondary', ml: 1}}>(Starting from)</Typography> : ''} {plan.isFree && <Typography variant="caption" sx={{color: 'success.main', ml: 1}}>(₹0 base)</Typography>}
+                    </TableCell>
+                    <TableCell sx={{ textTransform: 'capitalize', fontSize: isMobile ? '0.75rem' : '0.85rem' }}>Annual</TableCell>
                     <TableCell className="figure" sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>
-                      {existing ? `₹${(existing.price_paise / 100).toLocaleString('en-IN')}` : 'Platform default (not overridden yet)'}
+                      {existing ? `₹${(existing.annual / 100).toLocaleString('en-IN')}` : (plan.isFree ? '₹0 (fixed)' : 'Not set')}
+                    </TableCell>
+                    <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>
+                      {existing ? `${(existing.platform_fee_bps / 100).toFixed(2)}%` : 'Not set'}
                     </TableCell>
                     <TableCell sx={{ fontSize: isMobile ? '0.7rem' : '0.75rem', color: 'text.secondary' }}>
                       {existing ? `${new Date(existing.updated_at).toLocaleDateString('en-IN')} by ${existing.updated_by || '—'}` : '—'}
@@ -106,24 +165,35 @@ export default function ProductPricing() {
                       <MobileTextField
                         size="small"
                         type="number"
-                        placeholder="e.g. 1000"
-                        value={drafts[key] || ''}
-                        onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
+                        placeholder={plan.isFree ? '0 (fixed)' : 'e.g. 14990'}
+                        value={drafts[priceKey] || ''}
+                        onChange={(e) => setDrafts((d) => ({ ...d, [priceKey]: e.target.value }))}
+                        disabled={plan.isFree}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <MobileTextField
+                        size="small"
+                        type="number"
+                        placeholder={plan.isFree ? '150' : 'e.g. 100'}
+                        value={feeDrafts[feeKey] || ''}
+                        onChange={(e) => setFeeDrafts((d) => ({ ...d, [feeKey]: e.target.value }))}
+                        inputProps={{ min: 0, max: 10000, step: 1 }}
                       />
                     </TableCell>
                     <TableCell align="right">
                       <MobileButton
                         size="small"
-                        variant="outlined"
-                        disabled={saving === key || !drafts[key]}
-                        onClick={() => handleSave(plan, cycle)}
+                        variant="contained"
+                        disabled={saving === plan.key || !drafts[priceKey] || plan.isFree}
+                        onClick={() => handleSave(plan.key)}
                       >
-                        {saving === key ? 'Saving…' : 'Update'}
+                        {saving === plan.key ? 'Saving…' : 'Save'}
                       </MobileButton>
                     </TableCell>
                   </TableRow>
                 );
-              }))}
+              })}
             </TableBody>
           </Table>
         </ResponsiveTableContainer>

@@ -256,6 +256,11 @@ app.get('/ready', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+// Public API — no auth, for landing page / external consumers
+// ──────────────────────────────────────────────────────────────────────────
+app.use('/api/public', require('./routes/public'));
+
+// ──────────────────────────────────────────────────────────────────────────
 // API v1 Router — canonical versioned endpoints
 // ──────────────────────────────────────────────────────────────────────────
 const v1 = express.Router();
@@ -284,7 +289,7 @@ v1.use('/designations', require('./routes/designations'));
 v1.use('/org-hierarchy-tiers', require('./routes/orgHierarchyTiers'));
 v1.use('/assets', require('./routes/assets'));
 v1.use('/notifications', require('./routes/notifications'));
-v1.use('/recruitment', require('./routes/recruitment'));
+v1.use('/recruitment', require('./routes/recruitment').router);
 v1.use('/performance', require('./routes/performance'));
 v1.use('/import', require('./routes/import'));
 v1.use('/documents', require('./routes/documents'));
@@ -385,7 +390,7 @@ app.use('/api/designations', require('./routes/designations'));
 app.use('/api/org-hierarchy-tiers', require('./routes/orgHierarchyTiers'));
 app.use('/api/assets', require('./routes/assets'));
 app.use('/api/notifications', require('./routes/notifications'));
-app.use('/api/recruitment', require('./routes/recruitment'));
+app.use('/api/recruitment', require('./routes/recruitment').router);
 app.use('/api/performance', require('./routes/performance'));
 app.use('/api/import', require('./routes/import'));
 app.use('/api/documents', require('./routes/documents'));
@@ -411,6 +416,7 @@ app.use('/api/finance/bills', require('./routes/bills'));
 app.use('/api/purchase-requests', require('./routes/purchaseRequests'));
 app.use('/api/bank-accounts', require('./routes/bankAccounts'));
 app.use('/api/bank-statements', require('./routes/bankStatementImport'));
+app.use('/api/bank-reconciliation', require('./routes/bankReconciliation'));
 app.use('/api/accounting', require('./routes/accounting'));
 app.use('/api/platform-sync', require('./routes/platform-sync'));
 app.use('/api/invoices', require('./routes/invoices'));

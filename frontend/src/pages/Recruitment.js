@@ -26,11 +26,16 @@ import {
 const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contract', 'intern'];
 const STAGES = ['applied', 'screening', 'interview', 'offer', 'hired', 'rejected'];
 const SOURCES = ['linkedin', 'naukri', 'referral', 'walk_in', 'other'];
+const JOB_STATUSES = [
+  { value: 'published', label: 'Published (visible on careers)' },
+  { value: 'draft', label: 'Draft (internal only)' },
+  { value: 'closed', label: 'Closed' },
+];
 
 const emptyJobForm = {
   title: '', department_id: '', team_id: '', employment_type: 'full_time', description: '',
-  location: '', experience_min_years: '', experience_max_years: '', salary_range_min: '', salary_range_max: '',
-  openings_count: 1, linkedin_url: '', naukri_url: '',
+  location: '', experience_required: 'yes', experience_min_years: '', experience_max_years: '', salary_range_min: '', salary_range_max: '',
+  openings_count: 1, linkedin_url: '', naukri_url: '', status: 'published',
 };
 
 function JobList({ onOpenJob }) {
@@ -38,6 +43,8 @@ function JobList({ onOpenJob }) {
   const [jobs, setJobs] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingJob, setEditingJob] = useState(null);
   const [form, setForm] = useState(emptyJobForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -69,11 +76,54 @@ function JobList({ onOpenJob }) {
     }
   };
 
+  const handleEditClick = (job) => {
+    setEditingJob(job);
+    setForm({
+      title: job.title,
+      department_id: job.department_id || '',
+      team_id: job.team_id || '',
+      employment_type: job.employment_type || 'full_time',
+      description: job.description || '',
+      location: job.location || '',
+      experience_required: job.experience_required || 'yes',
+      experience_min_years: job.experience_min_years || '',
+      experience_max_years: job.experience_max_years || '',
+      salary_range_min: job.salary_range_min || '',
+      salary_range_max: job.salary_range_max || '',
+      openings_count: job.openings_count || 1,
+      linkedin_url: job.external_links?.linkedin || '',
+      naukri_url: job.external_links?.naukri || '',
+      status: job.status || 'published',
+    });
+    setEditOpen(true);
+  };
+
+  const handleUpdate = async () => {
+    if (!editingJob) return;
+    setSaving(true);
+    setError('');
+    try {
+      const { linkedin_url, naukri_url, ...rest } = form;
+      const external_links = {};
+      if (linkedin_url) external_links.linkedin = linkedin_url;
+      if (naukri_url) external_links.naukri = naukri_url;
+      await client.patch(`/recruitment/jobs/${editingJob.id}`, { ...rest, external_links: Object.keys(external_links).length ? external_links : undefined });
+      setEditOpen(false);
+      setEditingJob(null);
+      setForm(emptyJobForm);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to update job posting');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Box>
       <MobilePageHeader>
         <Typography variant={isMobile ? 'h6' : 'h5'}>Recruitment</Typography>
-        <MobileButton variant="contained" size="small" startIcon={<AddIcon />} onClick={() => setOpen(true)}>New job posting</MobileButton>
+        <MobileButton variant="contained" size="small" startIcon={<AddIcon />} onClick={() => { setForm(emptyJobForm); setOpen(true); }}>New job posting</MobileButton>
       </MobilePageHeader>
 
       <MobilePaper sx={{ mb: 2 }}>
@@ -90,27 +140,36 @@ function JobList({ onOpenJob }) {
             <TableHead>
               <TableRow>
                 <TableCell>Role</TableCell><TableCell>Department</TableCell><TableCell>Type</TableCell>
-                <TableCell align="right">Applicants</TableCell><TableCell align="right">Openings</TableCell><TableCell>Status</TableCell>
+                <TableCell align="right">Applicants</TableCell><TableCell align="right">Openings</TableCell><TableCell>Status</TableCell><TableCell>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {jobs.map((j) => (
-                <TableRow key={j.id} hover sx={{ cursor: 'pointer' }} onClick={() => onOpenJob(j.id)}>
+                <TableRow key={j.id} hover>
                   <TableCell>{j.title}</TableCell>
                   <TableCell>{j.department_name || '—'}</TableCell>
                   <TableCell sx={{ textTransform: 'capitalize' }}>{j.employment_type?.replace('_', ' ')}</TableCell>
                   <TableCell align="right" className="figure">{j.applicant_count}</TableCell>
                   <TableCell align="right" className="figure">{j.filled_count}/{j.openings_count}</TableCell>
                   <TableCell><StatusChip status={j.status} /></TableCell>
+                  <TableCell>
+                    <MobileButton size="small" onClick={(e) => { e.stopPropagation(); handleEditClick(j); }}>
+                      Edit
+                    </MobileButton>
+                    <MobileButton size="small" variant="text" color="primary" onClick={(e) => { e.stopPropagation(); onOpenJob(j.id); }}>
+                      Candidates
+                    </MobileButton>
+                  </TableCell>
                 </TableRow>
               ))}
-              {!jobs.length && <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No job postings yet.</TableCell></TableRow>}
+              {!jobs.length && <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No job postings yet.</TableCell></TableRow>}
             </TableBody>
           </Table>
         </ResponsiveTableContainer>
       </MobilePaper>
 
-      <MobileDialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+      {/* New Job Dialog */}
+      <MobileDialog open={open} onClose={() => { setOpen(false); setForm(emptyJobForm); }} maxWidth="sm" fullWidth>
         <DialogTitle>New job posting</DialogTitle>
         <DialogContent>
           <MobileFormGrid sx={{ mt: 0.5 }}>
@@ -133,19 +192,99 @@ function JobList({ onOpenJob }) {
             />
             <MobileTextField fullWidth label="Location" value={form.location} onChange={set('location')} />
             <MobileTextField fullWidth type="number" label="Openings" value={form.openings_count} onChange={set('openings_count')} />
-            <MobileTextField fullWidth type="number" label="Experience min (yrs)" value={form.experience_min_years} onChange={set('experience_min_years')} />
-            <MobileTextField fullWidth type="number" label="Experience max (yrs)" value={form.experience_max_years} onChange={set('experience_max_years')} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Experience required?"
+              value={form.experience_required}
+              onChange={set('experience_required')}
+              options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No (Freshers)' }]}
+            />
+            {form.experience_required === 'yes' && (
+              <>
+                <MobileTextField fullWidth type="number" label="Experience min (yrs)" value={form.experience_min_years} onChange={set('experience_min_years')} />
+                <MobileTextField fullWidth type="number" label="Experience max (yrs)" value={form.experience_max_years} onChange={set('experience_max_years')} />
+              </>
+            )}
             <MobileTextField fullWidth type="number" label="Salary min (₹/yr)" value={form.salary_range_min} onChange={set('salary_range_min')} />
             <MobileTextField fullWidth type="number" label="Salary max (₹/yr)" value={form.salary_range_max} onChange={set('salary_range_max')} />
             <MobileTextField fullWidth multiline rows={3} label="Description" value={form.description} onChange={set('description')} />
             <MobileTextField fullWidth label="LinkedIn posting URL" value={form.linkedin_url} onChange={set('linkedin_url')} />
             <MobileTextField fullWidth label="Naukri posting URL" value={form.naukri_url} onChange={set('naukri_url')} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Status"
+              value={form.status}
+              onChange={set('status')}
+              options={JOB_STATUSES}
+            />
           </MobileFormGrid>
           {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
         </DialogContent>
         <MobileActionButtons>
-          <MobileButton onClick={() => setOpen(false)}>Cancel</MobileButton>
+          <MobileButton onClick={() => { setOpen(false); setForm(emptyJobForm); }}>Cancel</MobileButton>
           <MobileButton variant="contained" onClick={handleCreate} disabled={saving || !form.title}>{saving ? 'Creating…' : 'Create'}</MobileButton>
+        </MobileActionButtons>
+      </MobileDialog>
+
+      {/* Edit Job Dialog */}
+      <MobileDialog open={editOpen} onClose={() => { setEditOpen(false); setEditingJob(null); setForm(emptyJobForm); }} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit job posting</DialogTitle>
+        <DialogContent>
+          <MobileFormGrid sx={{ mt: 0.5 }}>
+            <MobileTextField fullWidth label="Role title" value={form.title} onChange={set('title')} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Department"
+              value={form.department_id}
+              onChange={set('department_id')}
+              options={[{ value: '', label: 'Unassigned' }, ...departments.map((d) => ({ value: d.id, label: d.name }))]}
+            />
+            <MobileTextField
+              fullWidth
+              select
+              label="Employment type"
+              value={form.employment_type}
+              onChange={set('employment_type')}
+              options={EMPLOYMENT_TYPES.map((t) => ({ value: t, label: t.replace('_', ' ') }))}
+            />
+            <MobileTextField fullWidth label="Location" value={form.location} onChange={set('location')} />
+            <MobileTextField fullWidth type="number" label="Openings" value={form.openings_count} onChange={set('openings_count')} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Experience required?"
+              value={form.experience_required}
+              onChange={set('experience_required')}
+              options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No (Freshers)' }]}
+            />
+            {form.experience_required === 'yes' && (
+              <>
+                <MobileTextField fullWidth type="number" label="Experience min (yrs)" value={form.experience_min_years} onChange={set('experience_min_years')} />
+                <MobileTextField fullWidth type="number" label="Experience max (yrs)" value={form.experience_max_years} onChange={set('experience_max_years')} />
+              </>
+            )}
+            <MobileTextField fullWidth type="number" label="Salary min (₹/yr)" value={form.salary_range_min} onChange={set('salary_range_min')} />
+            <MobileTextField fullWidth type="number" label="Salary max (₹/yr)" value={form.salary_range_max} onChange={set('salary_range_max')} />
+            <MobileTextField fullWidth multiline rows={3} label="Description" value={form.description} onChange={set('description')} />
+            <MobileTextField fullWidth label="LinkedIn posting URL" value={form.linkedin_url} onChange={set('linkedin_url')} />
+            <MobileTextField fullWidth label="Naukri posting URL" value={form.naukri_url} onChange={set('naukri_url')} />
+            <MobileTextField
+              fullWidth
+              select
+              label="Status"
+              value={form.status}
+              onChange={set('status')}
+              options={JOB_STATUSES}
+            />
+          </MobileFormGrid>
+          {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+        </DialogContent>
+        <MobileActionButtons>
+          <MobileButton onClick={() => { setEditOpen(false); setEditingJob(null); setForm(emptyJobForm); }}>Cancel</MobileButton>
+          <MobileButton variant="contained" onClick={handleUpdate} disabled={saving || !form.title || !editingJob}>{saving ? 'Updating…' : 'Save changes'}</MobileButton>
         </MobileActionButtons>
       </MobileDialog>
     </Box>
@@ -157,6 +296,7 @@ function JobDetail({ jobId, onBack }) {
   const [job, setJob] = useState(null);
   const [applications, setApplications] = useState([]);
   const [addOpen, setAddOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(null);
   const [candidateForm, setCandidateForm] = useState({ full_name: '', email: '', phone: '', source: 'linkedin', current_company: '', expected_ctc: '', notice_period_days: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -164,7 +304,7 @@ function JobDetail({ jobId, onBack }) {
   const [hireDate, setHireDate] = useState('');
   const [message, setMessage] = useState(null);
 
-  const load = useCallback(() => client.get(`/recruitment/jobs/${jobId}`).then(({ data }) => { setJob(data.job); setApplications(data.applications); }), [jobId]);
+  const load = useCallback(() => client.get(`/recruitment/jobs/${jobId}`).then(({ data }) => { setJob(data.job); setApplications(data.applications || []); }), [jobId]);
   useEffect(() => { load(); }, [load]);
 
   const addCandidate = async () => {
@@ -206,6 +346,9 @@ function JobDetail({ jobId, onBack }) {
     }
   };
 
+  const openDetail = (app) => setDetailOpen(app);
+  const closeDetail = () => setDetailOpen(null);
+
   if (!job) return null;
 
   return (
@@ -238,12 +381,12 @@ function JobDetail({ jobId, onBack }) {
               <TableRow>
                 <TableCell>Candidate</TableCell><TableCell>Source</TableCell><TableCell>Current company</TableCell>
                 <TableCell align="right">Expected CTC</TableCell><TableCell align="right">Notice (days)</TableCell>
-                <TableCell>Stage</TableCell>
+                <TableCell>Stage</TableCell><TableCell>Applied</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {applications.map((a) => (
-                <TableRow key={a.id}>
+                <TableRow key={a.id} hover>
                   <TableCell>
                     <Typography sx={{ fontWeight: 600, fontSize: isMobile ? '0.8rem' : '0.875rem' }}>{a.full_name}</Typography>
                     <Typography sx={{ fontSize: isMobile ? '0.65rem' : '0.72rem', color: 'text.secondary' }}>{a.email}</Typography>
@@ -261,13 +404,73 @@ function JobDetail({ jobId, onBack }) {
                       options={STAGES.map((s) => ({ value: s, label: s, disabled: a.stage === 'hired' && s !== 'hired' }))}
                     />
                   </TableCell>
+                  <TableCell>
+                    <Typography variant="body2" color="text.secondary">
+                      {new Date(a.applied_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </Typography>
+                  </TableCell>
                 </TableRow>
               ))}
-              {!applications.length && <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No candidates yet.</TableCell></TableRow>}
+              {!applications.length && <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>No candidates yet.</TableCell></TableRow>}
             </TableBody>
           </Table>
         </ResponsiveTableContainer>
       </MobilePaper>
+
+      {/* Application Detail Dialog */}
+      {detailOpen && (
+        <MobileDialog open={Boolean(detailOpen)} onClose={closeDetail} maxWidth="md" fullWidth>
+          <DialogTitle>{detailOpen.full_name} — Application Details</DialogTitle>
+          <DialogContent>
+            <MobileFormGrid sx={{ mt: 0.5 }}>
+              <MobileTextField fullWidth label="Full name" value={detailOpen.full_name} disabled />
+              <MobileTextField fullWidth label="Email" value={detailOpen.email} disabled />
+              <MobileTextField fullWidth label="Phone" value={detailOpen.phone || '—'} disabled />
+              <MobileTextField fullWidth label="Source" value={detailOpen.source} disabled />
+              <MobileTextField fullWidth label="Current company" value={detailOpen.current_company || '—'} disabled />
+              <MobileTextField fullWidth label="Expected CTC (₹/yr)" value={detailOpen.expected_ctc ? `₹${Number(detailOpen.expected_ctc).toLocaleString('en-IN')}` : '—'} disabled />
+              <MobileTextField fullWidth label="Notice period (days)" value={detailOpen.notice_period_days ?? '—'} disabled />
+              <MobileTextField fullWidth label="Stage" value={detailOpen.stage} disabled />
+              <MobileTextField fullWidth label="Applied on" value={new Date(detailOpen.applied_at).toLocaleString('en-IN')} disabled />
+              {detailOpen.resume_url && (
+                <Box sx={{ mt: 1 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>Resume</Typography>
+                  <MuiLink href={detailOpen.resume_url} target="_blank" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                    <OpenInNewIcon fontSize="small" /> Open Resume
+                  </MuiLink>
+                </Box>
+              )}
+              {detailOpen.linkedin && (
+                <Box sx={{ mt: 1 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>LinkedIn</Typography>
+                  <MuiLink href={detailOpen.linkedin} target="_blank" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                    <OpenInNewIcon fontSize="small" /> Open Profile
+                  </MuiLink>
+                </Box>
+              )}
+              {detailOpen.portfolio && (
+                <Box sx={{ mt: 1 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>Portfolio</Typography>
+                  <MuiLink href={detailOpen.portfolio} target="_blank" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                    <OpenInNewIcon fontSize="small" /> Open Portfolio
+                  </MuiLink>
+                </Box>
+              )}
+              {detailOpen.cover_letter && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>Cover Letter</Typography>
+                  <Typography variant="body" sx={{ whiteSpace: 'pre-wrap', background: 'var(--bg)', p: 2, borderRadius: 1, border: '1px solid var(--brd)' }}>
+                    {detailOpen.cover_letter}
+                  </Typography>
+                </Box>
+              )}
+            </MobileFormGrid>
+          </DialogContent>
+          <MobileActionButtons>
+            <MobileButton onClick={closeDetail}>Close</MobileButton>
+          </MobileActionButtons>
+        </MobileDialog>
+      )}
 
       <MobileDialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Add candidate</DialogTitle>

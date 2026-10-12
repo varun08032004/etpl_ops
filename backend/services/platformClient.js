@@ -13,6 +13,52 @@ const BASE_DELAY_MS = 2000;
 // Request timeout (ms)
 const REQUEST_TIMEOUT_MS = 15000;
 
+// Platform API URLs - try in order (localhost first for dev, then production)
+function getPlatformUrls() {
+  const urls = [];
+  // Add localhost if configured
+  if (process.env.PLATFORM_API_URL_LOCALHOST) {
+    urls.push(process.env.PLATFORM_API_URL_LOCALHOST);
+  }
+  // Add production URL
+  if (process.env.PLATFORM_API_URL) {
+    urls.push(process.env.PLATFORM_API_URL);
+  }
+  // Default fallback for local development
+  if (urls.length === 0) {
+    urls.push('http://localhost:5000');
+  }
+  return urls;
+}
+
+// Fetch with fallback URLs - tries each URL until one succeeds
+async function fetchWithFallback(path, options, tokenEnvVar = 'PLATFORM_SYNC_SERVICE_TOKEN') {
+  const urls = getPlatformUrls();
+  const token = process.env[tokenEnvVar];
+  
+  if (!token) {
+    throw new Error(`${tokenEnvVar} not configured — see .env.example`);
+  }
+  
+  const headers = { ...options.headers, 'x-service-token': token };
+  const fetchOptions = { ...options, headers };
+  
+  let lastError;
+  for (const base of urls) {
+    const url = `${base.replace(/\/$/, '')}${path}`;
+    try {
+      const resp = await fetchWithRetry(url, fetchOptions);
+      return resp;
+    } catch (err) {
+      lastError = err;
+      console.warn(`[platformClient] Failed to reach ${base}: ${err.message}, trying next URL...`);
+      continue;
+    }
+  }
+  
+  throw new Error(`All platform API URLs failed. Last error: ${lastError?.message}`);
+}
+
 // Simple rate limiter to space out requests
 let lastRequestTime = 0;
 const MIN_REQUEST_INTERVAL_MS = 100; // Max 10 requests/second
@@ -162,22 +208,12 @@ function getCircuitBreakerState() {
 }
 
 async function fetchPlatformIncome(fromDate, toDate) {
-  const base = process.env.PLATFORM_API_URL;
-  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
-
-  if (!base || !token) {
-    throw new Error(
-      'PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example'
-    );
-  }
-
   const cacheKey = `income:${fromDate}:${toDate}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
-  const url = `${base.replace(/\/$/, '')}/api/ops-integration/income?from=${fromDate}&to=${toDate}`;
-
-  const resp = await fetchWithRetry(url, { headers: { 'x-service-token': token } });
+  const path = `/api/ops-integration/income?from=${fromDate}&to=${toDate}`;
+  const resp = await fetchWithFallback(path, {});
 
   const data = await resp.json();
   const result = [...(data.subscriptions || []), ...(data.trades || [])];
@@ -186,20 +222,12 @@ async function fetchPlatformIncome(fromDate, toDate) {
 }
 
 async function fetchPlatformCustomers(limit = 1000) {
-  const base = process.env.PLATFORM_API_URL;
-  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
-  if (!base || !token) {
-    throw new Error(
-      'PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example'
-    );
-  }
   const cacheKey = `customers:${limit}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
-  const url = `${base.replace(/\/$/, '')}/api/ops-integration/customers?limit=${limit}`;
-
-  const resp = await fetchWithRetry(url, { headers: { 'x-service-token': token } });
+  const path = `/api/ops-integration/customers?limit=${limit}`;
+  const resp = await fetchWithFallback(path, {});
   const data = await resp.json();
   const result = data.customers || [];
   setCached(cacheKey, result);
@@ -211,17 +239,9 @@ async function fetchPlatformCustomers(limit = 1000) {
 // on the next customer-roster pull. `since` is an ISO timestamp; omit to get
 // the platform's own default window (last 30 days).
 async function fetchChurnEvents(since = null) {
-  const base = process.env.PLATFORM_API_URL;
-  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
-  if (!base || !token) {
-    throw new Error(
-      'PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example'
-    );
-  }
   const qs = since ? `?since=${encodeURIComponent(since)}` : '';
-  const url = `${base.replace(/\/$/, '')}/api/ops-integration/churn-events${qs}`;
-
-  const resp = await fetchWithRetry(url, { headers: { 'x-service-token': token } });
+  const path = `/api/ops-integration/churn-events${qs}`;
+  const resp = await fetchWithFallback(path, {});
   const data = await resp.json();
   return data.events || [];
 }
@@ -232,18 +252,9 @@ async function fetchChurnEvents(since = null) {
 // Finance can check whether that revenue was ever imported and, if so,
 // reverse it (via the existing platform-sync void flow).
 async function fetchPlatformRefunds(since = null) {
-  const base = process.env.PLATFORM_API_URL;
-  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
-  if (!base || !token) {
-    throw new Error(
-      'PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example'
-    );
-  }
-
   const qs = since ? `?since=${encodeURIComponent(since)}` : '';
-  const url = `${base.replace(/\/$/, '')}/api/ops-integration/refunds${qs}`;
-
-  const resp = await fetchWithRetry(url, { headers: { 'x-service-token': token } });
+  const path = `/api/ops-integration/refunds${qs}`;
+  const resp = await fetchWithFallback(path, {});
   const data = await resp.json();
   return data.refunds || [];
 }
@@ -252,17 +263,9 @@ async function fetchPlatformRefunds(since = null) {
 // applied to, so Marketing can see real revenue driven per code, not just a
 // usage count. Read-only, same token as the other fetch* functions above.
 async function fetchCouponRedemptions(since = null) {
-  const base = process.env.PLATFORM_API_URL;
-  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
-  if (!base || !token) {
-    throw new Error(
-      'PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example'
-    );
-  }
   const qs = since ? `?since=${encodeURIComponent(since)}` : '';
-  const url = `${base.replace(/\/$/, '')}/api/ops-integration/coupon-redemptions${qs}`;
-
-  const resp = await fetchWithRetry(url, { headers: { 'x-service-token': token } });
+  const path = `/api/ops-integration/coupon-redemptions${qs}`;
+  const resp = await fetchWithFallback(path, {});
   const data = await resp.json();
   return data.redemptions || [];
 }
@@ -270,38 +273,24 @@ async function fetchCouponRedemptions(since = null) {
 // fetchSupportTickets: platform support tickets, optionally filtered by
 // status. Read-only, same token as the other fetch* functions above.
 async function fetchSupportTickets({ since = null, status = null } = {}) {
-  const base = process.env.PLATFORM_API_URL;
-  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
-  if (!base || !token) {
-    throw new Error(
-      'PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example'
-    );
-  }
   const params = new URLSearchParams();
   if (since) params.set('since', since);
   if (status) params.set('status', status);
   const qs = params.toString() ? `?${params.toString()}` : '';
-  const url = `${base.replace(/\/$/, '')}/api/ops-integration/support-tickets${qs}`;
-
-  const resp = await fetchWithRetry(url, { headers: { 'x-service-token': token } });
+  const path = `/api/ops-integration/support-tickets${qs}`;
+  const resp = await fetchWithFallback(path, {});
   const data = await resp.json();
   return data.tickets || [];
 }
 
 // fetchDisputes: platform trade/credit disputes. Read-only, same token.
 async function fetchDisputes({ since = null, status = null } = {}) {
-  const base = process.env.PLATFORM_API_URL;
-  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
-  if (!base || !token) {
-    throw new Error('PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example');
-  }
   const params = new URLSearchParams();
   if (since) params.set('since', since);
   if (status) params.set('status', status);
   const qs = params.toString() ? `?${params.toString()}` : '';
-  const url = `${base.replace(/\/$/, '')}/api/ops-integration/disputes${qs}`;
-
-  const resp = await fetchWithRetry(url, { headers: { 'x-service-token': token } });
+  const path = `/api/ops-integration/disputes${qs}`;
+  const resp = await fetchWithFallback(path, {});
   const data = await resp.json();
   return data.disputes || [];
 }
@@ -313,18 +302,12 @@ async function fetchDisputes({ since = null, status = null } = {}) {
 // fetchKycStatus: recent KYC submissions with status/rejection reasons.
 // Read-only, same token.
 async function fetchKycStatus({ since = null, status = null } = {}) {
-  const base = process.env.PLATFORM_API_URL;
-  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
-  if (!base || !token) {
-    throw new Error('PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example');
-  }
   const params = new URLSearchParams();
   if (since) params.set('since', since);
   if (status) params.set('status', status);
   const qs = params.toString() ? `?${params.toString()}` : '';
-  const url = `${base.replace(/\/$/, '')}/api/ops-integration/kyc-status${qs}`;
-
-  const resp = await fetchWithRetry(url, { headers: { 'x-service-token': token } });
+  const path = `/api/ops-integration/kyc-status${qs}`;
+  const resp = await fetchWithFallback(path, {});
   const data = await resp.json();
   return data.submissions || [];
 }
@@ -335,20 +318,12 @@ async function fetchKycStatus({ since = null, status = null } = {}) {
 // record. Returns a Buffer of raw PDF bytes, or throws if not found/not
 // yet generated on the platform side.
 async function fetchInvoicePdf(type, id) {
-  const base = process.env.PLATFORM_API_URL;
-  const token = process.env.PLATFORM_SYNC_SERVICE_TOKEN;
-  if (!base || !token) {
-    throw new Error(
-      'PLATFORM_API_URL / PLATFORM_SYNC_SERVICE_TOKEN not configured — see .env.example'
-    );
-  }
   if (!['subscription', 'trade'].includes(type)) {
     throw new Error("type must be 'subscription' or 'trade'");
   }
 
-  const url = `${base.replace(/\/$/, '')}/api/ops-integration/invoice/${type}/${encodeURIComponent(id)}`;
-
-  const resp = await fetchWithRetry(url, { headers: { 'x-service-token': token } });
+  const path = `/api/ops-integration/invoice/${type}/${encodeURIComponent(id)}`;
+  const resp = await fetchWithFallback(path, {});
 
   if (resp.status === 404) {
     throw Object.assign(new Error('Invoice not found or not yet generated on the platform'), { status: 404 });
@@ -382,36 +357,45 @@ async function fetchInvoicePdf(type, id) {
 // account just needs to be told the outcome once the deal is won.
 
 async function platformCorporateCall(path, method, body) {
-  const base = process.env.PLATFORM_API_URL;
+  const urls = getPlatformUrls();
   const token = process.env.PLATFORM_SYNC_CORPORATE_WRITE_TOKEN;
-  if (!base || !token) {
-    throw new Error('PLATFORM_API_URL / PLATFORM_SYNC_CORPORATE_WRITE_TOKEN not configured — see .env.example');
+  if (!token) {
+    throw new Error('PLATFORM_SYNC_CORPORATE_WRITE_TOKEN not configured — see .env.example');
   }
-  const url = `${base.replace(/\/$/, '')}/api/ops-integration-corporate${path}`;
-  let resp;
-  try {
-    resp = await fetch(url, {
-      method,
-      headers: { 'x-service-token': token, 'Content-Type': 'application/json' },
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
-  } catch (err) {
-    throw new Error(`Could not reach platform API at ${base}: ${err.message}`);
+  
+  const fetchOptions = {
+    method,
+    headers: { 'x-service-token': token, 'Content-Type': 'application/json' },
+    body: body != null ? JSON.stringify(body) : undefined,
+  };
+  
+  let lastError;
+  for (const base of urls) {
+    const url = `${base.replace(/\/$/, '')}/api/ops-integration-corporate${path}`;
+    try {
+      let resp = await fetch(url, fetchOptions);
+      const text = await resp.text().catch(() => '');
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { /* leave as null */ }
+      
+      if (!resp.ok) {
+        const hint = resp.status === 404
+          ? ' — routes/opsIntegrationCorporate.js may not be deployed/mounted yet on the platform side'
+          : '';
+        throw Object.assign(
+          new Error(`Platform API returned ${resp.status}${hint}: ${(text || '').slice(0, 300)}`),
+          { status: resp.status, body: data }
+        );
+      }
+      return data;
+    } catch (err) {
+      lastError = err;
+      console.warn(`[platformClient] Failed to reach ${base}: ${err.message}, trying next URL...`);
+      continue;
+    }
   }
-  const text = await resp.text().catch(() => '');
-  let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch { /* leave as null, raw text goes in the error below */ }
-
-  if (!resp.ok) {
-    const hint = resp.status === 404
-      ? ' — routes/opsIntegrationCorporate.js may not be deployed/mounted yet on the platform side'
-      : '';
-    throw Object.assign(
-      new Error(`Platform API returned ${resp.status}${hint}: ${(text || '').slice(0, 300)}`),
-      { status: resp.status, body: data }
-    );
-  }
-  return data;
+  
+  throw new Error(`All platform API URLs failed. Last error: ${lastError?.message}`);
 }
 
 // activateCorporate: triggers Corporate plan activation on the platform for
@@ -442,33 +426,42 @@ async function fetchCorporateActivations() {
 // Corporate above — see routes/opsIntegrationCoupons.js on the platform side.
 
 async function platformScopedCall(namespace, tokenEnvVar, path, method, body) {
-  const base = process.env.PLATFORM_API_URL;
+  const urls = getPlatformUrls();
   const token = process.env[tokenEnvVar];
-  if (!base || !token) {
-    throw new Error(`PLATFORM_API_URL / ${tokenEnvVar} not configured — see .env.example`);
+  if (!token) {
+    throw new Error(`${tokenEnvVar} not configured — see .env.example`);
   }
-  const url = `${base.replace(/\/$/, '')}/api/${namespace}${path}`;
-  let resp;
-  try {
-    resp = await fetch(url, {
-      method,
-      headers: { 'x-service-token': token, 'Content-Type': 'application/json' },
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
-  } catch (err) {
-    throw new Error(`Could not reach platform API at ${base}: ${err.message}`);
+  
+  const fetchOptions = {
+    method,
+    headers: { 'x-service-token': token, 'Content-Type': 'application/json' },
+    body: body != null ? JSON.stringify(body) : undefined,
+  };
+  
+  let lastError;
+  for (const base of urls) {
+    const url = `${base.replace(/\/$/, '')}/api/${namespace}${path}`;
+    try {
+      const resp = await fetch(url, fetchOptions);
+      const text = await resp.text().catch(() => '');
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { /* leave as null */ }
+      
+      if (!resp.ok) {
+        throw Object.assign(
+          new Error(`Platform API returned ${resp.status}: ${(text || '').slice(0, 300)}`),
+          { status: resp.status, body: data }
+        );
+      }
+      return data;
+    } catch (err) {
+      lastError = err;
+      console.warn(`[platformClient] Failed to reach ${base}: ${err.message}, trying next URL...`);
+      continue;
+    }
   }
-  const text = await resp.text().catch(() => '');
-  let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch { /* leave as null, raw text goes in the error below */ }
-
-  if (!resp.ok) {
-    throw Object.assign(
-      new Error(`Platform API returned ${resp.status}: ${(text || '').slice(0, 300)}`),
-      { status: resp.status, body: data }
-    );
-  }
-  return data;
+  
+  throw new Error(`All platform API URLs failed. Last error: ${lastError?.message}`);
 }
 
 // createCoupon — plans is restricted to ['starter','growth'] on the
@@ -505,10 +498,10 @@ async function setCouponActive(code, active, { validUntil, maxRedemptions } = {}
 // against /api/ops-integration-pricing/*). Starter/Growth only — Corporate
 // pricing is always per-deal via Corporate Deals, never a flat rate here.
 
-async function updatePlanPrice(plan, cycle, priceINR, updatedBy = null) {
+async function updatePlanPrice(plan, cycle, priceINR, platformFeeBps = 0, updatedBy = null) {
   const data = await platformScopedCall(
     'ops-integration-pricing', 'PLATFORM_SYNC_PRICING_WRITE_TOKEN',
-    `/${plan}/${cycle}`, 'PATCH', { priceINR, updatedBy }
+    `/${plan}/${cycle}`, 'PATCH', { priceINR, platformFeeBps, updatedBy }
   );
   return data;
 }

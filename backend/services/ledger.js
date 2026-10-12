@@ -43,7 +43,8 @@ async function nextNumber(client, prefix, table, column) {
  * @param {string} [entry.narration]
  * @param {string} [entry.createdBy] staff_accounts.id
  * @param {Array<{accountId:string, debit?:number, credit?:number, partyId?:string, description?:string}>} entry.lines
- * @returns {Promise<{id:string, entryNumber:string}>}
+ * @param {boolean} [entry.allowClosedPeriod] allow posting in closed fiscal period
+ * @returns {Promise<{id:string, entryNumber:string, duplicate:boolean}>}
  */
 async function postJournalEntry(entry, client = null) {
   const { entryDate, source, sourceType, sourceId, narration, createdBy, lines, allowClosedPeriod } = entry;
@@ -52,20 +53,7 @@ async function postJournalEntry(entry, client = null) {
     throw new Error('A journal entry needs at least 2 lines');
   }
 
-  // A closed fiscal period is a hard stop for every caller (invoices, payroll,
-  // manual entries, everything) — the ONLY exception is the closing entry
-  // itself, which is necessarily dated inside the period it's closing.
-  // closeFiscalPeriod() below is the only caller that sets allowClosedPeriod.
-  if (!allowClosedPeriod) {
-    const { rows: [closed] } = await safeQuery(
-      `SELECT label FROM fiscal_periods WHERE is_closed = true AND $1::date BETWEEN start_date AND end_date`,
-      [entryDate]
-    );
-    if (closed) {
-      throw new Error(`${entryDate} falls inside "${closed.label}", which is closed. Reopen the period or use a current date.`);
-    }
-  }
-
+  // Validate lines
   let totalDebit = 0;
   let totalCredit = 0;
   for (const l of lines) {
@@ -84,13 +72,43 @@ async function postJournalEntry(entry, client = null) {
   }
 
   const doPost = async (client) => {
+    // Check closed period inside transaction
+    if (!allowClosedPeriod) {
+      const { rows: [closed] } = await client.query(
+        `SELECT label FROM fiscal_periods WHERE is_closed = true AND $1::date BETWEEN start_date AND end_date`,
+        [entryDate]
+      );
+      if (closed) {
+        throw new Error(`${entryDate} falls inside "${closed.label}", which is closed. Reopen the period or use a current date.`);
+      }
+    }
+
     const entryNumber = await nextNumber(client, 'JE', 'journal_entries', 'entry_number');
 
-    const { rows: [je] } = await client.query(
-      `INSERT INTO journal_entries (entry_number, entry_date, source, source_type, source_id, narration, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, entry_number`,
-      [entryNumber, entryDate, source, sourceType || null, sourceId || null, narration || null, createdBy || null]
-    );
+    // Try to insert the journal entry. The unique constraint on (source_type, source_id)
+    // will prevent duplicates for entries with source_type + source_id.
+    let je;
+    try {
+      const { rows } = await client.query(
+        `INSERT INTO journal_entries (entry_number, entry_date, source, source_type, source_id, narration, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, entry_number`,
+        [entryNumber, entryDate, source, sourceType || null, sourceId || null, narration || null, createdBy || null]
+      );
+      je = rows[0];
+    } catch (err) {
+      // Handle unique constraint violation for idempotency
+      if (err.code === '23505' && err.constraint === 'uq_journal_entries_source_type_source_id') {
+        // Fetch the existing entry
+        const { rows } = await client.query(
+          `SELECT id, entry_number FROM journal_entries WHERE source_type = $1 AND source_id = $2`,
+          [sourceType, sourceId]
+        );
+        if (rows[0]) {
+          return { id: rows[0].id, entryNumber: rows[0].entry_number, duplicate: true };
+        }
+      }
+      throw err;
+    }
 
     for (const l of lines) {
       await client.query(
@@ -100,7 +118,7 @@ async function postJournalEntry(entry, client = null) {
       );
     }
 
-    return { id: je.id, entryNumber: je.entry_number };
+    return { id: je.id, entryNumber: je.entry_number, duplicate: false };
   };
 
   if (client) {

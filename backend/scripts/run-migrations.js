@@ -91,6 +91,8 @@ async function main() {
     '../db/081_encrypt_employee_pii.sql',
     '../db/082_backfill_bank_credentials.sql',
     '../db/083_backfill_employee_pii.sql',
+    '../db/084_journal_entry_idempotency.sql',
+    '../db/085_bank_reconciliation_schema.sql',
   ];
 
   for (const migration of migrations) {
