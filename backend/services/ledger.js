@@ -98,14 +98,73 @@ async function postJournalEntry(entry, client = null) {
     } catch (err) {
       // Handle unique constraint violation for idempotency
       if (err.code === '23505' && err.constraint === 'uq_journal_entries_source_type_source_id') {
-        // Fetch the existing entry
-        const { rows } = await client.query(
-          `SELECT id, entry_number FROM journal_entries WHERE source_type = $1 AND source_id = $2`,
+        // Fetch the existing entry and its lines
+        const { rows: [existing] } = await client.query(
+          `SELECT id, entry_number, entry_date, source, source_type, source_id, narration, created_by
+           FROM journal_entries WHERE source_type = $1 AND source_id = $2`,
           [sourceType, sourceId]
         );
-        if (rows[0]) {
-          return { id: rows[0].id, entryNumber: rows[0].entry_number, duplicate: true };
+        if (!existing) {
+          throw err; // Should not happen, but be safe
         }
+
+        // Load existing lines for comparison
+        const { rows: existingLines } = await client.query(
+          `SELECT account_id, debit, credit, party_id, description
+           FROM journal_lines WHERE journal_entry_id = $1 ORDER BY account_id`,
+          [existing.id]
+        );
+
+        // Normalize the incoming lines for comparison
+        const incomingLines = lines
+          .map(l => ({
+            accountId: l.accountId,
+            debit: Number(l.debit || 0),
+            credit: Number(l.credit || 0),
+            partyId: l.partyId || null,
+            description: l.description || null
+          }))
+          .sort((a, b) => a.accountId.localeCompare(b.accountId));
+
+        // Normalize existing lines
+        const normalizedExistingLines = existingLines
+          .map(l => ({
+            accountId: l.account_id,
+            debit: Number(l.debit),
+            credit: Number(l.credit),
+            partyId: l.party_id,
+            description: l.description
+          }))
+          .sort((a, b) => a.accountId.localeCompare(b.accountId));
+
+        // Compare all fields that define the financial event
+        const isSameEvent =
+          existing.entry_date === entryDate &&
+          existing.source === source &&
+          existing.narration === (narration || null) &&
+          incomingLines.length === normalizedExistingLines.length &&
+          incomingLines.every((inc, idx) => {
+            const ex = normalizedExistingLines[idx];
+            return inc.accountId === ex.accountId &&
+              inc.debit === ex.debit &&
+              inc.credit === ex.credit &&
+              inc.partyId === ex.partyId &&
+              inc.description === ex.description;
+          });
+
+        if (isSameEvent) {
+          // True idempotent retry - same financial event
+          return { id: existing.id, entryNumber: existing.entry_number, duplicate: true };
+        }
+
+        // Same source key but DIFFERENT financial event - this is an integrity error
+        const err = new Error(
+          `Idempotency key conflict: source_type='${sourceType}' source_id='${sourceId}' ` +
+          `already used for a different financial event (entry ${existing.entry_number}). ` +
+          `Cannot reuse idempotency key for different content.`
+        );
+        err.code = 'IDEMPOTENCY_CONFLICT';
+        throw err;
       }
       throw err;
     }
