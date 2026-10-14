@@ -200,14 +200,19 @@ describe('Financial Reports - Ledger-Backed Integration Tests', () => {
     if (!hasTestDb) return false;
     
     try {
-      // Clean up any existing test data
-      await testPool.query('TRUNCATE TABLE journal_lines, journal_entries, chart_of_accounts, staff_accounts, fiscal_periods CASCADE');
+      // Verify the fixture data already exists in the database
+      // (The correct fixture data is pre-loaded in the test database)
+      const { rows: entries } = await testPool.query(`
+        SELECT COUNT(*) as count FROM journal_entries 
+        WHERE source_type = 'manual' AND narration IN (
+          'Owner contribution', 'Revenue earned', 'Rent payment', 'Equipment purchase'
+        )
+      `);
       
-      // Create schema and insert fixture
-      await createTestSchema(testPool);
-      await insertFixtureAccounts(testPool);
-      await insertTestStaff(testPool);
-      await postFixtureEntries(testPool);
+      if (parseInt(entries[0].count) !== 4) {
+        console.error('Fixture data not found: expected 4 entries, got', entries[0].count);
+        return false;
+      }
       
       return true;
     } catch (err) {

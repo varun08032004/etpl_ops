@@ -19,7 +19,10 @@ describe('Ledger Idempotency', () => {
 
   beforeAll(async () => {
     try {
-      testPool = new Pool({ connectionString: TEST_DB_URL });
+      testPool = new Pool({ 
+        connectionString: TEST_DB_URL,
+        ssl: { rejectUnauthorized: false }
+      });
       await testPool.query('SELECT 1');
       hasTestDb = true;
     } catch (err) {
