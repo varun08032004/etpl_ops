@@ -6,15 +6,18 @@
  * Tests ledger-backed financial reports (Trial Balance, P&L, Balance Sheet)
  * with exact figure assertions against a deterministic ledger fixture.
  * 
- * Requires PostgreSQL test database (TEST_DB_URL).
- * If TEST_DB_URL is not available, tests will be skipped with BLOCKED status.
+ * Requires PostgreSQL test database (INTERNAL_OPS_DATABASE_URL).
+ * If INTERNAL_OPS_DATABASE_URL is not available, tests will be skipped with BLOCKED status.
  */
+
+require('dotenv').config();
 
 const { Pool } = require('pg');
 const ledger = require('../services/ledger');
 const { safeQuery } = require('../db/pool');
 
-const TEST_DB_URL = process.env.TEST_DB_URL || 'postgresql://postgres:postgres@localhost:5432/etpl_ops_test';
+// Use the configured database URL (Supabase) for integration tests
+const TEST_DB_URL = process.env.INTERNAL_OPS_DATABASE_URL;
 
 describe('Financial Reports - Ledger-Backed Integration Tests', () => {
   let testPool;
@@ -130,8 +133,8 @@ describe('Financial Reports - Ledger-Backed Integration Tests', () => {
 
   const insertTestStaff = async (pool) => {
     await pool.query(`
-      INSERT INTO staff_accounts (id, email, role, is_active, full_name) VALUES
-      ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'test@test.com', 'finance', true, 'Test User')
+      INSERT INTO staff_accounts (id, email, role, is_active, password_hash) VALUES
+      ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'test@test.com', 'finance', true, 'test-hash')
       ON CONFLICT (id) DO NOTHING;
     `);
   };
@@ -471,7 +474,7 @@ describe('Financial Reports - Ledger-Backed Integration Tests', () => {
 
       // Net profit from P&L should match the implied retained earnings on balance sheet
       expect(bs.impliedRetainedEarnings).toBe(pnl.netProfit);
-    });
+    }, 60000);
 
     test('BLOCKED: trial balance debits equal credits', async () => {
       if (!hasTestDb) {

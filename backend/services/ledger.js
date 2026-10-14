@@ -369,10 +369,15 @@ async function getBalanceSheet(asOfDate) {
             COALESCE(SUM(jl.debit),0) AS total_debit,
             COALESCE(SUM(jl.credit),0) AS total_credit
      FROM chart_of_accounts coa
-     LEFT JOIN journal_lines jl ON jl.account_id = coa.id
-     LEFT JOIN journal_entries je ON je.id = jl.journal_entry_id
-       AND je.entry_date <= $1::date
-     WHERE coa.account_type IN ('asset','liability','equity') AND coa.is_group = false AND coa.is_active = true
+     LEFT JOIN (
+       SELECT jl.account_id, jl.debit, jl.credit
+       FROM journal_lines jl
+       JOIN journal_entries je ON je.id = jl.journal_entry_id
+       WHERE je.entry_date <= $1::date
+     ) jl ON jl.account_id = coa.id
+     WHERE coa.account_type IN ('asset','liability','equity') 
+       AND coa.is_group = false 
+       AND coa.is_active = true
      GROUP BY coa.id, coa.code, coa.name, coa.account_type
      ORDER BY coa.code`,
     [asOfDate]

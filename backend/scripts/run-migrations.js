@@ -20,8 +20,8 @@ async function runMigration(filePath, customPool) {
   const migrationId = path.basename(filePath, '.sql');
 
   const client = await activePool.connect();
-  // Convert migration ID to 64-bit integer for advisory lock
-  const lockKey = parseInt(crypto.createHash('sha256').update(`migration:${migrationId}`).digest('hex').slice(0, 16), 16);
+  // Convert migration ID to 64-bit integer for advisory lock (use first 8 hex chars = 32 bits)
+  const lockKey = parseInt(crypto.createHash('sha256').update(`migration:${migrationId}`).digest('hex').slice(0, 8), 16);
   
   try {
     await client.query('BEGIN');
@@ -44,18 +44,19 @@ async function runMigration(filePath, customPool) {
     }
     
     // Record applying state BEFORE execution (survives rollback)
+    const appliedBy = process.env.STAFF_ID || '9de5521a-16b5-4015-8102-e84ea5099dcc';
     await client.query(`
       INSERT INTO schema_migrations (migration_id, filename, checksum, status, applied_by)
       VALUES ($1, $2, $3, 'applying', $4)
       ON CONFLICT (migration_id) DO UPDATE SET
         status = 'applying', applied_at = NULL, error_message = NULL, checksum = EXCLUDED.checksum
-    `, [migrationId, path.basename(filePath), checksum, process.env.STAFF_ID || '00000000-0000-0000-0000-000000000000']);
+    `, [migrationId, path.basename(filePath), checksum, appliedBy]);
     
     await client.query('COMMIT'); // Persist "applying" state
     await client.query('BEGIN');  // New transaction for actual migration
     
+    const start = Date.now();
     try {
-      const start = Date.now();
       await client.query(sql);
       const execTime = Date.now() - start;
       
