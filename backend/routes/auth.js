@@ -129,6 +129,15 @@ router.get('/debug/test', async (req, res) => {
   }
 });
 
+// SIMPLE SYNC TEST - no imports, no async
+router.get('/debug/sync', (req, res) => {
+  res.json({ ok: true, message: 'sync route works', body: req.body });
+});
+
+router.post('/debug/sync', (req, res) => {
+  res.json({ ok: true, message: 'sync post works', body: req.body });
+});
+
 // DEBUG: Test login flow step by step
 router.post('/debug/login-test', (req, res, next) => {
   console.log('[DEBUG-LOGIN-TEST] RAW BODY:', req.body);
