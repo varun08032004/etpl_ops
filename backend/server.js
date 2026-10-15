@@ -156,6 +156,15 @@ app.use((req, res, next) => {
 app.use('/api/payroll/webhooks/axis-payout', express.raw({ type: 'application/json' }));
 app.use('/api/attendance/webhooks/agent', express.raw({ type: 'application/json', limit: '50mb' }));
 
+// DEBUG: Log raw body for auth routes
+app.use('/api/auth/*', (req, res, next) => {
+  if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+    console.log('[DEBUG-MIDDLEWARE] Content-Type:', req.headers['content-type']);
+    console.log('[DEBUG-MIDDLEWARE] Raw body preview:', req.body);
+  }
+  next();
+});
+
 // Body parsing with size limits
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
