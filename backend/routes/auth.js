@@ -129,6 +129,54 @@ router.get('/debug/test', async (req, res) => {
   }
 });
 
+// DEBUG: Test login flow step by step
+router.post('/debug/login-test', async (req, res) => {
+  try {
+    const { safeQuery } = require('../db/pool');
+    const bcrypt = require('bcrypt');
+    const { signAccessToken, signRefreshToken, storeRefreshToken, enforceSessionLimit, accessCookieOptions, refreshCookieOptions, ACCESS_COOKIE_MAX_AGE, REFRESH_COOKIE_MAX_AGE } = require('../middleware/auth');
+    
+    const { email, password } = req.body;
+    console.log('[debug:login-test] Request:', { email, hasPassword: !!password });
+    
+    // Step 1: Find user
+    const { rows: [staff] } = await safeQuery(`SELECT * FROM staff_accounts WHERE email = $1`, [email?.toLowerCase()]);
+    console.log('[debug:login-test] Staff found:', !!staff);
+    if (!staff) return res.json({ step: 'find_user', result: 'NOT_FOUND' });
+    console.log('[debug:login-test] Staff:', { id: staff.id, email: staff.email, is_active: staff.is_active, hasHash: !!staff.password_hash });
+    
+    // Step 2: Check password
+    const ok = await bcrypt.compare(password, staff.password_hash);
+    console.log('[debug:login-test] bcrypt result:', ok);
+    if (!ok) return res.json({ step: 'check_password', result: 'MISMATCH' });
+    
+    // Step 3: Generate tokens
+    const accessToken = signAccessToken(staff);
+    const refreshToken = signRefreshToken(staff);
+    console.log('[debug:login-test] Tokens generated:', { access: !!accessToken, refresh: !!refreshToken });
+    
+    // Step 4: Store refresh token
+    await enforceSessionLimit(staff.id);
+    await storeRefreshToken(staff.id, refreshToken, req.headers['user-agent'] || null, req.ip);
+    console.log('[debug:login-test] Refresh token stored');
+    
+    // Step 5: Set cookies
+    res.cookie('internal_ops_token', accessToken, accessCookieOptions(ACCESS_COOKIE_MAX_AGE));
+    res.cookie('internal_ops_refresh', refreshToken, refreshCookieOptions(REFRESH_COOKIE_MAX_AGE));
+    console.log('[debug:login-test] Cookies set');
+    
+    res.json({ 
+      step: 'complete', 
+      result: 'OK',
+      accessToken: accessToken.substring(0, 20) + '...',
+      staff: { id: staff.id, email: staff.email, role: staff.role }
+    });
+  } catch (err) {
+    console.error('[debug:login-test] Error:', err);
+    res.status(500).json({ error: err.message, stack: err.stack, step: 'error' });
+  }
+});
+
 router.post('/login', authRateLimit, validateBody(loginSchema), async (req, res) => {
   console.log('[auth:login] Request body:', { email: req.body?.email, hasPassword: !!req.body?.password });
   try {
