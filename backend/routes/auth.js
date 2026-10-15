@@ -97,6 +97,38 @@ const authRateLimit = rateLimit({
   message: { error: 'Too many attempts — please wait a few minutes and try again.' },
 });
 
+// DEBUG: Test endpoint to verify DB and JWT
+router.get('/debug/test', async (req, res) => {
+  try {
+    const { safeQuery } = require('../db/pool');
+    const { signAccessToken } = require('../middleware/auth');
+    
+    // Test DB
+    const { rows } = await safeQuery('SELECT 1 as test, NOW() as now');
+    console.log('[debug] DB test:', rows);
+    
+    // Test JWT
+    const token = signAccessToken({ id: 'test', role: 'admin' });
+    console.log('[debug] JWT test:', token ? 'OK' : 'FAIL');
+    
+    res.json({ 
+      db: 'OK', 
+      dbResult: rows[0], 
+      jwt: token ? 'OK' : 'FAIL',
+      jwtPreview: token?.substring(0, 20) + '...',
+      env: {
+        jwtSecret: process.env.INTERNAL_OPS_JWT_SECRET ? 'SET' : 'MISSING',
+        dbUrl: process.env.INTERNAL_OPS_DATABASE_URL ? 'SET' : 'MISSING',
+        cookieDomain: process.env.INTERNAL_OPS_COOKIE_DOMAIN,
+        allowedOrigin: process.env.INTERNAL_OPS_ALLOWED_ORIGIN,
+      }
+    });
+  } catch (err) {
+    console.error('[debug] Error:', err);
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 router.post('/login', authRateLimit, validateBody(loginSchema), async (req, res) => {
   console.log('[auth:login] Request body:', { email: req.body?.email, hasPassword: !!req.body?.password });
   try {
