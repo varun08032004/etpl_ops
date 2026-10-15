@@ -31,8 +31,8 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'blob:'],
-      // Allow API calls from Electron app (file:// or electron:// origin) and local dev
-      connectSrc: ["'self'", 'http://127.0.0.1:5001', 'http://localhost:5001', 'https://etpl-ops.onrender.com'],
+      // Allow API calls from frontend (ops.ethertrack.in), backend (api.ethertrack.in), and local dev
+      connectSrc: ["'self'", 'http://127.0.0.1:5001', 'http://localhost:5001', 'https://etpl-ops.onrender.com', 'https://api.ethertrack.in', 'https://ops.ethertrack.in'],
       frameSrc: ["'none'"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
@@ -81,6 +81,7 @@ const productionDomains = [
   'https://ops.ethertrack.in',
   'https://app.ethertrack.in',
   'https://ethertrack.in',
+  'https://api.ethertrack.in',
 ];
 
 // Also allow Vercel preview deployments (*.vercel.app) and Railway deployments (*.railway.app)
