@@ -135,6 +135,13 @@ router.post('/debug/login-test', (req, res, next) => {
   console.log('[DEBUG-LOGIN-TEST] HEADERS:', req.headers['content-type']);
   next();
 }, async (req, res) => {
+
+// SIMPLE TEST: no body parsing middleware
+router.post('/debug/raw-test', (req, res) => {
+  console.log('[DEBUG-RAW-TEST] RAW BODY:', req.body);
+  console.log('[DEBUG-RAW-TEST] HEADERS:', req.headers['content-type']);
+  res.json({ body: req.body, headers: req.headers['content-type'] });
+});
   console.log('[DEBUG-LOGIN-TEST] HANDLER STARTED');
   try {
     console.log('[DEBUG-LOGIN-TEST] Step 1: imports');
@@ -191,13 +198,7 @@ router.post('/login', authRateLimit, validateBody(loginSchema), async (req, res)
     const { rows: [staff] } = await safeQuery(`SELECT * FROM staff_accounts WHERE email = $1`, [email.toLowerCase()]);
     console.log('[auth:login] Staff found:', !!staff, 'active:', staff?.is_active);
     if (!staff || !staff.is_active) {
-      // Record failed attempt for non-existent/inactive accounts (to prevent enumeration)
-      // staff_account_id is NULL for non-existent accounts (FK allows NULL after migration 086)
-      await safeQuery(
-        `INSERT INTO failed_login_attempts (staff_account_id, ip_address, user_agent, success)
-         VALUES ($1, $2, $3, FALSE)`,
-        [staff?.id || null, req.ip, req.headers['user-agent'] || null]
-      );
+      // Don't record failed attempts for non-existent users (prevents enum, avoids NOT NULL constraint)
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
