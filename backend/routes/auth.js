@@ -130,7 +130,11 @@ router.get('/debug/test', async (req, res) => {
 });
 
 // DEBUG: Test login flow step by step
-router.post('/debug/login-test', async (req, res) => {
+router.post('/debug/login-test', (req, res, next) => {
+  console.log('[DEBUG-LOGIN-TEST] RAW BODY:', req.body);
+  console.log('[DEBUG-LOGIN-TEST] HEADERS:', req.headers['content-type']);
+  next();
+}, async (req, res) => {
   console.log('[DEBUG-LOGIN-TEST] HANDLER STARTED');
   try {
     console.log('[DEBUG-LOGIN-TEST] Step 1: imports');
