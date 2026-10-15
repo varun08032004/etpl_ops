@@ -106,11 +106,11 @@ router.post('/login', authRateLimit, validateBody(loginSchema), async (req, res)
     console.log('[auth:login] Staff found:', !!staff, 'active:', staff?.is_active);
     if (!staff || !staff.is_active) {
       // Record failed attempt for non-existent/inactive accounts (to prevent enumeration)
+      // staff_account_id is NULL for non-existent accounts (FK allows NULL after migration 086)
       await safeQuery(
         `INSERT INTO failed_login_attempts (staff_account_id, ip_address, user_agent, success)
-         VALUES ($1, $2, $3, FALSE)
-         ON CONFLICT DO NOTHING`,
-        [staff?.id || '00000000-0000-0000-0000-000000000000', req.ip, req.headers['user-agent'] || null]
+         VALUES ($1, $2, $3, FALSE)`,
+        [staff?.id || null, req.ip, req.headers['user-agent'] || null]
       );
       return res.status(401).json({ error: 'Invalid credentials' });
     }

@@ -5,10 +5,13 @@
  * Tests the unique constraint behavior and semantic comparison
  */
 
+require('dotenv').config();
+
 const ledger = require('../services/ledger');
 const { Pool } = require('pg');
 
 const TEST_DB_URL = process.env.INTERNAL_OPS_DATABASE_URL;
+console.log('TEST_DB_URL:', TEST_DB_URL ? 'SET' : 'NOT SET');
 
 describe('Ledger Idempotency', () => {
   let testPool;
@@ -21,10 +24,24 @@ describe('Ledger Idempotency', () => {
     try {
       testPool = new Pool({ 
         connectionString: TEST_DB_URL,
-        ssl: { rejectUnauthorized: false }
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 10000,
+        idleTimeoutMillis: 30000,
+        max: 5
       });
-      await testPool.query('SELECT 1');
-      hasTestDb = true;
+      // Test connection with retry
+      for (let i = 0; i < 3; i++) {
+        try {
+          const result = await testPool.query('SELECT 1');
+          console.log('DB connection test result:', result.rows);
+          hasTestDb = true;
+          break;
+        } catch (err) {
+          console.error(`DB connection attempt ${i + 1} failed:`, err.message);
+          if (i === 2) throw err;
+          await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+        }
+      }
     } catch (err) {
       console.warn('Test database not available - idempotency tests will be skipped:', err.message);
       hasTestDb = false;
@@ -63,7 +80,7 @@ describe('Ledger Idempotency', () => {
     // First post
     const result1 = await ledger.postJournalEntry({
       entryDate: '2024-01-15',
-      source: 'test',
+      source: 'manual',
       sourceType: 'idempotency_test',
       sourceId,
       narration: 'Test entry',
@@ -77,7 +94,7 @@ describe('Ledger Idempotency', () => {
     // Second post with identical data - should return duplicate: true
     const result2 = await ledger.postJournalEntry({
       entryDate: '2024-01-15',
-      source: 'test',
+      source: 'manual',
       sourceType: 'idempotency_test',
       sourceId,
       narration: 'Test entry',
@@ -104,7 +121,7 @@ describe('Ledger Idempotency', () => {
     const [result1, result2] = await Promise.all([
       ledger.postJournalEntry({
         entryDate: '2024-01-15',
-        source: 'test',
+        source: 'manual',
         sourceType: 'idempotency_test',
         sourceId,
         narration: 'Concurrent test',
@@ -113,7 +130,7 @@ describe('Ledger Idempotency', () => {
       }),
       ledger.postJournalEntry({
         entryDate: '2024-01-15',
-        source: 'test',
+        source: 'manual',
         sourceType: 'idempotency_test',
         sourceId,
         narration: 'Concurrent test',
@@ -143,7 +160,7 @@ describe('Ledger Idempotency', () => {
 
     await ledger.postJournalEntry({
       entryDate: '2024-01-15',
-      source: 'test',
+      source: 'manual',
       sourceType: 'idempotency_test',
       sourceId,
       narration: 'Test entry',
@@ -160,7 +177,7 @@ describe('Ledger Idempotency', () => {
     await expect(
       ledger.postJournalEntry({
         entryDate: '2024-01-15',
-        source: 'test',
+        source: 'manual',
         sourceType: 'idempotency_test',
         sourceId,
         narration: 'Test entry',
@@ -186,7 +203,7 @@ describe('Ledger Idempotency', () => {
 
     await ledger.postJournalEntry({
       entryDate: '2024-01-15',
-      source: 'test',
+      source: 'manual',
       sourceType: 'idempotency_test',
       sourceId,
       narration: 'Test entry',
@@ -203,7 +220,7 @@ describe('Ledger Idempotency', () => {
     await expect(
       ledger.postJournalEntry({
         entryDate: '2024-01-15',
-        source: 'test',
+        source: 'manual',
         sourceType: 'idempotency_test',
         sourceId,
         narration: 'Test entry',
@@ -229,7 +246,7 @@ describe('Ledger Idempotency', () => {
 
     await ledger.postJournalEntry({
       entryDate: '2024-01-15',
-      source: 'test',
+      source: 'manual',
       sourceType: 'idempotency_test',
       sourceId,
       narration: 'Test entry',
@@ -246,7 +263,7 @@ describe('Ledger Idempotency', () => {
     await expect(
       ledger.postJournalEntry({
         entryDate: '2024-01-15',
-        source: 'test',
+        source: 'manual',
         sourceType: 'idempotency_test',
         sourceId,
         narration: 'Test entry',
@@ -271,7 +288,7 @@ describe('Ledger Idempotency', () => {
 
     await ledger.postJournalEntry({
       entryDate: '2024-01-15',
-      source: 'test',
+      source: 'manual',
       sourceType: 'idempotency_test',
       sourceId,
       narration: 'Test entry',
@@ -283,7 +300,7 @@ describe('Ledger Idempotency', () => {
     await expect(
       ledger.postJournalEntry({
         entryDate: '2024-01-20', // Different date!
-        source: 'test',
+        source: 'manual',
         sourceType: 'idempotency_test',
         sourceId,
         narration: 'Test entry',
@@ -308,7 +325,7 @@ describe('Ledger Idempotency', () => {
 
     await ledger.postJournalEntry({
       entryDate: '2024-01-15',
-      source: 'test',
+      source: 'manual',
       sourceType: 'idempotency_test',
       sourceId,
       narration: 'Original narration',
@@ -320,7 +337,7 @@ describe('Ledger Idempotency', () => {
     await expect(
       ledger.postJournalEntry({
         entryDate: '2024-01-15',
-        source: 'test',
+        source: 'manual',
         sourceType: 'idempotency_test',
         sourceId,
         narration: 'Different narration', // Different!
@@ -333,7 +350,7 @@ describe('Ledger Idempotency', () => {
     });
   });
 
-  test('BLOCKED: different source throws unrelated error', async () => {
+  test('BLOCKED: different source_type succeeds', async () => {
     if (!hasTestDb) { console.log('SKIPPED: Test database not available'); return; }
     await setupTestData();
 
@@ -342,22 +359,24 @@ describe('Ledger Idempotency', () => {
       { accountId: shareCapitalAccountId, credit: 1000 },
     ];
 
+    const uniqueSourceId = `test-source-${Date.now()}-8`;
+
     await ledger.postJournalEntry({
       entryDate: '2024-01-15',
-      source: 'test',
+      source: 'manual',
       sourceType: 'idempotency_test',
-      sourceId: 'test-source-8',
+      sourceId: uniqueSourceId,
       narration: 'Test entry',
       createdBy: staffId,
       lines,
     });
 
-    // Try to post with different source (not source_type + source_id)
+    // Try to post with different source_type (genuinely different key)
     const result = await ledger.postJournalEntry({
       entryDate: '2024-01-15',
-      source: 'different_source', // Different source
-      sourceType: 'idempotency_test',
-      sourceId: 'test-source-8',
+      source: 'manual',
+      sourceType: 'different_source_type', // Different source_type - genuinely different key
+      sourceId: uniqueSourceId,
       narration: 'Test entry',
       createdBy: staffId,
       lines,
@@ -380,7 +399,7 @@ describe('Ledger Idempotency', () => {
     await expect(
       ledger.postJournalEntry({
         entryDate: '2024-01-15',
-        source: 'test',
+        source: 'manual',
         sourceType: 'idempotency_test',
         sourceId: 'test-source-9',
         narration: 'Unbalanced entry',

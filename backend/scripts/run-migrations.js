@@ -44,7 +44,7 @@ async function runMigration(filePath, customPool) {
     }
     
     // Record applying state BEFORE execution (survives rollback)
-    const appliedBy = process.env.STAFF_ID || '9de5521a-16b5-4015-8102-e84ea5099dcc';
+    const appliedBy = process.env.STAFF_ID || 'ffffffff-ffff-ffff-ffff-ffffffffffff';
     await client.query(`
       INSERT INTO schema_migrations (migration_id, filename, checksum, status, applied_by)
       VALUES ($1, $2, $3, 'applying', $4)

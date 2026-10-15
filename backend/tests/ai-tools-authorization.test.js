@@ -134,10 +134,6 @@ function createToken(userId) {
   return signAccessToken({ sub: userId, role: 'test' });
 }
 
-function signAccessToken(payload) {
-  return jwt.sign(payload, 'test-secret', { expiresIn: '30m' });
-}
-
 async function runAIToolAuthTests() {
   const app = createApp();
   const results = { passed: 0, failed: 0, tests: [] };

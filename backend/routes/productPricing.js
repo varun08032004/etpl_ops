@@ -6,13 +6,13 @@
 // which go through the platform's own /api/ops-integration-pricing write surface
 // (routes/opsIntegrationPricing.js on the platform side).
 //
-// NEW STRUCTURE (2026-10-12):
+// NEW STRUCTURE (2026-10-13):
 // - ALL 4 TIERS: Annual ONLY (no monthly)
-// - Each tier has: annual_price_paise (base), buyer_fee_bps, seller_fee_bps
-// - Free: ₹0 base, buyer: 200bps (2%), seller: 0bps
-// - Starter: base price + buyer: 100bps (1%), seller: 100bps (1%)
-// - Growth: base price + buyer: 75bps (0.75%), seller: 75bps (0.75%)
-// - Corporate: base price + buyer: 50bps (0.5%), seller: 50bps (0.5%)
+// - Each tier has: annual_price_paise (base), buyer_fee_percent, seller_fee_percent
+// - Free: ₹0 base, buyer: 2.00000% (2%), seller: 0.00000% (0%)
+// - Starter: base price + buyer: 1.00000% (1%), seller: 1.00000% (1%)
+// - Growth: base price + buyer: 0.75000% (0.75%), seller: 0.75000% (0.75%)
+// - Corporate: base price + buyer: 0.50000% (0.5%), seller: 0.50000% (0.5%)
 
 const express = require('express');
 const router = express.Router();
@@ -38,10 +38,10 @@ router.get('/', async (req, res) => {
 });
 
 // PATCH /api/product/pricing/:plan/:cycle
-// body: { priceINR, buyerFeeBps, sellerFeeBps }
+// body: { priceINR, buyerFeePercent, sellerFeePercent }
 router.patch('/:plan/:cycle', async (req, res) => {
   const { plan, cycle } = req.params;
-  const { priceINR, buyerFeeBps, sellerFeeBps } = req.body;
+  const { priceINR, buyerFeePercent, sellerFeePercent } = req.body;
 
   if (!VALID_PLANS.includes(plan))
     return res.status(400).json({ error: "plan must be 'free', 'starter', 'growth', or 'corporate'" });
@@ -52,14 +52,14 @@ router.patch('/:plan/:cycle', async (req, res) => {
   if (priceINR == null || isNaN(priceINR) || Number(priceINR) < 0)
     return res.status(400).json({ error: 'priceINR must be a non-negative number' });
 
-  if (buyerFeeBps != null && (isNaN(buyerFeeBps) || Number(buyerFeeBps) < 0 || Number(buyerFeeBps) > 10000))
-    return res.status(400).json({ error: 'buyerFeeBps must be between 0 and 10000 (0% to 100%)' });
+  if (buyerFeePercent != null && (isNaN(buyerFeePercent) || Number(buyerFeePercent) < 0 || Number(buyerFeePercent) > 100))
+    return res.status(400).json({ error: 'buyerFeePercent must be between 0 and 100 (0% to 100%)' });
 
-  if (sellerFeeBps != null && (isNaN(sellerFeeBps) || Number(sellerFeeBps) < 0 || Number(sellerFeeBps) > 10000))
-    return res.status(400).json({ error: 'sellerFeeBps must be between 0 and 10000 (0% to 100%)' });
+  if (sellerFeePercent != null && (isNaN(sellerFeePercent) || Number(sellerFeePercent) < 0 || Number(sellerFeePercent) > 100))
+    return res.status(400).json({ error: 'sellerFeePercent must be between 0 and 100 (0% to 100%)' });
 
   try {
-    await updatePlanPrice(plan, cycle, Number(priceINR), Number(buyerFeeBps) || 0, Number(sellerFeeBps) || 0, req.staff.email);
+    await updatePlanPrice(plan, cycle, Number(priceINR), Number(buyerFeePercent) || 0, Number(sellerFeePercent) || 0, req.staff.email);
     await logAction({
       staffId: req.staff.id,
       action: 'product_pricing.updated',
@@ -67,8 +67,8 @@ router.patch('/:plan/:cycle', async (req, res) => {
       entityId: `${plan}/${cycle}`,
       newValue: { 
         priceINR: Number(priceINR), 
-        buyerFeeBps: buyerFeeBps != null ? Number(buyerFeeBps) : undefined,
-        sellerFeeBps: sellerFeeBps != null ? Number(sellerFeeBps) : undefined 
+        buyerFeePercent: buyerFeePercent != null ? Number(buyerFeePercent) : undefined,
+        sellerFeePercent: sellerFeePercent != null ? Number(sellerFeePercent) : undefined 
       },
     }).catch(() => {});
     res.json({ 
@@ -76,8 +76,8 @@ router.patch('/:plan/:cycle', async (req, res) => {
       plan, 
       cycle, 
       priceINR: Number(priceINR), 
-      buyerFeeBps: buyerFeeBps != null ? Number(buyerFeeBps) : undefined,
-      sellerFeeBps: sellerFeeBps != null ? Number(sellerFeeBps) : undefined
+      buyerFeePercent: buyerFeePercent != null ? Number(buyerFeePercent) : undefined,
+      sellerFeePercent: sellerFeePercent != null ? Number(sellerFeePercent) : undefined
     });
   } catch (e) {
     console.error('[PATCH /product/pricing]', e.message);

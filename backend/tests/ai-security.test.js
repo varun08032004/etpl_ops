@@ -315,10 +315,6 @@ function createToken(userId) {
   return signAccessToken({ sub: userId, role: 'test' });
 }
 
-function signAccessToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '30m' });
-}
-
 async function runAIToolAuthTests() {
   const pool = new Pool({ connectionString: DB_URL });
   const app = await createTestApp(pool);

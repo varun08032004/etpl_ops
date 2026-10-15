@@ -10,9 +10,7 @@ const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'test-secret-for-testing-only';
 
-function signAccessToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '30m' });
-}
+// signAccessToken is defined at line 118
 
 function createApp() {
   const app = express();

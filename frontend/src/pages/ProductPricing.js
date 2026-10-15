@@ -14,11 +14,13 @@ import {
   useMobile,
 } from '../components/MobileResponsive';
 
-// NEW STRUCTURE (2026-10-12):
+// NEW STRUCTURE (2026-10-13):
 // - ALL 4 TIERS: Annual ONLY (no monthly)
-// - Each tier has: annual_price (base), platform_fee_bps (editable fee %)
-// - Free: ₹0 base, platform_fee_bps editable
-// - Starter/Growth/Corporate: base price + platform_fee_bps from etpl_ops
+// - Each tier has: annual_price (base), buyer_fee_percent, seller_fee_percent
+// - Free: ₹0 base, buyer: 2.00000% (2%), seller: 0.00000% (0%)
+// - Starter: base price + buyer: 1.00000% (1%), seller: 1.00000% (1%)
+// - Growth: base price + buyer: 0.75000% (0.75%), seller: 0.75000% (0.75%)
+// - Corporate: base price + buyer: 0.50000% (0.5%), seller: 0.50000% (0.5%)
 
 const PLANS = [
   { key: 'free', label: 'Free', isFree: true },
@@ -26,6 +28,11 @@ const PLANS = [
   { key: 'growth', label: 'Growth' },
   { key: 'corporate', label: 'Corporate', isStartingFrom: true },
 ];
+
+function formatPercent(value) {
+  if (value === null || value === undefined) return '—';
+  return Number(value).toFixed(5).replace(/\.?0+$/, '') + '%';
+}
 
 export default function ProductPricing() {
   const isMobile = useMobile();
@@ -54,22 +61,25 @@ export default function ProductPricing() {
 
   const handleSave = async (plan) => {
     const priceKey = `${plan}:price`;
-    const feeKey = `${plan}:fee`;
+    const buyerFeeKey = `${plan}:buyerFee`;
+    const sellerFeeKey = `${plan}:sellerFee`;
     const priceVal = drafts[priceKey];
-    const feeVal = feeDrafts[feeKey];
+    const buyerFeeVal = feeDrafts[buyerFeeKey];
+    const sellerFeeVal = feeDrafts[sellerFeeKey];
 
     if (priceVal == null || priceVal === '' || isNaN(priceVal) || Number(priceVal) < 0) return;
 
     setSaving(plan);
     setSaveMsg('');
     try {
-      await client.patch(`/product/pricing/${plan}/annual`, { priceINR: Number(priceVal), platformFeeBps: feeVal != null && feeVal !== '' ? Number(feeVal) : 0 });
+      await client.patch(`/product/pricing/${plan}/annual`, { priceINR: Number(priceVal), buyerFeePercent: buyerFeeVal != null && buyerFeeVal !== '' ? Number(buyerFeeVal) : 0, sellerFeePercent: sellerFeeVal != null && sellerFeeVal !== '' ? Number(sellerFeeVal) : 0 });
       const planConfig = PLANS.find(p => p.key === plan);
       const label = planConfig?.isStartingFrom ? `Starting from ₹${priceVal}/yr` : `₹${priceVal}/yr`;
-      const feeLabel = feeVal != null && feeVal !== '' ? `, Platform fee: ${(Number(feeVal)/100).toFixed(2)}%` : '';
-      setSaveMsg(`${planConfig?.label || plan} price updated to ${label}${feeLabel}. Live on the platform within 60 seconds.`);
+      const buyerFeeLabel = buyerFeeVal != null && buyerFeeVal !== '' ? `, Buyer fee: ${formatPercent(Number(buyerFeeVal))}` : '';
+      const sellerFeeLabel = sellerFeeVal != null && sellerFeeVal !== '' ? `, Seller fee: ${formatPercent(Number(sellerFeeVal))}` : '';
+      setSaveMsg(`${planConfig?.label || plan} price updated to ${label}${buyerFeeLabel}${sellerFeeLabel}. Live on the platform within 60 seconds.`);
       setDrafts((d) => ({ ...d, [priceKey]: '' }));
-      setFeeDrafts((d) => ({ ...d, [feeKey]: '' }));
+      setFeeDrafts((d) => ({ ...d, [buyerFeeKey]: '', [sellerFeeKey]: '' }));
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to update price');
@@ -98,27 +108,10 @@ export default function ProductPricing() {
       <MobilePageHeader>
         <Typography variant={isMobile ? 'h6' : 'h5'}>Pricing</Typography>
         <Typography sx={{ fontSize: '0.85rem', color: 'text.secondary', mt: 0.5, mb: 2 }}>
-          All tiers annual only. Set base price and platform fee (% in bps, e.g., 100 = 1.00%).
-          Free tier base is always ₹0.
+          All tiers annual only. Set base price and platform fee (% with up to 5 decimals, e.g., 1.00000 = 1.00%).
+          Free tier base is always ₹0. Both buyer and seller fees are editable.
         </Typography>
       </MobilePageHeader>
-
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-        <MobileButton
-          variant="contained"
-          size="small"
-          startIcon={<Publish />}
-          onClick={handlePushToMain}
-          disabled={pushing}
-        >
-          {pushing ? 'Pushing…' : 'Push to Main'}
-        </MobileButton>
-        <Tooltip title="Refresh from platform">
-          <IconButton size="small" onClick={load} disabled={loading}>
-            <Refresh />
-          </IconButton>
-        </Tooltip>
-      </Box>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {saveMsg && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSaveMsg('')}>{saveMsg}</Alert>}
@@ -131,16 +124,18 @@ export default function ProductPricing() {
                 <TableCell>Plan</TableCell>
                 <TableCell>Cycle</TableCell>
                 <TableCell>Current Base Price (live)</TableCell>
-                <TableCell>Current Platform Fee</TableCell>
+                <TableCell>Current Buyer Fee</TableCell>
+                <TableCell>Current Seller Fee</TableCell>
                 <TableCell>Last Updated</TableCell>
                 <TableCell>New Base Price (₹)</TableCell>
-                <TableCell>New Platform Fee (bps)</TableCell>
+                <TableCell>New Buyer Fee (%)</TableCell>
+                <TableCell>New Seller Fee (%)</TableCell>
                 <TableCell align="right">Action</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading && (
-                <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>Loading…</TableCell></TableRow>
+                <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', color: 'text.secondary', py: 4 }}>Loading…</TableCell></TableRow>
               )}
               {!loading && PLANS.map((plan) => {
                 const priceKey = `${plan.key}:price`;
@@ -156,7 +151,10 @@ export default function ProductPricing() {
                       {existing ? `₹${(existing.annual / 100).toLocaleString('en-IN')}` : (plan.isFree ? '₹0 (fixed)' : 'Not set')}
                     </TableCell>
                     <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>
-                      {existing ? `${(existing.platform_fee_bps / 100).toFixed(2)}%` : 'Not set'}
+                      {existing ? formatPercent(existing.buyer_fee_percent) : 'Not set'}
+                    </TableCell>
+                    <TableCell sx={{ fontSize: isMobile ? '0.75rem' : '0.85rem' }}>
+                      {existing ? formatPercent(existing.seller_fee_percent) : 'Not set'}
                     </TableCell>
                     <TableCell sx={{ fontSize: isMobile ? '0.7rem' : '0.75rem', color: 'text.secondary' }}>
                       {existing ? `${new Date(existing.updated_at).toLocaleDateString('en-IN')} by ${existing.updated_by || '—'}` : '—'}
@@ -175,10 +173,24 @@ export default function ProductPricing() {
                       <MobileTextField
                         size="small"
                         type="number"
-                        placeholder={plan.isFree ? '150' : 'e.g. 100'}
+                        step="0.00001"
+                        min="0"
+                        max="100"
+                        placeholder={plan.isFree ? '0.00000' : 'e.g. 1.00000'}
                         value={feeDrafts[feeKey] || ''}
                         onChange={(e) => setFeeDrafts((d) => ({ ...d, [feeKey]: e.target.value }))}
-                        inputProps={{ min: 0, max: 10000, step: 1 }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <MobileTextField
+                        size="small"
+                        type="number"
+                        step="0.00001"
+                        min="0"
+                        max="100"
+                        placeholder={plan.isFree ? '0.00000' : 'e.g. 1.00000'}
+                        value={feeDrafts[`${plan.key}:seller`] || ''}
+                        onChange={(e) => setFeeDrafts((d) => ({ ...d, [`${plan.key}:seller`]: e.target.value }))}
                       />
                     </TableCell>
                     <TableCell align="right">

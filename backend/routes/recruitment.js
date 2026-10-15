@@ -417,12 +417,26 @@ async function getPublicJob(req, res) {
 }
  
 // POST /api/public/jobs/:id/apply — submit application (public)
+const { z } = require('zod');
+
+const applySchema = z.object({
+  job_id: z.string().uuid(),
+  full_name: z.string().min(1),
+  email: z.string().email(),
+  phone: z.string().optional().nullable(),
+  linkedin: z.string().url().optional().nullable(),
+  portfolio: z.string().url().optional().nullable(),
+  answers: z.record(z.any()).optional(),
+});
+
 async function applyPublic(req, res) {
   const parsed = applySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
- 
-  const { job_id, full_name, email, phone, linkedin, portfolio, resume_url, cover_letter, answers } = parsed.data;
- 
+
+  const { job_id, full_name, email, phone, linkedin, portfolio, answers } = parsed.data;
+  const resumeFile = req.files?.resume?.[0];
+  const coverLetterFile = req.files?.cover_letter?.[0];
+
   try {
     // Verify job exists and is published
     const { rows: jobRows } = await safeQuery(
@@ -430,20 +444,38 @@ async function applyPublic(req, res) {
       [job_id]
     );
     if (!jobRows[0]) return res.status(404).json({ error: 'Job not found or not accepting applications' });
- 
+
     // Check for duplicate application
     const { rows: existing } = await safeQuery(
-      `SELECT id FROM job_applications WHERE job_id = $1 AND email = $2`,
+      `SELECT id FROM job_applications WHERE job_posting_id = $1 AND email = $2`,
       [job_id, email]
     );
     if (existing[0]) return res.status(409).json({ error: 'Application already exists for this email' });
- 
+
+    // Upload resume if provided
+    let resumeUrl = null;
+    if (resumeFile) {
+      const { uploadFile } = require('../services/storage');
+      const storagePath = `recruitment/${job_id}/${Date.now()}-${resumeFile.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      await uploadFile(storagePath, resumeFile.buffer, resumeFile.mimetype);
+      resumeUrl = storagePath; // Store path; getSignedUrl used when downloading
+    }
+
+    // Upload cover letter if provided
+    let coverLetterUrl = null;
+    if (coverLetterFile) {
+      const { uploadFile } = require('../services/storage');
+      const storagePath = `recruitment/${job_id}/${Date.now()}-${coverLetterFile.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      await uploadFile(storagePath, coverLetterFile.buffer, coverLetterFile.mimetype);
+      coverLetterUrl = storagePath;
+    }
+
     const { rows } = await safeQuery(
       `INSERT INTO job_applications
-        (job_id, full_name, email, phone, linkedin, portfolio, resume_url, cover_letter, answers, status, applied_at)
+        (job_posting_id, full_name, email, phone, linkedin, portfolio, resume_url, cover_letter, answers, status, applied_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'applied',NOW())
        RETURNING *`,
-      [job_id, full_name, email, phone || null, linkedin || null, portfolio || null, resume_url || null, cover_letter || null, answers || {}]
+      [job_id, full_name, email, phone || null, linkedin || null, portfolio || null, resumeUrl, coverLetterUrl, answers || {}]
     );
     res.status(201).json({ application: rows[0] });
   } catch (err) {
