@@ -215,8 +215,7 @@ describe('Financial Reports - Ledger-Backed Integration Tests', () => {
     if (!hasTestDb) return false;
     
     try {
-      // Verify the fixture data already exists in the database
-      // (The correct fixture data is pre-loaded in the test database)
+      // Check if the fixture data already exists in the database
       const { rows: entries } = await testPool.query(`
         SELECT COUNT(*) as count FROM journal_entries 
         WHERE source_type = 'manual' AND narration IN (
@@ -225,8 +224,20 @@ describe('Financial Reports - Ledger-Backed Integration Tests', () => {
       `);
       
       if (parseInt(entries[0].count) !== 4) {
-        console.error('Fixture data not found: expected 4 entries, got', entries[0].count);
-        return false;
+        // Fixture data not found, create it
+        console.log('Fixture data not found, creating...');
+        await postFixtureEntries(testPool);
+        // Verify it was created
+        const { rows: verifyEntries } = await testPool.query(`
+          SELECT COUNT(*) as count FROM journal_entries 
+          WHERE source_type = 'manual' AND narration IN (
+            'Owner contribution', 'Revenue earned', 'Rent payment', 'Equipment purchase'
+          )
+        `);
+        if (parseInt(verifyEntries[0].count) !== 4) {
+          console.error('Failed to create fixture data');
+          return false;
+        }
       }
       
       return true;
