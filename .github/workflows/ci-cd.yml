@@ -93,14 +93,8 @@ jobs:
           PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE etpl_ops_test;" || true
           # Run schema migrations
           PGPASSWORD=postgres psql -h localhost -U postgres -d etpl_ops_test -f db/schema.sql
-          # Run migration registry (079) and encryption migrations (080-085)
-          PGPASSWORD=postgres psql -h localhost -U postgres -d etpl_ops_test -f db/079_migration_registry.sql
-          PGPASSWORD=postgres psql -h localhost -U postgres -d etpl_ops_test -f db/080_encrypt_bank_credentials.sql
-          PGPASSWORD=postgres psql -h localhost -U postgres -d etpl_ops_test -f db/081_encrypt_employee_pii.sql
-          PGPASSWORD=postgres psql -h localhost -U postgres -d etpl_ops_test -f db/082_backfill_bank_credentials.sql
-          PGPASSWORD=postgres psql -h localhost -U postgres -d etpl_ops_test -f db/083_backfill_employee_pii.sql
-          PGPASSWORD=postgres psql -h localhost -U postgres -d etpl_ops_test -f db/084_journal_entry_idempotency.sql
-          PGPASSWORD=postgres psql -h localhost -U postgres -d etpl_ops_test -f db/085_bank_reconciliation_schema.sql
+          # Run migration runner to apply migrations 079-085
+          PGPASSWORD=postgres INTERNAL_OPS_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/etpl_ops_test node scripts/run-migrations.js
         env:
           PGPASSWORD: postgres
 
@@ -128,10 +122,24 @@ jobs:
           NVIDIA_API_KEY: test-key
           OPENAI_API_KEY: test-key
 
+      - name: Test migration runner
+        run: |
+          cd backend
+          PGPASSWORD=postgres INTERNAL_OPS_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/etpl_ops_test node scripts/run-migrations.js
+        env:
+          PGPASSWORD: postgres
+
+      - name: Verify migration runner idempotency
+        run: |
+          cd backend
+          PGPASSWORD=postgres INTERNAL_OPS_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/etpl_ops_test node scripts/run-migrations.js
+        env:
+          PGPASSWORD: postgres
+
       - name: Run backend integration tests
         run: |
           cd backend
-          npx jest encryptionBackfill.test migrationRegistry.test ledger.test financialReports.test bankReconciliation.test --testTimeout=60000
+          npx jest encryptionBackfill.test migrationRegistry.test ledger.test financialReports.test bankReconciliation.test ledgerIdempotency.test financialReports.test --testTimeout=120000
         env:
           TEST_DB_URL: postgresql://postgres:postgres@localhost:5432/etpl_ops_test
           INTERNAL_OPS_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/etpl_ops_test

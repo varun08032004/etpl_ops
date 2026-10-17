@@ -6,8 +6,8 @@
  * Tests ledger-backed financial reports (Trial Balance, P&L, Balance Sheet)
  * with exact figure assertions against a deterministic ledger fixture.
  * 
- * Requires PostgreSQL test database (INTERNAL_OPS_DATABASE_URL).
- * If INTERNAL_OPS_DATABASE_URL is not available, tests will be skipped with BLOCKED status.
+ * Requires PostgreSQL test database (TEST_DB_URL).
+ * If TEST_DB_URL is not available, tests will be skipped with BLOCKED status.
  */
 
 require('dotenv').config();
@@ -16,8 +16,9 @@ const { Pool } = require('pg');
 const ledger = require('../services/ledger');
 const { safeQuery } = require('../db/pool');
 
-// Use the configured database URL (Supabase) for integration tests
-const TEST_DB_URL = process.env.INTERNAL_OPS_DATABASE_URL;
+// Use TEST_DB_URL for isolated test database (CI PostgreSQL service)
+// Fallback to INTERNAL_OPS_DATABASE_URL only if TEST_DB_URL not set
+const TEST_DB_URL = process.env.TEST_DB_URL || process.env.INTERNAL_OPS_DATABASE_URL;
 
 describe('Financial Reports - Ledger-Backed Integration Tests', () => {
   let testPool;
@@ -27,13 +28,24 @@ describe('Financial Reports - Ledger-Backed Integration Tests', () => {
     try {
       testPool = new Pool({ 
         connectionString: TEST_DB_URL,
-        ssl: { rejectUnauthorized: false }
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 10000,
+        idleTimeoutMillis: 30000,
+        max: 5
       });
-      // Test connection
-      await testPool.query('SELECT 1');
-      hasTestDb = true;
+      // Test connection with retry
+      for (let i = 0; i < 3; i++) {
+        try {
+          await testPool.query('SELECT 1');
+          hasTestDb = true;
+          break;
+        } catch (err) {
+          if (i === 2) throw err;
+          await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+        }
+      }
     } catch (err) {
-      console.warn('Test database not available - financial report tests will be skipped:', err.message);
+      console.error('Test database connection failed:', err.message);
       hasTestDb = false;
     }
   });

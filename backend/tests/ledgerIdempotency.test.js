@@ -10,8 +10,9 @@ require('dotenv').config();
 const ledger = require('../services/ledger');
 const { Pool } = require('pg');
 
-const TEST_DB_URL = process.env.INTERNAL_OPS_DATABASE_URL;
-console.log('TEST_DB_URL:', TEST_DB_URL ? 'SET' : 'NOT SET');
+// Use TEST_DB_URL for isolated test database (CI PostgreSQL service)
+// Fallback to INTERNAL_OPS_DATABASE_URL only if TEST_DB_URL not set
+const TEST_DB_URL = process.env.TEST_DB_URL || process.env.INTERNAL_OPS_DATABASE_URL;
 
 describe('Ledger Idempotency', () => {
   let testPool;
@@ -32,18 +33,16 @@ describe('Ledger Idempotency', () => {
       // Test connection with retry
       for (let i = 0; i < 3; i++) {
         try {
-          const result = await testPool.query('SELECT 1');
-          console.log('DB connection test result:', result.rows);
+          await testPool.query('SELECT 1');
           hasTestDb = true;
           break;
         } catch (err) {
-          console.error(`DB connection attempt ${i + 1} failed:`, err.message);
           if (i === 2) throw err;
           await new Promise(r => setTimeout(r, 1000 * (i + 1)));
         }
       }
     } catch (err) {
-      console.warn('Test database not available - idempotency tests will be skipped:', err.message);
+      console.error('Test database connection failed:', err.message);
       hasTestDb = false;
     }
   });
